@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# Pushing IRIS Image
+docker push ${DOCKER_REPO}:iris-${DOCKER_TAG} 
+
+# Pushing OPCUA Certified Server Image
+docker push ${DOCKER_REPO}:server-ctt-${DOCKER_TAG}

@@ -1,0 +1,6273 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Export generator="IRIS" version="26" zv="IRIS for Windows (x86-64) 2025.3 (Build 226U)" ts="2025-12-17 13:36:05">
+<Class name="Examples.OPCUA.SecureBrowse">
+<Description>
+IRIS OPC UA Secure Browse Example</Description>
+<IncludeCode>OPCUA.Constants,Ensemble</IncludeCode>
+<TimeChanged>67556,48683.0768455</TimeChanged>
+<TimeCreated>67556,48683.0768455</TimeCreated>
+
+<Method name="Run">
+<ClassMethod>1</ClassMethod>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+
+		set tSC = ##class(OPCUA.Utils).Initialize()
+		Quit:$$$ISERR(tSC)
+		
+		set tClient = ##class(OPCUA.Client).%New()
+
+		set tSC = tClient.Initialize()
+		Quit:$$$ISERR(tSC)
+
+		set tClientURI = "urn:secuac"
+		set tCertificatePathname = "/usr/irissys/uac/certs/secuac.crt.der"
+		set tPrivateKeyPathname = "/usr/irissys/uac/certs/secuac.key.der"
+		set tTrustListDir = "/usr/irissys/uac/certs/trustdir"
+		set tRevocationListDir = "/usr/irissys/uac/certs/crldir"
+		set tSC = tClient.SetupClient(,$$$OpcuaMessageSecurityModeSignAndEncrypt,tClientURI,tCertificatePathname,tPrivateKeyPathname,tTrustListDir,tRevocationListDir)
+		Quit:$$$ISERR(tSC)
+
+		set tSC = tClient.Connect("opc.tcp://certified-server","user1","password")
+		Quit:$$$ISERR(tSC)
+
+		// Start with Root Node (0,84)
+		set tNode = $LB(0,84,0,6)
+
+		#dim tResults as %List
+		set tSC = tClient.Browse(.tResults, $LB($LI(tNode,3)), $LB($LI(tNode,1)), $LB($LI(tNode,2)))
+
+		w !! 
+		if $$$ISERR(tSC) {
+			set ERROR=tSC zw ERROR
+			Quit
+		} else {
+			w "Displaying results starting with those for the root node (DEPTH=0)",!
+			set RESULTS=tResults zw ROOTNODE
+		}
+		w !
+
+		set tDepth = 1
+		set tPrevDepth = tDepth
+		set tNodeList = $LB(tNode)
+
+		while 1 {
+
+			set NODE=$LI(tNodeList,tDepth) zw NODE
+			set DEPTH=tDepth-1 zw DEPTH
+
+			set tRefList = $LI($LI($LI(tResults,4),1),4)
+
+			for i=1:1:$LL(tRefList) {
+				set tRef = $LI(tRefList,i)
+				if $LI($LI(tRef,3),3) = 0 {
+					w i_" :  "_$LI($LI(tRef,4),1)_" ("_$LI($LI(tRef,3),1)_","_$LI($LI(tRef,3),2)_")",!
+				} else {
+					w i_" :  "_$LI($LI(tRef,4),1)_" ("_$LI($LI(tRef,3),1)_",'"_$LI($LI(tRef,3),2)_"')",!
+				}
+			}
+
+			if $LL(tRefList) = 0 {
+				READ "LEAF / END OF LIST (u=up,q=quit): ",c
+			} elseif tDepth = 1 {
+				READ "SELECT (1-n,q=quit): ",c
+			} else {
+				READ "SELECT (1-n,u=up,q=quit): ",c
+			}
+
+			set tPrevDepth = tDepth
+
+			if c = "q" {
+				Quit
+			} elseif c = "u" {
+				if tDepth = 1 {
+					w !!, "Root Node (DEPTH=0)",!!
+					continue
+				} else {
+					if tDepth > 1 set tDepth = tDepth - 1
+					set tNode = $LI(tNodeList,tDepth)
+				}
+			} elseif $ISVALIDNUM(c,1,1,$LL(tRefList)) {
+				set tNode = $LI($LI(tRefList,c),3)
+				set tDepth = tDepth + 1
+				set $LI(tNodeList,tDepth) = tNode
+			} else {
+				w !!, "Invalid entry: "_c,!!
+				continue
+			}
+
+			set tSC = tClient.Browse(.tResults, $LB($LI(tNode,3)), $LB($LI(tNode,1)), $LB($LI(tNode,2)))
+
+			w !!
+			if $$$ISERR(tSC) {
+				set ERROR=tSC zw ERROR
+				set tDepth = tPrevDepth
+				set tNode = $LI(tNodeList,tDepth)
+			} else {
+				set RESULTS=tResults zw RESULTS
+			}
+			w !
+
+		}
+
+		W !!!
+
+		set tSC = tClient.Disconnect()
+
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	
+	Quit tSC
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="Examples.OPCUA.SecureWrite">
+<Description>
+IRIS OPC UA Secure Write Example</Description>
+<IncludeCode>OPCUA.Constants,Ensemble</IncludeCode>
+<TimeChanged>67556,48683.0783305</TimeChanged>
+<TimeCreated>67556,48683.0783305</TimeCreated>
+
+<Method name="Run">
+<Description>
+Using a secure connection, writes an integer value to a specific
+node on an OPC UA server, and then subsequently resets the value
+of that node back to what it was originally. Notice that this 
+function operates on a node also referenced in the subscription
+data feed example Examples.OPCUADS.SecureExample, and that the
+effects of this test can be seen in the output of that example
+when that data feed is enabled and sourcing data. </Description>
+<ClassMethod>1</ClassMethod>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+
+		set tSC = ##class(OPCUA.Utils).Initialize()
+		Quit:$$$ISERR(tSC)
+		
+		set tClient = ##class(OPCUA.Client).%New()
+
+		set tSC = tClient.Initialize()
+		Quit:$$$ISERR(tSC)
+
+		set tClientURI = "urn:secuac"
+		set tCertificatePathname = "/usr/irissys/uac/certs/secuac.crt.der"
+		set tPrivateKeyPathname = "/usr/irissys/uac/certs/secuac.key.der"
+		set tTrustListDir = "/usr/irissys/uac/certs/trustdir"
+		set tRevocationListDir = "/usr/irissys/uac/certs/crldir"
+		set tSC = tClient.SetupClient(,$$$OpcuaMessageSecurityModeSignAndEncrypt,tClientURI,tCertificatePathname,tPrivateKeyPathname,tTrustListDir,tRevocationListDir)
+		Quit:$$$ISERR(tSC)
+
+		set tSC = tClient.Connect("opc.tcp://certified-server","user1","password")
+		Quit:$$$ISERR(tSC)
+
+		#dim tResults as %List
+
+		w !!, "Reading data (0): "
+		set tSC = tClient.ReadValueAttribute(.tResults, "the.answer", 1, $$$OpcuaNodeIdTypeString)
+		Quit:$$$ISERR(tSC)
+
+		zw tResults
+
+		set tValue = $LI(tResults,5)
+
+		w "Writing 57... "
+		set tSC = tClient.WriteValueAttribute(57, $$$OpcuaDataTypeInt32, "the.answer", 1, $$$OpcuaNodeIdTypeString)
+		Quit:$$$ISERR(tSC)
+
+		w "Reading data (1): "
+		set tSC = tClient.ReadValueAttribute(.tResults, "the.answer", 1, $$$OpcuaNodeIdTypeString)
+		Quit:$$$ISERR(tSC)
+
+		zw tResults
+
+		Hang 1
+
+		w "Writing 42... "
+		set tSC = tClient.WriteValueAttribute(tValue, $$$OpcuaDataTypeInt32, "the.answer", 1, $$$OpcuaNodeIdTypeString)
+		Quit:$$$ISERR(tSC)
+
+		w "Reading data (2): "
+		set tSC = tClient.ReadValueAttribute(.tResults, "the.answer", 1, $$$OpcuaNodeIdTypeString)
+		Quit:$$$ISERR(tSC)
+
+		zw tResults
+
+		w !!
+
+		set tSC = tClient.Disconnect()
+
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	
+	Quit tSC
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="Examples.OPCUA.SimpleBrowse">
+<Description>
+IRIS OPC UA Simple Browse Example</Description>
+<IncludeCode>OPCUA.Constants,Ensemble</IncludeCode>
+<TimeChanged>67556,48683.0771979</TimeChanged>
+<TimeCreated>67556,48683.0771979</TimeCreated>
+
+<Method name="Run">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>URI:%String="opc.tcp://plc"</FormalSpec>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+
+		set tSC = ##class(OPCUA.Utils).Initialize()
+		Quit:$$$ISERR(tSC)
+		
+		set tClient = ##class(OPCUA.Client).%New()
+
+		set tSC = tClient.Initialize()
+		Quit:$$$ISERR(tSC)
+
+		set tSC = tClient.SetupClient(,$$$OpcuaMessageSecurityModeNone)
+		Quit:$$$ISERR(tSC)
+
+		set tSC = tClient.Connect(URI)
+		Quit:$$$ISERR(tSC)
+
+		// Start with Root Node (0,84)
+		set tNode = $LB(0,84,0,6)
+
+		#dim tResults as %List
+		set tSC = tClient.Browse(.tResults, $LB($LI(tNode,3)), $LB($LI(tNode,1)), $LB($LI(tNode,2)))
+
+		w !! 
+		zw URI
+		w !
+		if $$$ISERR(tSC) {
+			set ERROR=tSC zw ERROR
+			Quit
+		} else {
+			w "Displaying results starting with those for the root node (DEPTH=0)",!
+			set RESULTS=tResults zw ROOTNODE
+		}
+		w !
+
+		set tDepth = 1
+		set tPrevDepth = tDepth
+		set tNodeList = $LB(tNode)
+
+		while 1 {
+
+			set NODE=$LI(tNodeList,tDepth) zw NODE
+			set DEPTH=tDepth-1 zw DEPTH
+
+			set tRefList = $LI($LI($LI(tResults,4),1),4)
+
+			for i=1:1:$LL(tRefList) {
+				set tRef = $LI(tRefList,i)
+				if $LI($LI(tRef,3),3) = 0 {
+					w i_" :  "_$LI($LI(tRef,4),1)_" ("_$LI($LI(tRef,3),1)_","_$LI($LI(tRef,3),2)_")",!
+				} else {
+					w i_" :  "_$LI($LI(tRef,4),1)_" ("_$LI($LI(tRef,3),1)_",'"_$LI($LI(tRef,3),2)_"')",!
+				}
+			}
+
+			if $LL(tRefList) = 0 {
+				READ "LEAF / END OF LIST (u=up,q=quit): ",c
+			} elseif tDepth = 1 {
+				READ "SELECT (1-n,q=quit): ",c
+			} else {
+				READ "SELECT (1-n,u=up,q=quit): ",c
+			}
+
+			set tPrevDepth = tDepth
+
+			if c = "q" {
+				Quit
+			} elseif c = "u" {
+				if tDepth = 1 {
+					w !!, "Root Node (DEPTH=0)",!!
+					continue
+				} else {
+					if tDepth > 1 set tDepth = tDepth - 1
+					set tNode = $LI(tNodeList,tDepth)
+				}
+			} elseif $ISVALIDNUM(c,1,1,$LL(tRefList)) {
+				set tNode = $LI($LI(tRefList,c),3)
+				set tDepth = tDepth + 1
+				set $LI(tNodeList,tDepth) = tNode
+			} else {
+				w !!, "Invalid entry: "_c,!!
+				continue
+			}
+
+			set tSC = tClient.Browse(.tResults, $LB($LI(tNode,3)), $LB($LI(tNode,1)), $LB($LI(tNode,2)))
+
+			w !!
+			if $$$ISERR(tSC) {
+				set ERROR=tSC zw ERROR
+				set tDepth = tPrevDepth
+				set tNode = $LI(tNodeList,tDepth)
+			} else {
+				set RESULTS=tResults zw RESULTS
+			}
+			w !
+
+		}
+
+		W !!!
+
+		set tSC = tClient.Disconnect()
+
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	
+	Quit tSC
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="Examples.OPCUA.SimpleWrite">
+<Description>
+IRIS OPC UA Simple Write Example</Description>
+<IncludeCode>OPCUA.Constants,Ensemble</IncludeCode>
+<TimeChanged>67556,48683.0764089</TimeChanged>
+<TimeCreated>67556,48683.0764089</TimeCreated>
+
+<Method name="Run">
+<Description>
+Writes each of an integer and a double value to a specific node 
+on a publicly-accessible OPC UA server, and shows the change by
+reading values from the node beforehand and afterwards.</Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+
+		set tSC = ##class(OPCUA.Utils).Initialize()
+		Quit:$$$ISERR(tSC)
+		
+		set tClient = ##class(OPCUA.Client).%New()
+
+		set tSC = tClient.Initialize()
+		Quit:$$$ISERR(tSC)
+
+		set tSC = tClient.SetupClient()
+		Quit:$$$ISERR(tSC)
+
+		set tSC = tClient.Connect("opc.tcp://opcuaserver.com:48010")
+		Quit:$$$ISERR(tSC)
+
+		#dim tResults as %List
+		#dim tValue as %Integer
+
+		w !!, "Temperature         (0): "
+		set tSC = tClient.ReadValueAttribute(.tResults, "AirConditioner_1.Temperature", 3, $$$OpcuaNodeIdTypeString)
+		Quit:$$$ISERR(tSC)
+		zw tResults
+
+		w "TemperatureSetPoint (0): "
+		set tSC = tClient.ReadValueAttribute(.tResults, "AirConditioner_1.TemperatureSetPoint", 3, $$$OpcuaNodeIdTypeString)
+		Quit:$$$ISERR(tSC)
+		zw tResults
+
+		set tValue = 63  // Integer
+		w "Writing "_tValue_"... "
+		set tSC = tClient.WriteValueAttribute($DECIMAL(tValue), $$$OpcuaDataTypeUInt16, "AirConditioner_1.TemperatureSetPoint", 3, $$$OpcuaNodeIdTypeString)
+		Quit:$$$ISERR(tSC)
+
+		w !, "Temperature         (1): "
+		set tSC = tClient.ReadValueAttribute(.tResults, "AirConditioner_1.Temperature", 3, $$$OpcuaNodeIdTypeString)
+		Quit:$$$ISERR(tSC)
+		zw tResults
+
+		w "TemperatureSetPoint (1): "
+		set tSC = tClient.ReadValueAttribute(.tResults, "AirConditioner_1.TemperatureSetPoint", 3, $$$OpcuaNodeIdTypeString)
+		Quit:$$$ISERR(tSC)
+		zw tResults
+
+		w "Waiting 2 seconds..."
+		Hang 2
+
+		set tValue = 731.5 // Double
+		w !, "Writing "_tValue_"... "
+		set tSC = tClient.WriteValueAttribute($DOUBLE(tValue), $$$OpcuaDataTypeDouble, "AirConditioner_1.TemperatureSetPoint", 3, $$$OpcuaNodeIdTypeString)
+		Quit:$$$ISERR(tSC)
+
+		w !, "Temperature         (2): "
+		set tSC = tClient.ReadValueAttribute(.tResults, "AirConditioner_1.Temperature", 3, $$$OpcuaNodeIdTypeString)
+		Quit:$$$ISERR(tSC)
+		zw tResults
+
+		w "TemperatureSetPoint (2): "
+		set tSC = tClient.ReadValueAttribute(.tResults, "AirConditioner_1.TemperatureSetPoint", 3, $$$OpcuaNodeIdTypeString)
+		Quit:$$$ISERR(tSC)
+		zw tResults
+
+		w !!
+
+		set tSC = tClient.Disconnect()
+
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+
+	Quit tSC
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="Examples.OPCUADS.ArrayExample">
+<Super>%Persistent,OPCUA.DataSource.Definition</Super>
+<TimeChanged>67556,48683.1958928</TimeChanged>
+<TimeCreated>67556,48683.1153064</TimeCreated>
+
+<Parameter name="OPCUADATASOURCE">
+<Default>MyDataSource2</Default>
+</Parameter>
+
+<Parameter name="OPCUDEFAULTANAMESPACE">
+<Default>2</Default>
+</Parameter>
+
+<Property name="BooleanArr">
+<Type>OPCUA.Types.ArrayDataValue.Boolean</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Arrays.Boolean"/>
+</Property>
+
+<Property name="Int32Arr">
+<Type>OPCUA.Types.ArrayDataValue.Integer</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Arrays.Int32"/>
+</Property>
+
+<Property name="DoubleArr">
+<Type>OPCUA.Types.ArrayDataValue.Double</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Arrays.Double"/>
+</Property>
+
+<Property name="StringArr">
+<Type>OPCUA.Types.ArrayDataValue.String</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Arrays.String"/>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Persistent</Type>
+<DataLocation>^Examples.OPCUADS.ArrayExampleD</DataLocation>
+<DefaultData>ArrayExampleDefaultData</DefaultData>
+<IdLocation>^Examples.OPCUADS.ArrayExampleD</IdLocation>
+<IndexLocation>^Examples.OPCUADS.ArrayExampleI</IndexLocation>
+<StreamLocation>^Examples.OPCUADS.ArrayExampleS</StreamLocation>
+<Data name="ArrayExampleDefaultData">
+<Structure>listnode</Structure>
+<Subscript/>
+<Value name="1">
+<Value>%%CLASSNAME</Value>
+</Value>
+<Value name="2">
+<Value>BooleanArr</Value>
+</Value>
+<Value name="3">
+<Value>Int32Arr</Value>
+</Value>
+<Value name="4">
+<Value>DoubleArr</Value>
+</Value>
+<Value name="5">
+<Value>StringArr</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="Examples.OPCUADS.InternetPollingExample">
+<Description>
+IRIS OPC UA Internet polling demo node id and data type specifications</Description>
+<Super>%Persistent,OPCUA.DataSource.Definition</Super>
+<TimeChanged>67556,48683.1945893</TimeChanged>
+<TimeCreated>67556,48683.1065619</TimeCreated>
+
+<Parameter name="OPCUADATASOURCE">
+<Default>MyDataSource2</Default>
+</Parameter>
+
+<Parameter name="OPCUDEFAULTANAMESPACE">
+<Default>3</Default>
+</Parameter>
+
+<Property name="Temperature">
+<Type>OPCUA.Types.DoubleDataValue</Type>
+<Parameter name="OPCUANODENAME" value="AirConditioner_1.Temperature"/>
+</Property>
+
+<Property name="Humidity">
+<Type>OPCUA.Types.DoubleDataValue</Type>
+<Parameter name="OPCUANODENAME" value="AirConditioner_1.Humidity"/>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Persistent</Type>
+<DataLocation>^Examples.O55DC.InternetPolC4ACD</DataLocation>
+<DefaultData>InternetPollingExampleDefaultData</DefaultData>
+<IdLocation>^Examples.O55DC.InternetPolC4ACD</IdLocation>
+<IndexLocation>^Examples.O55DC.InternetPolC4ACI</IndexLocation>
+<StreamLocation>^Examples.O55DC.InternetPolC4ACS</StreamLocation>
+<Data name="InternetPollingExampleDefaultData">
+<Structure>listnode</Structure>
+<Subscript/>
+<Value name="1">
+<Value>%%CLASSNAME</Value>
+</Value>
+<Value name="2">
+<Value>Temperature</Value>
+</Value>
+<Value name="3">
+<Value>Humidity</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="Examples.OPCUADS.InternetSubscriptionExample">
+<Description>
+IRIS Internet OPC UA subscription demo node id and data type specifications</Description>
+<Super>%Persistent,OPCUA.DataSource.Definition</Super>
+<TimeChanged>67556,48683.1936795</TimeChanged>
+<TimeCreated>67556,48683.1153246</TimeCreated>
+
+<Parameter name="OPCUADATASOURCE">
+<Default>MyDataSource2</Default>
+</Parameter>
+
+<Parameter name="OPCUDEFAULTANAMESPACE">
+<Default>3</Default>
+</Parameter>
+
+<Property name="Temperature">
+<Type>OPCUA.Types.DoubleDataValue</Type>
+<Parameter name="OPCUANODENAME" value="AirConditioner_1.Temperature"/>
+</Property>
+
+<Property name="Humidity">
+<Type>OPCUA.Types.DoubleDataValue</Type>
+<Parameter name="OPCUANODENAME" value="AirConditioner_1.Humidity"/>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Persistent</Type>
+<DataLocation>^Examples.O55DC.InternetSubB0FED</DataLocation>
+<DefaultData>InternetSubscriptionExampleDefaultData</DefaultData>
+<IdLocation>^Examples.O55DC.InternetSubB0FED</IdLocation>
+<IndexLocation>^Examples.O55DC.InternetSubB0FEI</IndexLocation>
+<StreamLocation>^Examples.O55DC.InternetSubB0FES</StreamLocation>
+<Data name="InternetSubscriptionExampleDefaultData">
+<Structure>listnode</Structure>
+<Subscript/>
+<Value name="1">
+<Value>%%CLASSNAME</Value>
+</Value>
+<Value name="2">
+<Value>Temperature</Value>
+</Value>
+<Value name="3">
+<Value>Humidity</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="Examples.OPCUADS.PollingExample">
+<Description>
+IRIS OPC UA local polling demo node id and data type specifications</Description>
+<Super>%Persistent,OPCUA.DataSource.Definition</Super>
+<TimeChanged>67556,48683.1962888</TimeChanged>
+<TimeCreated>67556,48683.1141031</TimeCreated>
+
+<Parameter name="OPCUADATASOURCE">
+<Default>MyDataSource2</Default>
+</Parameter>
+
+<Parameter name="OPCUDEFAULTANAMESPACE">
+<Default>1</Default>
+</Parameter>
+
+<Property name="SA1">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="SA1"/>
+</Property>
+
+<Property name="SA2">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="SA2"/>
+</Property>
+
+<Property name="VT5">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="VT5"/>
+</Property>
+
+<Property name="PRNO">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="PRNO"/>
+</Property>
+
+<Property name="PROG">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="PROG"/>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Persistent</Type>
+<DataLocation>^Examples.OP55DC.PollingExampleD</DataLocation>
+<DefaultData>PollingExampleDefaultData</DefaultData>
+<IdLocation>^Examples.OP55DC.PollingExampleD</IdLocation>
+<IndexLocation>^Examples.OP55DC.PollingExampleI</IndexLocation>
+<StreamLocation>^Examples.OP55DC.PollingExampleS</StreamLocation>
+<Data name="PollingExampleDefaultData">
+<Structure>listnode</Structure>
+<Subscript/>
+<Value name="1">
+<Value>%%CLASSNAME</Value>
+</Value>
+<Value name="2">
+<Value>SA1</Value>
+</Value>
+<Value name="3">
+<Value>SA2</Value>
+</Value>
+<Value name="4">
+<Value>VT5</Value>
+</Value>
+<Value name="5">
+<Value>PRNO</Value>
+</Value>
+<Value name="6">
+<Value>PROG</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="Examples.OPCUADS.Production">
+<Super>Ens.Production</Super>
+<TimeChanged>67556,48683.1109757</TimeChanged>
+<TimeCreated>67556,48683.1109757</TimeCreated>
+
+<XData name="ProductionDefinition">
+<Data><![CDATA[
+<Production Name="Examples.OPCUADS.ExampleProduction" LogGeneralTraceEvents="false">
+  <Description></Description>
+  <ActorPoolSize>2</ActorPoolSize>
+  <Item Name="ArrayExample" Category="" ClassName="OPCUA.Service.TCPPollingService" PoolSize="1"
+ Enabled="false" Foreground="false" 
+ Comment="This example demonstrates how arrays of data can be imported into IRIS." 
+ LogTraceEvents="true" Schedule="">
+    <Setting Target="Adapter" Name="DataSourceClass">Examples.OPCUADS.ArrayExample</Setting>
+    <Setting Target="Adapter" Name="URL">opc.tcp://opcuaserver.com:48010</Setting>
+    <Setting Target="Adapter" Name="CallInterval">15</Setting>
+  </Item>
+  <Item Name="PollingExample" Category="" ClassName="OPCUA.Service.TCPPollingService" PoolSize="1"
+ Enabled="false" Foreground="false" 
+ Comment="This example repeatedly polls a locally-running OPC UA server for input." 
+ LogTraceEvents="true" Schedule="">
+    <Setting Target="Adapter" Name="DataSourceClass">Examples.OPCUADS.PollingExample</Setting>
+    <Setting Target="Adapter" Name="URL">opc.tcp://plc</Setting>
+    <Setting Target="Adapter" Name="CallInterval">1</Setting>
+  </Item>
+  <Item Name="SubscriptionExample" Category="" ClassName="OPCUA.Service.TCPSubscriptionService" PoolSize="1"
+ Enabled="false" Foreground="false" 
+ Comment="This example receives input data from a subscription to monitored items on a locally-running OPC UA server." 
+ LogTraceEvents="true" Schedule="">
+    <Setting Target="Adapter" Name="DataSourceClass">Examples.OPCUADS.SubscriptionExample</Setting>
+    <Setting Target="Adapter" Name="URL">opc.tcp://plc</Setting>
+    <Setting Target="Adapter" Name="RequestedPublishingInterval">300</Setting>
+    <Setting Target="Adapter" Name="RequestedSamplingInterval">0</Setting>
+    <Setting Target="Adapter" Name="RequestedQueueSize">5</Setting>
+  </Item>
+  <Item Name="SecureExample" Category="" ClassName="OPCUA.Service.TCPSubscriptionService" PoolSize="1"
+ Enabled="false" Foreground="false" 
+ Comment="This example receives input data from a server requiring mutual authentication and transmission encryption." 
+ LogTraceEvents="true" Schedule="">
+    <Setting Target="Adapter" Name="DataSourceClass">Examples.OPCUADS.SecureExample</Setting>
+    <Setting Target="Adapter" Name="URL">opc.tcp://certified-server</Setting>
+    <Setting Target="Adapter" Name="RequestedPublishingInterval">1000</Setting>
+    <Setting Target="Adapter" Name="RequestedSamplingInterval">250</Setting>
+    <Setting Target="Adapter" Name="RequestedQueueSize">5</Setting>
+    <Setting Target="Adapter" Name="Username">user1</Setting>
+    <Setting Target="Adapter" Name="Password">password</Setting>
+    <Setting Target="Adapter" Name="SecurityMode">3</Setting>
+    <Setting Target="Adapter" Name="ClientURI">urn:secuac</Setting>
+    <Setting Target="Adapter" Name="PublicCertificate">/usr/irissys/uac/certs/secuac.crt.der</Setting>
+    <Setting Target="Adapter" Name="PrivateKey">/usr/irissys/uac/certs/secuac.key.der</Setting>
+    <Setting Target="Adapter" Name="TrustListDir">/usr/irissys/uac/certs/trustdir</Setting>
+    <Setting Target="Adapter" Name="RevocationListDir">/usr/irissys/uac/certs/crldir</Setting>
+  </Item>
+  <Item Name="InternetPollingExample" Category="" ClassName="OPCUA.Service.TCPPollingService" PoolSize="1"
+ Enabled="false" Foreground="false" 
+ Comment="This example repeatedly polls a public OPC UA server at opcuaserver.com." 
+ LogTraceEvents="true" Schedule="">
+    <Setting Target="Adapter" Name="DataSourceClass">Examples.OPCUADS.InternetPollingExample</Setting>
+    <Setting Target="Adapter" Name="URL">opc.tcp://opcuaserver.com:48010</Setting>
+    <Setting Target="Adapter" Name="CallInterval">5</Setting>
+  </Item>
+  <Item Name="InternetSubscriptionExample" Category="" ClassName="OPCUA.Service.TCPSubscriptionService" PoolSize="1"
+ Enabled="false" Foreground="false" 
+ Comment="This example creates a subscription to monitored items on a pubic OPC UA server at opcuaserver.com."
+ LogTraceEvents="true" Schedule="">
+    <Setting Target="Adapter" Name="DataSourceClass">Examples.OPCUADS.InternetSubscriptionExample</Setting>
+    <Setting Target="Adapter" Name="URL">opc.tcp://opcuaserver.com:48010</Setting>
+    <Setting Target="Adapter" Name="CallInterval">5</Setting>
+    <Setting Target="Adapter" Name="ReestablishOnEmptyResult">3</Setting>
+  </Item>
+</Production>
+]]></Data>
+</XData>
+</Class>
+
+
+<Class name="Examples.OPCUADS.SecureExample">
+<Description>
+IRIS local OPC UA subscription demo node id and data type specifications</Description>
+<Super>%Persistent,OPCUA.DataSource.Definition</Super>
+<TimeChanged>67556,48683.2191835</TimeChanged>
+<TimeCreated>67556,48683.1521967</TimeCreated>
+
+<Parameter name="OPCUADATASOURCE">
+<Default>MyDataSource2</Default>
+</Parameter>
+
+<Parameter name="OPCUDEFAULTANAMESPACE">
+<Default>1</Default>
+</Parameter>
+
+<Property name="CurrentTime">
+<Type>OPCUA.Types.TimeStampDataValue</Type>
+<Parameter name="OPCUANODENAME" value="2345"/>
+</Property>
+
+<Property name="TheAnswer">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="the.answer"/>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Persistent</Type>
+<DataLocation>^Examples.OPC55DC.SecureExampleD</DataLocation>
+<DefaultData>SecureExampleDefaultData</DefaultData>
+<IdLocation>^Examples.OPC55DC.SecureExampleD</IdLocation>
+<IndexLocation>^Examples.OPC55DC.SecureExampleI</IndexLocation>
+<StreamLocation>^Examples.OPC55DC.SecureExampleS</StreamLocation>
+<Data name="SecureExampleDefaultData">
+<Structure>listnode</Structure>
+<Subscript/>
+<Value name="1">
+<Value>%%CLASSNAME</Value>
+</Value>
+<Value name="2">
+<Value>CurrentTime</Value>
+</Value>
+<Value name="3">
+<Value>TheAnswer</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="Examples.OPCUADS.SubscriptionExample">
+<Description>
+IRIS local OPC UA subscription demo node id and data type specifications</Description>
+<Super>%Persistent,OPCUA.DataSource.Definition</Super>
+<TimeChanged>67556,48683.2245919</TimeChanged>
+<TimeCreated>67556,48683.0829796</TimeCreated>
+
+<Parameter name="OPCUADATASOURCE">
+<Default>MyDataSource2</Default>
+</Parameter>
+
+<Parameter name="OPCUDEFAULTANAMESPACE">
+<Default>1</Default>
+</Parameter>
+
+<Property name="SA1">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="SA1"/>
+</Property>
+
+<Property name="SA2">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="SA2"/>
+</Property>
+
+<Property name="VT5">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="VT5"/>
+</Property>
+
+<Property name="PRNO">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="PRNO"/>
+</Property>
+
+<Property name="PROG">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="PROG"/>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Persistent</Type>
+<DataLocation>^Examples.O55DC.Subscriptio66AED</DataLocation>
+<DefaultData>SubscriptionExampleDefaultData</DefaultData>
+<IdLocation>^Examples.O55DC.Subscriptio66AED</IdLocation>
+<IndexLocation>^Examples.O55DC.Subscriptio66AEI</IndexLocation>
+<StreamLocation>^Examples.O55DC.Subscriptio66AES</StreamLocation>
+<Data name="SubscriptionExampleDefaultData">
+<Structure>listnode</Structure>
+<Subscript/>
+<Value name="1">
+<Value>%%CLASSNAME</Value>
+</Value>
+<Value name="2">
+<Value>SA1</Value>
+</Value>
+<Value name="3">
+<Value>SA2</Value>
+</Value>
+<Value name="4">
+<Value>VT5</Value>
+</Value>
+<Value name="5">
+<Value>PRNO</Value>
+</Value>
+<Value name="6">
+<Value>PROG</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="Examples.OPCUADS.Utils">
+<TimeChanged>67556,48683.0802626</TimeChanged>
+<TimeCreated>67556,48683.0802626</TimeCreated>
+
+<Method name="LoadOnInstallation">
+<ClassMethod>1</ClassMethod>
+<Implementation><![CDATA[
+	set ^Ens.AutoStart = "Examples.OPCUADS.Production"
+	set ^Ens.AutoStart("StartupPriority") = 0
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="OPCUA.Adapter.Common">
+<IncludeCode>%callout,OPCUA.Constants</IncludeCode>
+<Super>Ens.InboundAdapter</Super>
+<TimeChanged>67556,48591.6720548</TimeChanged>
+<TimeCreated>67556,48591.6720548</TimeCreated>
+
+<Parameter name="SETTINGS">
+<Description>
+Configurable settings</Description>
+<Default>URL:Connection,ConnectionRetryTimeout:Connection,DataSourceClass:Data,Username:User,Password:User,SecurityMode:Security,ClientURI:Security,PublicCertificate:Security,PrivateKey:Security,TrustListDir:Security,RevocationListDir:Security,LogFileTag:Logging</Default>
+</Parameter>
+
+<UDLText name="T">
+<Content><![CDATA[
+// *** PROPERTIES INFLUENCED BY SETTINGS ***
+
+]]></Content>
+</UDLText>
+
+<Property name="URL">
+<Description><![CDATA[
+The URL of the server from which data is sought. 
+(e.g. <i>opc.tcp://servername:4840</i>)]]></Description>
+<Type>%String</Type>
+<Parameter name="MAXLEN" value="200"/>
+</Property>
+
+<Property name="ConnectionRetryTimeout">
+<Description>
+The duration (in seconds), since the last time that 
+the OPC UA client was able to connect to the target
+OPC UA server, after which no more connection attempts
+will be made.</Description>
+<Type>%Integer</Type>
+<InitialExpression>600</InitialExpression>
+</Property>
+
+<Property name="DataSourceClass">
+<Description>
+The name of the DataSource class specifying the 
+data types and nodes from which to obtain data
+as well as the fields in which to deposit the results.</Description>
+<Type>%String</Type>
+</Property>
+
+<Property name="Username">
+<Description>
+The username with which to log on to the OPC UA server.</Description>
+<Type>%String</Type>
+</Property>
+
+<Property name="Password">
+<Description>
+The password with which to log on to the OPC UA server.</Description>
+<Type>%String</Type>
+</Property>
+
+<Property name="SecurityMode">
+<Type>%String</Type>
+<InitialExpression>"1"</InitialExpression>
+<Required>1</Required>
+<Parameter name="DISPLAYLIST" value=",None,Sign &amp; Encrypt"/>
+<Parameter name="VALUELIST" value=",1,3"/>
+</Property>
+
+<Property name="ClientURI">
+<Description>
+The "application URI" of this IRIS OPC UA connector. 
+Notice that this identifying string may need to match
+comparable identifying strings noted within certificates
+used to identify this application to the target OPC UA
+server.</Description>
+<Type>%String</Type>
+<Parameter name="MAXLEN" value="200"/>
+</Property>
+
+<Property name="PublicCertificate">
+<Description>
+The full pathname of the certificate that is to be 
+used to identify the IRIS OPC UA connector as a client 
+to the OPC UA server. Notice that this certificate may 
+need to have been signed by a certicate authority that
+is trusted by the target OPC UA server. Should be
+supplied in DER format.</Description>
+<Type>%String</Type>
+<Parameter name="MAXLEN" value="900"/>
+</Property>
+
+<Property name="PrivateKey">
+<Description>
+The full pathname of the private key that is to be used
+by this IRIS OPC UA connector in communications with the
+target OPC UA server. Should be supplied in DER format.</Description>
+<Type>%String</Type>
+<Parameter name="MAXLEN" value="900"/>
+</Property>
+
+<Property name="TrustListDir">
+<Description>
+The full pathname of the directory in which the certificates
+of trusted sources are kept. Importantly, this directory
+may need to hold a valid certificate of the certificate authority
+that signs a target OPC UA server's identifying certificates,
+or a trusted certificate of a target OPC UA server itself.
+Certificates in this directory should be supplied in 
+DER format.</Description>
+<Type>%String</Type>
+<Parameter name="MAXLEN" value="900"/>
+</Property>
+
+<Property name="RevocationListDir">
+<Description>
+The full pathname of the directory in which certificate 
+revocation lists (CRLs) are to be held. Such CRLs may be
+required for connecting to any given OPC UA server even  
+in the event that no certificates have been revoked in
+regards to that server.</Description>
+<Type>%String</Type>
+<Parameter name="MAXLEN" value="900"/>
+</Property>
+
+<Property name="LogFileTag">
+<Description>
+Indicates a tag that will identify a logfile for supplemental
+logging regarding this process. If omitted, supplemental 
+logging will not be performed. Importantly, under some circumstances,
+use of this supplemental logging can result in a great amount of 
+being written to disk and may result in degradation of application 
+performance. Consequently, it is recommended that this feature only 
+be used for the purposes of development and debugging and not for 
+general system monitoring. </Description>
+<Type>%String</Type>
+<Parameter name="MAXLEN" value="50"/>
+</Property>
+
+<UDLText name="T">
+<Content><![CDATA[
+// *** PRIVATE PROPERTIES ***
+
+]]></Content>
+</UDLText>
+
+<Property name="Client">
+<Type>OPCUA.Client</Type>
+<Private>1</Private>
+</Property>
+
+<Property name="IsConnected">
+<Type>%Integer</Type>
+<Private>1</Private>
+</Property>
+
+<Property name="ResetClientFlag">
+<Type>%Integer</Type>
+<Private>1</Private>
+</Property>
+
+<Property name="LastReportedError">
+<Type>%Status</Type>
+<Private>1</Private>
+</Property>
+
+<Property name="ConnectionRetryEndTime">
+<Type>%TimeStamp</Type>
+<Private>1</Private>
+</Property>
+
+<UDLText name="T">
+<Content><![CDATA[
+// *** METHODS ***
+
+]]></Content>
+</UDLText>
+
+<Method name="OnInit">
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC as %Status = $$$OK
+
+	try {
+
+		set ..IsConnected = 0
+		set ..ResetClientFlag = 0
+
+		set ..ConnectionRetryEndTime = ##class(%SYSTEM.SQL).DATEADD("s",..ConnectionRetryTimeout,$ZTimestamp)
+
+		set ..Client = ##class(OPCUA.Client).%New()
+		set tSC = ..Client.Initialize()
+		Quit:$$$ISERR(tSC)
+
+		set tSC = ..Client.SetLogFile(..LogFileTag)
+		set tSC = ..Client.SetupClient("",..SecurityMode,..ClientURI,..PublicCertificate,..PrivateKey,..TrustListDir,..RevocationListDir)
+		Quit:$$$ISERR(tSC)
+
+	} catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	
+	if $$$ISERR(tSC) {
+		$$$LOGERROR("OPCUA Client initialization failed [c.oi] : "_$SYSTEM.Status.GetErrorText(tSC))
+		Quit tSC
+	} 
+	
+	Quit tSC  // Quit $$$OK
+]]></Implementation>
+</Method>
+
+<Method name="Connect">
+<Private>1</Private>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC as %Status = $$$OK
+	
+	try {
+
+		if ..ResetClientFlag '= 0 {
+
+			set tSC = ..Client.SetLogFile(..LogFileTag)
+			set tSC = ..Client.SetupClient("",..SecurityMode,..ClientURI,..PublicCertificate,..PrivateKey,..TrustListDir,..RevocationListDir)
+
+			if $$$ISERR(tSC) {
+
+				$$$LOGERROR("Error encountered while resetting client [c.c] : "_$SYSTEM.Status.GetErrorText(tSC))
+				Quit
+
+			} else {
+
+				$$$TRACE("OPCUA Client reset [c.c]")
+			}
+		}
+
+		set tSC = ..Client.Connect(..URL,..Username,..Password)
+		//Quit:$$$ISERR(tSC)
+
+	} catch (e) {
+		set tSC = e.AsStatus()
+	}
+
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="Disconnect">
+<Private>1</Private>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC as %Status = $$$OK
+	
+	try {
+	
+		set tSC = ..Client.Disconnect()
+		//Quit:$$$ISERR(tSC)
+
+	} catch (e) {
+		set tSC = e.AsStatus()
+	}
+
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="OnTearDown">
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC as %Status = $$$OK
+
+	try {
+	
+		set tSC = ..Client.Disconnect()
+				
+	} catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	
+	Quit tSC
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="OPCUA.Adapter.TCPPollingInboundAdapter">
+<Description>
+An inbound adapter for accessing data on an OPC UA server
+by repeated polling of the server for results.</Description>
+<Super>OPCUA.Adapter.Common</Super>
+<TimeChanged>67556,48619.6866657</TimeChanged>
+<TimeCreated>67556,48619.6866657</TimeCreated>
+
+<Property name="Specification">
+<Type>%List</Type>
+<Private>1</Private>
+</Property>
+
+<Property name="QueryHandle">
+<Type>%Integer</Type>
+<Private>1</Private>
+</Property>
+
+<Method name="Configure">
+<Description>
+Must be called before connecting. 
+(OPCUA.Service.TCPPollingService calls this function in its OnInit() event.)</Description>
+<FormalSpec>pSpecification:%List</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC as %Status = $$$OK
+		
+	try {
+
+		set ..Specification = pSpecification
+
+	} catch (e) {
+		set tSC = e.AsStatus()
+	}
+
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="Connect">
+<Description>
+Used internally to setup of the OPC-UA client, connect to the 
+server, and intialize the query that will be used to poll for
+results.</Description>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC as %Status = $$$OK
+
+	try {
+
+		if ..QueryHandle > 0 {
+
+			set tSC = ..Client.ReadBulkClear(..QueryHandle)
+			// do not quit on clear failure
+
+			set ..QueryHandle = 0
+		}
+
+		#dim tmp as %Integer
+		set tSC = ..Client.ReadBulkSetupC(.tmp,..Specification)
+		Quit:$$$ISERR(tSC)
+
+		set ..QueryHandle = tmp
+
+		set tSC = ##super()
+		Quit:$$$ISERR(tSC)
+
+	} catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	
+	Quit tSC  // Quit $$$OK
+]]></Implementation>
+</Method>
+
+<Method name="OnTask">
+<Description>
+Used internally in order to handle poll results.</Description>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC as %Status = $$$OK
+
+	#dim tQtyProcessed as %Integer = 0
+	#dim tStartTime as %TimeStamp = $ZTimestamp
+	
+	try {
+
+		if '..IsConnected {
+
+			set tSC = ..Connect()
+			$$$ThrowOnError(tSC)
+
+			$$$LOGINFO("OPCUA adapter connected to "_..URL)			
+		}
+
+		#dim tList as %List
+
+		set tSC = ..Client.ReadBulkPollC(.tList,..QueryHandle)
+		Quit:$$$ISERR(tSC)
+
+		set tSC = ..BusinessHost.ProcessInput(.tList)  
+		Quit:$$$ISERR(tSC)
+
+	} catch (e) {
+		Set tSC = e.AsStatus()
+	}
+
+	set tEndTime = $ZTimestamp
+	set tElapsedTime = ##class(%SYSTEM.SQL).DATEDIFF("ms",tStartTime,tEndTime) / 1000.0 // in seconds
+
+	if $$$ISERR(tSC) {
+	
+		try {
+			#dim tTmp as %Integer = -1
+			do ..Client.GetClientState("",.tTmp)
+			set ..IsConnected = tTmp
+		} catch (e) {
+			set ..IsConnected = 0
+		}
+
+		if ..LastReportedError '= tSC {
+
+			if ##class(OPCUA.Utils).AreSimilarOpcuaDisconnectErrors($SYSTEM.Status.GetErrorText(..LastReportedError),$SYSTEM.Status.GetErrorText(tSC)) {
+
+				$$$TRACE("Error encountered : "_$SYSTEM.Status.GetErrorText(tSC)_" : "_..Client.GetClientStateString())
+
+			} else {
+
+				$$$LOGERROR("Error encountered : "_$SYSTEM.Status.GetErrorText(tSC)_" : "_..Client.GetClientStateString())
+			}
+
+			set ..LastReportedError = tSC
+			set ..BusinessHost.%WaitForNextCallInterval = 1	
+
+		} else {
+			$$$TRACE("Error encountered : "_$SYSTEM.Status.GetErrorText(tSC)_" : "_..Client.GetClientStateString())
+		}
+
+		$$$SetHostMonitor(..BusinessHost.%ConfigName,$$$eMonitorStatus,"Error")
+
+		if ##class(%SYSTEM.SQL).DATEDIFF("s",..ConnectionRetryEndTime,$ZTimestamp) > 0 {
+			$$$LOGERROR("Connection retry period concluded. Unable to establish connection.")
+			set ..BusinessHost.%QuitTask = 1
+			return tSC
+		}
+
+	} else {
+
+		set ..IsConnected = 1
+
+		set ..LastReportedError = tSC // $$$OK
+		set ..BusinessHost.%WaitForNextCallInterval = 1
+		
+		$$$TRACE("1 record entered in "_tElapsedTime_" seconds. : "_..Client.GetClientStateString())
+
+		$$$SetHostMonitor(..BusinessHost.%ConfigName,$$$eMonitorStatus,"OK")
+
+		set ..ConnectionRetryEndTime = ##class(%SYSTEM.SQL).DATEADD("s",..ConnectionRetryTimeout,$ZTimestamp)
+
+	} 
+
+	Quit $$$OK
+]]></Implementation>
+</Method>
+
+<Method name="OnTearDown">
+<Description>
+Used internally to disconnect the OPC-UA client.</Description>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	try {
+		do ..Client.ReadBulkClear(..QueryHandle)	// Perhaps unnecessary
+	} catch (e) {}
+
+	return ##super()
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="OPCUA.Adapter.TCPSubscriptionInboundAdapter">
+<Description>
+An inbound adapter for accessing data 
+using an OPC UA subscription to monitored items on an OPC UA server.</Description>
+<Super>OPCUA.Adapter.Common</Super>
+<TimeChanged>67556,48557.8667502</TimeChanged>
+<TimeCreated>67556,48557.8667502</TimeCreated>
+
+<Parameter name="SETTINGS">
+<Description>
+Configurable settings</Description>
+<Default>ReestablishOnEmptyResult:Connection,RequestedPublishingInterval:OPC-UA Subscription,RequestedLifetimeCount:OPC-UA Subscription,RequestedMaxKeepAliveCount:OPC-UA Subscription,MaxNotificationsPerPublish:OPC-UA Subscription,SubscriptionPollingTimeout:OPC-UA Subscription,RequestedSamplingInterval:OPC-UA Subscription,RequestedQueueSize:OPC-UA Subscription</Default>
+</Parameter>
+
+<UDLText name="T">
+<Content><![CDATA[
+// *** PROPERTIES INFLUENCED BY SETTINGS ***
+
+]]></Content>
+</UDLText>
+
+<Property name="RequestedPublishingInterval">
+<Description>
+The requested cyclic rate (in milliseconds) that the Subscription 
+is being requested to return Notifications to the Client. 
+Notice that the actual rate is set by the server and may be 
+different from that requested.
+If the requested value is 0 or negative, then 
+the Server shall revise with the fastest supported publishing interval.
+Defined in section 5.13.2.2 of the OPC UA specification.</Description>
+<Type>%Numeric</Type>
+<InitialExpression>500</InitialExpression>
+</Property>
+
+<Property name="RequestedLifetimeCount">
+<Description>
+When the publishing timer has expired this number of times without 
+a Publish request being available to send a NotificationMessage, 
+then the Subscription shall be deleted by the Server.
+Notice that the actual lifetime count is set by the server and may be 
+different from that requested.
+The lifetime count must be a minimum of three times the keep keep-alive count.
+Defined in section 5.13.2.2 of the OPC UA specification.</Description>
+<Type>%Integer</Type>
+<InitialExpression>10000</InitialExpression>
+</Property>
+
+<Property name="RequestedMaxKeepAliveCount">
+<Description>
+When the publishing timer has expired this number of times without 
+requiring any NotificationMessage to be sent, the Subscription 
+sends a keep-alive Message to the Client.
+Notice that the actual keep-alive count is set by the server and may be 
+different from that requested.
+If the requested value is 0, the Server shall revise with 
+the smallest supported keep-alive count.
+Defined in section 5.13.2.2 of the OPC UA specification.</Description>
+<Type>%Integer</Type>
+<InitialExpression>10</InitialExpression>
+</Property>
+
+<Property name="MaxNotificationsPerPublish">
+<Description>
+The maximum number of notifications that the Client wishes to receive 
+in a single Publish response. A value of zero indicates that there is no limit.
+Defined in section 5.13.2.2 of the OPC UA specification.</Description>
+<Type>%Integer</Type>
+<InitialExpression>100</InitialExpression>
+</Property>
+
+<Property name="SubscriptionPollingTimeout">
+<Description>
+The timeout applied to each poll made by the client of the 
+OPC UA server requesting notifications for changes to 
+monitored items. Necessarily, the minimum time required to 
+execute the poll.</Description>
+<Type>%Integer</Type>
+<InitialExpression>500</InitialExpression>
+</Property>
+
+<Property name="ReestablishOnEmptyResult">
+<Description>
+Indicates whether, in the event that no notifications are returned 
+by the target server for a given subscription polling attempt, 
+any existing connection to that server should
+be abandoned and an attempt made to reestablish the connection. A 
+value of 1 indicates so; a value of 0 not. If indicated as a value 
+higher than one, then the value also indicates the number of times
+that such subscription polling attempts must return no notifications
+before the connection should be abandoned and an attempt made to 
+reestablish it.</Description>
+<Type>%Integer</Type>
+<InitialExpression>0</InitialExpression>
+</Property>
+
+<Property name="RequestedSamplingInterval">
+<Description>
+A duration in milliseconds indicating the interval at which 
+monitored items on the server should be assessed by the server 
+in order to determine if changes have occurred. A value of zero 
+indicates that the server should use the fastest practical rate. 
+A negative number indicates that the defualt rate should be used.
+Notice that the actual sampling intervals are set by the server
+and may be different than those requested. Notice also that, in 
+this application, only a single rate may be requested and that 
+that rate must be applicable to all monitored items for the 
+subscription. Defined in section 7.16 of the OPC UA specification.</Description>
+<Type>%Numeric</Type>
+<InitialExpression>500</InitialExpression>
+</Property>
+
+<Property name="RequestedQueueSize">
+<Description>
+Indicates the number of data changes that the server should remember,
+for any given monitored item, for reporting to the client when the 
+client next polls asking for recent data changes. A value of one 
+indicates that the server should keep track of only the most recent
+value, and any poll request by the client will be answered with only
+that most recent value regardless of how many times a data change 
+has occurred since the time of the last poll of the server by the 
+client. A value of zero indicates that the default quantity should
+be used. Notice that, in this application, only a single queue size
+may be requested and that requested queue size is assumed to be 
+applicable to all monitored items for the subscription. Notice also
+that the actual queue sizes for monitored items on the server are 
+set by the server and may be different than requested. Defined in
+section 7.16 of the OPC UA specification.</Description>
+<Type>%Integer</Type>
+<InitialExpression>1</InitialExpression>
+</Property>
+
+<UDLText name="T">
+<Content><![CDATA[
+// *** PRIVATE PROPERTIES ***
+
+]]></Content>
+</UDLText>
+
+<Property name="Specification">
+<Type>%List</Type>
+<Private>1</Private>
+</Property>
+
+<Property name="QueryHandle">
+<Type>%Integer</Type>
+<Private>1</Private>
+</Property>
+
+<Property name="QtySequentialEmptyResults">
+<Type>%Integer</Type>
+<InitialExpression>0</InitialExpression>
+<Private>1</Private>
+</Property>
+
+<Property name="MaxInternalQueueSize">
+<Type>%Integer</Type>
+<InitialExpression>0</InitialExpression>
+<Private>1</Private>
+</Property>
+
+<Property name="MaxBatchSize">
+<Type>%Integer</Type>
+<InitialExpression>0</InitialExpression>
+<Private>1</Private>
+</Property>
+
+<UDLText name="T">
+<Content><![CDATA[
+// *** METHODS ***
+
+]]></Content>
+</UDLText>
+
+<Method name="Configure">
+<Description>
+Must be called before connecting. 
+(OPCUA.Service.TCPSubscriptionService calls this function in its OnInit() event.)</Description>
+<FormalSpec>pSpecification:%List</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC as %Status = $$$OK
+		
+	try {
+
+		set ..Specification = pSpecification
+
+	} catch (e) {
+		set tSC = e.AsStatus()
+	}
+
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="Connect">
+<Description>
+Used internally to setup of the OPC-UA client, connect to the 
+server, and intialize the query that will be used to poll for
+results.</Description>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC as %Status = $$$OK
+
+	try {
+	
+		set tSC = ##super()
+		Quit:$$$ISERR(tSC)
+		
+		$$$TRACE("OPCUA subscription adapter connected to "_..URL)
+
+	} catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	
+	if $$$ISERR(tSC) {
+		$$$TRACE("OPCUA subscription adapter unable to connect to "_..URL_" : "_$SYSTEM.Status.GetErrorText(tSC))
+		Quit tSC
+	} 
+
+	try {
+
+		#dim tHandle as %Integer
+		#dim tPublishingInterval as %Double = ..RequestedPublishingInterval
+		#dim tLifetimeCount as %Integer = ..RequestedLifetimeCount
+		#dim tMaxKeepAliveCount as %Integer = ..RequestedMaxKeepAliveCount
+		#dim tSamplingInterval as %Integer = ..RequestedSamplingInterval
+		#dim tQueueSize as %Integer = ..RequestedQueueSize
+		#dim tMaxInternalQueueSize as %Integer = ..MaxInternalQueueSize
+
+		set tSC = ..Client.CreateSubscriptionSetB(.tHandle,..Specification,.tPublishingInterval,.tLifetimeCount,.tMaxKeepAliveCount,..MaxNotificationsPerPublish,.tSamplingInterval,.tQueueSize,tMaxInternalQueueSize)
+		Quit:$$$ISERR(tSC)
+
+		set ..QueryHandle = tHandle
+
+		$$$LOGINFO("OPCUA subscription created: Handle="_..QueryHandle_", PublishingInterval="_tPublishingInterval_", LifetimeCount="_tLifetimeCount_", MaxKeepAliveCount="_tMaxKeepAliveCount_", MaxSamplingInterval="_tSamplingInterval_", MinQueueSize="_tQueueSize)
+
+	} catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	
+	if $$$ISERR(tSC) {
+	
+		$$$LOGERROR("OPCUA subscription query setup failed : "_$SYSTEM.Status.GetErrorText(tSC))
+
+		do ..Disconnect()
+
+		Quit tSC
+	} 
+	
+	Quit tSC  // Quit $$$OK
+]]></Implementation>
+</Method>
+
+<Method name="OnTask">
+<Description>
+Used internally in order to handle poll results.</Description>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC as %Status = $$$OK
+
+	#dim tQtyProcessed as %Integer = 0
+	#dim tProcessingErrors as %Integer = 0
+	
+	#dim tStartTime as %TimeStamp = $ZTimestamp
+
+	try {
+		
+		if (..IsConnected < 1) || (..ResetClientFlag '= 0) {
+
+			set tSC = ..Connect()
+			$$$ThrowOnError(tSC)
+
+			set ..ResetClientFlag = 0
+			set ..IsConnected = 1
+			$$$LOGINFO("OPCUA adapter connected to "_..URL)			
+		}
+
+		#dim tList as %List
+
+		set tSC = ..Client.PollSubscriptionSet(.tList,..QueryHandle,..SubscriptionPollingTimeout,..MaxBatchSize,1)
+		Quit:$$$ISERR(tSC)
+
+		//set tSC = ..BusinessHost.ProcessInput(.tList)  
+
+		// *********
+
+		set tQty = $LI(tList,2)
+		set tBatch = $LI(tList,3)
+		set tQueueStats = $LI(tList,4)
+
+		set tQtyLost = $LI(tQueueStats,7) - $LI(tQueueStats,3) // Qty lost after - before
+		set tQueueSizeLimit = $LI(tQueueStats,1) // zero if unlimited
+
+		if tQtyLost > 0 {
+			$$$LOGERROR("Data loss ("_tQtyLost_" elements). Internal queue size insufficient for incoming data rate.")
+		} elseif tQueueSizeLimit > 0 {
+			set tQueueUsage = $LI(tQueueStats,4) / tQueueSizeLimit // Queue size before processing / Max allowed size
+			if tQueueUsage > 0.5 {
+				$$$LOGWARNING("Internal queue utilized at greater than 50% capacity: "_tQueueUsage)
+			}
+		}
+
+		if (..MaxBatchSize '= 0) && (tQty >= ..MaxBatchSize) {
+			set tCurrentQueueSize = $LI(tQueueStats,6)
+			set tQueueItemsProcessed = $LI(tQueueStats,4) - tCurrentQueueSize // Queue size before - after processing
+			$$$LOGWARNING("Batch size capacity warning. Performance may degrade. Current queue items processed = "_tQueueItemsProcessed_". Current internal queue size = "_tCurrentQueueSize_".")
+		}
+
+		for i=1:1:tQty {
+
+			// Ensure that this is set even in the event of error.
+			// (If an error occurs within ProcessInput(), then 
+			// %WaitForNextCallInterval should hopefully still be set.)
+			set ..BusinessHost.%WaitForNextCallInterval = 1 
+
+			set tSC = ..BusinessHost.ProcessInput($LI(tBatch,i))  
+
+			if $$$ISERR(tSC) {
+
+				$$$TRACE("Error encountered processing adapter output, continuing... : "_$SYSTEM.Status.GetErrorText(tSC))
+				set tProcessingErrors = tProcessingErrors + 1
+
+			} else {
+
+				set tQtyProcessed = tQtyProcessed + 1
+			}
+
+		}
+
+		// *********
+
+		// Again, ensure that %WaitForNextCallInterval remains set.
+		set ..BusinessHost.%WaitForNextCallInterval = 1
+			
+		Quit:$$$ISERR(tSC)
+
+	} catch (e) {
+		Set tSC = e.AsStatus()
+	}
+
+	set tEndTime = $ZTimestamp
+	set tElapsedTime = ##class(%SYSTEM.SQL).DATEDIFF("ms",tStartTime,tEndTime) / 1000.0 // in seconds
+
+	if $$$ISERR(tSC) {
+
+		try {
+
+			#dim tTmpConn as %Integer = -1
+			#dim tTmpReset as %Integer = 0
+			
+			do ..Client.GetClientState("",.tTmpConn,"","",.tTmpReset)
+			
+			set ..IsConnected = tTmpConn
+			set ..ResetClientFlag = tTmpReset
+		
+		} catch (e) {
+			set ..IsConnected = 0
+			set ..ResetClientFlag = 0
+		}
+
+		if ..LastReportedError '= tSC {
+
+			if ##class(OPCUA.Utils).ErrTextIsTypeInfo($SYSTEM.Status.GetErrorText(tSC)) {
+
+				//$$$LOGINFO($SYSTEM.Status.GetErrorText(tSC))
+				$$$TRACE($SYSTEM.Status.GetErrorText(tSC))
+				set ..BusinessHost.%WaitForNextCallInterval = 0
+
+			} elseif ##class(OPCUA.Utils).AreSimilarOpcuaDisconnectErrors($SYSTEM.Status.GetErrorText(..LastReportedError),$SYSTEM.Status.GetErrorText(tSC)) {
+
+				$$$TRACE("Error encountered : "_$SYSTEM.Status.GetErrorText(tSC)_" : "_..Client.GetClientStateString())
+				set ..BusinessHost.%WaitForNextCallInterval = 1	
+
+			} else {
+
+				$$$LOGERROR("Error encountered : "_$SYSTEM.Status.GetErrorText(tSC)_" : "_..Client.GetClientStateString())
+				set ..BusinessHost.%WaitForNextCallInterval = 1	
+			}
+			set ..LastReportedError = tSC
+
+		} else {
+			$$$TRACE("Error encountered : "_$SYSTEM.Status.GetErrorText(tSC)_" : "_..Client.GetClientStateString())
+		}
+
+		$$$SetHostMonitor(..BusinessHost.%ConfigName,$$$eMonitorStatus,"Error")
+
+		if ##class(%SYSTEM.SQL).DATEDIFF("ms",..ConnectionRetryEndTime,$ZTimestamp) > 0 {
+			$$$LOGERROR("Error encountered : Maximum time since a successful response exceeded : "_$SYSTEM.Status.GetErrorText(tSC))
+			if ..IsConnected {
+				set ..IsConnected = 0
+			}
+			set ..BusinessHost.%QuitTask = 1
+			return tSC
+		}
+
+	} else {
+	
+		set ..IsConnected = 1
+
+		set ..LastReportedError = tSC // $$$OK
+		set ..BusinessHost.%WaitForNextCallInterval = 1
+		
+		if tProcessingErrors > 0 {
+
+			$$$LOGWARNING(tProcessingErrors_" processing error(s) encountered concurrent with the successful entry of "_tQtyProcessed_" record(s) : "_..Client.GetClientStateString())
+
+			set ..QtySequentialEmptyResults = 0
+
+		} elseif tQtyProcessed > 0 {
+
+			//$$$TRACE("1 record entered in "_tElapsedTime_" seconds.")
+			$$$TRACE(tQtyProcessed_" record(s) entered in "_tElapsedTime_" seconds with no errors encountered : "_..Client.GetClientStateString())	
+
+			set ..QtySequentialEmptyResults = 0
+
+		} else {
+		
+			// No results were returned. Is the client connected?
+			try {
+				#dim tTmp as %Integer = -1
+				do ..Client.GetClientState("",.tTmp)
+				set ..IsConnected = tTmp
+			} catch (e) {
+				set ..IsConnected = 0
+			}
+
+			if ..IsConnected = 0 {
+
+				$$$LOGWARNING("Connection lost : "_..Client.GetClientStateString())
+
+			} elseif ..ReestablishOnEmptyResult > 0 {
+
+				$$$TRACE(tQtyProcessed_" record(s) entered in "_tElapsedTime_" seconds with no errors encountered : "_..Client.GetClientStateString())	
+				
+				// Connection may have been dropped and should perhaps be reestablished 
+				set ..QtySequentialEmptyResults = ..QtySequentialEmptyResults + 1
+
+				if ..QtySequentialEmptyResults >= ..ReestablishOnEmptyResult {
+
+					$$$LOGWARNING("Maximum number of sequential empty results exceeded. Disconnecting.")	
+
+					try {
+						set tSC = ..Client.ReadBulkClear(..QueryHandle)
+					} catch (e) {
+						set tSC = e.AsStatus()
+					}
+
+					if $$$ISERR(tSC) {
+						$$$TRACE("Ignoring error encountered when deleting old subscription : "_$SYSTEM.Status.GetErrorText(tSC))
+					}
+
+					try {
+						set tSC = ..Client.Disconnect()
+					} catch (e) {
+						set tSC = e.AsStatus()
+					}
+
+					if $$$ISERR(tSC) {
+						$$$TRACE("Ignoring error encountered when disconnecting : "_$SYSTEM.Status.GetErrorText(tSC))
+					}
+
+					set ..IsConnected = 0
+					set ..ResetClientFlag = 1
+					set ..QtySequentialEmptyResults = 0
+				}
+
+			} else {
+
+				$$$TRACE(tQtyProcessed_" record(s) entered in "_tElapsedTime_" seconds with no errors encountered : "_..Client.GetClientStateString())	
+			}
+
+		}
+
+		$$$SetHostMonitor(..BusinessHost.%ConfigName,$$$eMonitorStatus,"OK")
+
+		set ..ConnectionRetryEndTime = ##class(%SYSTEM.SQL).DATEADD("s",..ConnectionRetryTimeout,$ZTimestamp)
+	} 
+
+	Quit $$$OK
+]]></Implementation>
+</Method>
+
+<Method name="OnTearDown">
+<Description>
+Used internally to disconnect the OPC-UA client.</Description>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	try {
+		do ..Client.ReadBulkClear(..QueryHandle)	// Perhaps unnecessary
+	} catch (e) {}
+
+	return ##super()
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="OPCUA.Client">
+<Description><![CDATA[
+This class implements an interface to portions of the open source open62541 library,
+allowing for the creation of two different types of data feeds that can be used
+to import data into IRIS from OPC UA servers located locally, across a LAN, and/or
+over the Internet. Security features such as encrypted 
+transmission and password authentication are not implemented at this time.
+Details about open62541 can be found at https://open62541.org.
+This client provides the ability to connect to an OPC UA server locally,
+across a LAN, or over the Internet. 
+<ul>
+<li>Periodic Polling Data Feeds</li> -- Data feeds of this type are implemented as 
+a simple request to an OPC UA server asking for a set of one or more node attributes 
+to be returned. The query is first declared to this OPC UA client using
+<method>ReadBulkSetup</method> and subsequently, <method>ReadBulkPoll</method> can 
+be used poll the server with a TCP/IP request in order to obtain the results
+representing a snapshot in time. <method>ReadBulkPoll</method> will return one 
+complete row of results each time it is executed, and can be used
+as many times as is necessary. Later, when IRIS has finished using the feed, 
+the query specification can be deleted from the client
+using the method <method>ReadBulkClear</method>.</li>
+<li>Subscribing Data Feeds</li> -- Data feeds of this type are implemented using 
+the OPC UA subscription framework whereby an OPC UA server is tasked with 
+monitoring one or more variables held within it, and reporting any changes to 
+those variables back to the requesting client. Feeds of this type can be declared
+using <method>CreateSubscriptionSet</method>, and subsequently, the client may
+request notfication of any recent changes with <method>PollSubscriptionSet</method>.
+Later, when IRIS has finisihed using the feed, the subscription can be deleted on
+the server using <method>DeleteSubscriptionSet</method>.</li>
+</ul>]]></Description>
+<IncludeCode>%callout,OPCUA.Constants,Ensemble</IncludeCode>
+<Super>%RegisteredObject</Super>
+<TimeChanged>67556,48611.4601595</TimeChanged>
+<TimeCreated>67556,48611.4601595</TimeCreated>
+
+<Parameter name="DOMAIN">
+<Description>
+Error Text Domain</Description>
+<Default>OPCUA</Default>
+</Parameter>
+
+<Property name="Handle">
+<Description>
+The handle to the library's instance of the OPC UA client</Description>
+<Type>%Integer</Type>
+<InitialExpression>0</InitialExpression>
+<Private>1</Private>
+</Property>
+
+<Method name="DecodeError">
+<Description>
+Used internally to interpret error codes returned by the client.</Description>
+<Final>1</Final>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>list:%String</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	Set tType=$List(list,2),tCode=$List(list,3),tMsgTxt=$List(list,4)
+	If tType=$$$ErrorTypeNone {
+		Set tTypeTxt=$$$Text("No Error")
+	} elseif tType=$$$ErrorTypeInfo {
+		Set tTypeTxt=$$$Text("Incomplete w/o Err")
+	} elseif tType=$$$ErrorTypeApp {
+		Set tTypeTxt=$$$Text("Application Error")
+	} elseif tType=$$$ErrorTypeCallin {
+		Set tTypeTxt=$$$Text("Callin Error")
+	} elseif tType=$$$ErrorTypeOPCUA {
+		Set tTypeTxt=$$$Text("OPC Error")
+	} elseif tType=$$$ErrorTypeClient {
+		Set tTypeTxt=$$$Text("Client Error")
+	} elseif tType=$$$ErrorTypeServer {
+		Set tTypeTxt=$$$Text("Server Error")
+	} elseif tType=$$$ErrorTypeUnknown {
+		Set tTypeTxt="Unknown Error"
+	} else {
+		Set tTypeTxt=$$$Text("Undefined Error")
+	}
+	
+	//Quit $$$ERROR($$$OPCUACLIENT,tCode,tTypeTxt,tMsgTxt)
+	Quit $$$ERROR($$$OPCUACLIENT,tMsgTxt)
+]]></Implementation>
+</Method>
+
+<Method name="InitializeLibrary">
+<Description>
+Loads the IrisOPCUA library if necessary</Description>
+<Final>1</Final>
+<Internal>1</Internal>
+<ClassMethod>1</ClassMethod>
+<Private>1</Private>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[	return ##class(OPCUA.Utils).Initialize()
+]]></Implementation>
+</Method>
+
+<Method name="Create">
+<Description>
+Private, Create a client</Description>
+<Final>1</Final>
+<Internal>1</Internal>
+<Private>1</Private>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+
+		#; Ensure library initialization
+		Set tSC = ..InitializeLibrary()
+		Quit:$$$ISERR(tSC)
+
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfCreateClientB,"")
+        
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+        
+        #; Cache Handle of the Client instance
+        Set ..Handle=$List(tRetval,2)
+		
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="Destroy">
+<Description>
+Private, Destroy a client</Description>
+<Final>1</Final>
+<Internal>1</Internal>
+<Private>1</Private>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+		
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfDestroyClientB,"",$listbuild(..Handle))
+        
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+        
+        #; Cache Handle of the Client instance
+        Set ..Handle=0
+		
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="GetStatusCodeName">
+<Description>
+Outputs the name of a corresponding UA status code.</Description>
+<Final>1</Final>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>*StatusCodeName:%String,StatusCode:%Integer</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+		
+		#; Ensure library initialization
+		Set tSC = ..InitializeLibrary()
+		Quit:$$$ISERR(tSC)
+
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfGetStatusCodeNameB,"",$LB(StatusCode))
+        
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+        #; Set output variables
+        Set StatusCodeName = $LI(tRetval,2)
+        
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="GetClientStateName">
+<Description>
+Outputs the name of a corresponding code indicating the client state.</Description>
+<Final>1</Final>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>*ClientStateName:%String,ClientStateCode:%Integer</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+		
+		#; Ensure library initialization
+		Set tSC = ..InitializeLibrary()
+		Quit:$$$ISERR(tSC)
+
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfGetClientStateNameB,"",$LB(ClientStateCode))
+        
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+        #; Set output variables
+        Set ClientStateName = $LI(tRetval,2)
+        
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="GetChannelStateName">
+<Description>
+Outputs the name of a corresponding code indicating the secure channel state.</Description>
+<Final>1</Final>
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[ChannelStateCode:%Integer,&pSC:%Status=""]]></FormalSpec>
+<ReturnType>%String</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim tRetName As %String = ""
+	
+	Try {
+		
+		#; Ensure library initialization
+		Set tSC = ..InitializeLibrary()
+		Quit:$$$ISERR(tSC)
+
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfGetChannelStateName,"",$LB(ChannelStateCode))
+        
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+        #; Set output variables
+        Set tRetName = $LI(tRetval,2)
+
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+
+	set pSC = tSC
+	return tRetName
+]]></Implementation>
+</Method>
+
+<Method name="GetSessionStateName">
+<Description>
+Outputs the name of a corresponding code indicating the session state.</Description>
+<Final>1</Final>
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[SessionStateCode:%Integer,&pSC:%Status=""]]></FormalSpec>
+<ReturnType>%String</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim tRetName As %String = ""
+	
+	Try {
+		
+		#; Ensure library initialization
+		Set tSC = ..InitializeLibrary()
+		Quit:$$$ISERR(tSC)
+
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfGetSessionStateName,"",$LB(SessionStateCode))
+        
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+        #; Set output variables
+        Set tRetName = $LI(tRetval,2)
+
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+
+	set pSC = tSC
+	return tRetName
+]]></Implementation>
+</Method>
+
+<Method name="GetSimpleErrorCodeName">
+<Description>
+Outputs the name of the corresponding error code. </Description>
+<Final>1</Final>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>*ErrorName:%String,ErrorCode:%Integer</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+		
+		#; Ensure library initialization
+		Set tSC = ..InitializeLibrary()
+		Quit:$$$ISERR(tSC)
+
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfGetSimpleErrorCodeNameB,"",$LB(ErrorCode))
+        
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+        #; Set output variables
+        Set ErrorName = $LI(tRetval,2)
+        
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="%OnNew">
+<Description>
+This callback method is invoked by the %New method to provide 
+notification that a new instance of an object is being created.</Description>
+<Final>1</Final>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="Initialize">
+<Description>
+This function must be called prior to using most functions of this class.
+It is usually appropriate to call this function immediately after
+instantiating the object.</Description>
+<Final>1</Final>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+		
+		#; Create the client
+		Set tSC=..Create()
+	
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="GetClientState">
+<Description>
+Outputs the client state and connection status</Description>
+<Final>1</Final>
+<FormalSpec>*ConnectionStatus:%Integer,*IsConnected:%Integer,*SecureChannelStatus:%Integer,*SessionStatus:%Integer,*ClientResetFlag:%Integer</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+		
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfGetClientStateD,"",$LB(..Handle))
+
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+        #; Set output variables
+        Set ConnectionStatus = $LI(tRetval,2)
+        Set IsConnected = $LI(tRetval,3)
+        Set SecureChannelStatus = $LI(tRetval,4)
+        Set SessionStatus = $LI(tRetval,5)
+		Set ClientResetFlag = $LI(tRetval,6)
+        
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="GetClientStateString">
+<Description>
+Outputs a human-readable string describing the client state and connection status</Description>
+<Final>1</Final>
+<FormalSpec><![CDATA[&pSC:%Status=""]]></FormalSpec>
+<ReturnType>%String</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim tRetStr As %String = ""
+	#dim e As %Exception.AbstractException	
+
+	Try {
+		
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfGetClientStateD,"",$LB(..Handle))
+
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+        #; Set output variables
+        Set ConnectionStatus = $LI(tRetval,2)
+        Set IsConnected = $LI(tRetval,3)
+        Set SecureChannelStatus = $LI(tRetval,4)
+        Set SessionStatus = $LI(tRetval,5)
+		Set ResetFlag = $LI(tRetval,6)
+        
+		#dim tConnStatusDesc as %String
+		do ##class(OPCUA.Client).GetStatusCodeName(.tConnStatusDesc,ConnectionStatus)
+
+		set tRetStr = "ChannelStatus='"_..GetChannelStateName(SecureChannelStatus)_"', SessionStatus='"_..GetSessionStateName(SessionStatus)_"', ConnectionStatus='"_tConnStatusDesc_"'"
+		if ResetFlag = 1 {
+			set tRetStr = tRetStr_" (Client reset scheduled)"
+		}
+
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+
+	set pSC = tSC
+	return tRetStr
+]]></Implementation>
+</Method>
+
+<Method name="SetLogFile">
+<Description>
+Sets logfile</Description>
+<Final>1</Final>
+<FormalSpec>LogFileName:%String</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfSetLogFile,"",$LB(LogFileName))
+		
+		#; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="SetupClient">
+<Description>
+Performs necessary setup functions prior to client's connecting
+to a server. Should be called subsequently to Initialize().</Description>
+<Final>1</Final>
+<FormalSpec>ConnectionTimeout:%Integer=3000,MessageSecurityMode:%Integer=1,ClientURI="",CertificatePathname:%String="",PrivateKeyPathname:%String="",TrustListDir:%String="",RevocationListDir:%String="",ResetFlag:%Integer=0</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+
+		#; Set the unicode flag for the connector
+		set tVersionIsUnicode = $System.Version.IsUnicode()
+
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfSetupClientC,"",$LB(..Handle,ConnectionTimeout,MessageSecurityMode,ClientURI,CertificatePathname,PrivateKeyPathname,TrustListDir,RevocationListDir,tVersionIsUnicode,ResetFlag))
+		
+		#; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="%OnClose">
+<Description>
+This callback method is invoked by the %Close method to provide 
+notification that the current object is being closed.</Description>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[	Quit ..Destroy()
+]]></Implementation>
+</Method>
+
+<Method name="Connect">
+<Description>
+Creates a connection to the specified URL.</Description>
+<Final>1</Final>
+<FormalSpec>url:%String,Username:%String="",Password:%String=""</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	// Notice that JN placed the URL in the %OnNew() Method
+
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+		
+		#; Call the library entry point
+		if Username = "" {
+
+			// Anonymous
+			Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfConnectB,"",$LB(..Handle,url))
+
+		} else {
+
+			Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfConnectUser,"",$LB(..Handle,url,Username,Password))
+		}
+                
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="Disconnect">
+<Description>
+Disconnects a client from a server that it is connected to.</Description>
+<Final>1</Final>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+		
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfDisconnectB,"",$LB(..Handle))
+    
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="Browse">
+<Final>1</Final>
+<FormalSpec>*Results:%List,NodeTypes:%List,NodeNamespaces:%List,NodeIds:%List</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+		
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfBrowse,"",$LB(..Handle,NodeTypes,NodeNamespaces,NodeIds))
+  
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+        #; Set output variables
+        //Set Results = $LI(tRetval,2)
+        Set Results = tRetval
+		        
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<UDLText name="T">
+<Content><![CDATA[
+// --------------------------------------------------------------------------------------------
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// Functions for use with Periodic Polling Data Feeds
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// --------------------------------------------------------------------------------------------
+
+]]></Content>
+</UDLText>
+
+<Method name="ReadBulkSetup">
+<Description><![CDATA[
+Prepares a query that can be subsequently executed repeatedly. 
+The data elements requested are specified in four lists of equal length:
+<ul>
+<li>NodeTypes -- A list of numeric values indicating the type of node id 
+that is used to identify the node. (e.g. $$$OpcuaNodeIdTypeString means 
+a string is used to identify the node.)</li>
+<li>NodeNamespaces -- A list of numeric values indicating the namespace 
+for each requested node.</li>
+<li>NodeIds -- A list of numeric or string values indicating the primary
+identifier used to identify each requested node.</li>
+<li>NodeAttributes -- A kist of numeric values indicating the attribute 
+to be returned for each requested node. (e.g. $$$OpcuaAttributeValue 
+means that the value attribute should be returned.)
+</ul>
+The QueryHandle is an output parameter that can subsequently
+be used to identify this particular query so that it can be executed
+and results for it obtained; this function simply declares the query.
+(This function is not deprecated, but <method>ReadBulkSetupC</method> 
+is preferred.)]]></Description>
+<Final>1</Final>
+<FormalSpec>*QueryHandle:%Integer,NodeTypes:%List,NodeNamespaces:%List,NodeIds:%List,NodeAttributes:%List</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+		
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfReadBulkSetup,"",$LB(..Handle,NodeTypes,NodeNamespaces,NodeIds,NodeAttributes))
+  
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+        #; Set output variables
+        Set QueryHandle = $LI(tRetval,2)
+        
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="ReadBulkSetupB">
+<Description><![CDATA[
+[DEPRECATED] Prepares a query that can be subsequently executed repeatedly.
+The data elements requested are specified in two lists of equal length, a
+a list of lists representing serialized node id objects, and a numeric list 
+of attribute identifiers.
+(This function is deprecated; <method>ReadBulkSetupC</method> is preferred.)]]></Description>
+<Final>1</Final>
+<FormalSpec>*QueryHandle:%Integer,NodeIds:%List,NodeAttributes:%List</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+		
+		#dim NodeIdCLs as %List
+
+		Set NodeIdCLs = NodeIds
+
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfReadBulkSetupB,"",$LB(..Handle,NodeIdCLs,NodeAttributes))
+  
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+        #; Set output variables
+        Set QueryHandle = $LI(tRetval,2)
+        
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="ReadBulkSetupC">
+<Description><![CDATA[
+Prepares a query that can be subsequently executed repeatedly.
+Data elements requested are detailed in a particular specification 
+format that is the output of the OPCUA.DataSource framework.
+Such specifications are in the form of multidimensional lists which 
+feature three top-level elements: (1) the DataSource name, 
+(2) the name of the global on which the results will be saved, and 
+(3) a multidimensional sublist identifying the property elements. 
+For the purposes of this function, only the sublist of element 
+three is relevant. That sublist begins with an empty element, which 
+is then followed by other elements, each further element itself 
+being a list, that list with the elements:
+<ul>
+<li>The type of the element: 1 = primitive, 2 = standard OPC UA</li>
+<li>One as pPropertyPath_"."_oProp.Name e.g. "[MyDataSource2].Temperature"</li>
+<li>The namespace</li>
+<li>The node name or number</li>
+<li>The attribute id number</li>
+</ul>
+For the purposes of this function, only the last three 
+elements---the namespace, the node name/number, and attribute id---are
+relevant.]]></Description>
+<Final>1</Final>
+<FormalSpec><![CDATA[*QueryHandle:%Integer,&Specification:%List]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	// Specifications are supplied in the form of %List
+	// 1. DataSource name
+	// 2. The name of the global on which to save the results
+	// 3. A multidimensional %List of property elements.
+	//		1. The first element is perhaps usually null (or the name of the class if a subclass?)
+	//		2. Property elements take the form of a list with elements:
+	//			1. The type of element: 1 = Primitives, 2 = Standard OPCUA, 3 = ?
+	//			2. The pPropertyPath_"."_oProp.Name e.g. "[MyDataSource2].Temperature"
+	//			3. The namespace
+	//			4. The node name, a string NodeId identifier
+	//			5. The AttributeId
+
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+		
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfReadBulkSetupC,"",$LB(..Handle,Specification))
+  
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+        #; Set output variables
+        Set QueryHandle = $LI(tRetval,2)
+        
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="ReadBulkPoll">
+<Description><![CDATA[
+Executes a query previously prepared with either ReadBulkSetup(),
+ReadBulkSetupB(), or ReadBulkSetupC(). Results are returned as a
+<class>%List</class> of primitives without time stamps.
+(This function is not deprecated, but <method>ReadBulkPollC</method> 
+is preferred.)]]></Description>
+<Final>1</Final>
+<FormalSpec>*Results:%List,QueryHandle:%Integer</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+		
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfReadBulkPoll,"",$LB(..Handle,QueryHandle))
+
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+        Set Results = tRetval
+        
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+		
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="ReadBulkPollB">
+<Description><![CDATA[
+Executes a query previously prepared with either ReadBulkSetup() 
+ReadBulkSetupB(), or ReadBulkSetupC(). Results are returned as a <class>%List</class>
+of <class>%List</class> for where each sublist consists of a 
+requested primitive accompanied by its source timestamp.
+(This function is not deprecated, but <method>ReadBulkPollC</method> 
+is preferred.)]]></Description>
+<Final>1</Final>
+<FormalSpec>*Results:%List,QueryHandle:%Integer</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+		
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfReadBulkPollB,"",$LB(..Handle,QueryHandle))
+
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+        Set Results = tRetval
+        
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="ReadBulkPollC">
+<Description><![CDATA[
+Executes a query previously prepared with either ReadBulkSetup() 
+ReadBulkSetupB(), or ReadBulkSetupC(). Results are returned as a <class>%List</class>
+where each returned element is a <class>%List</class> representing 
+a subclass of <class>OPCUA.Types.AbstractDataValue</class>.]]></Description>
+<Final>1</Final>
+<FormalSpec>*Results:%List,QueryHandle:%Integer</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+		
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfReadBulkPollC,"",$LB(..Handle,QueryHandle,"",""))
+
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+        Set Results = tRetval
+        
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="ReadBulkClear">
+<Description>
+Deletes a previously prepared query specification.</Description>
+<Final>1</Final>
+<FormalSpec>QueryHandle:%Integer</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+		
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfReadBulkClear,"",$LB(..Handle,QueryHandle))
+    
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<UDLText name="T">
+<Content><![CDATA[
+// --------------------------------------------------------------------------------------------
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// Functions for use with Subscribing Data Feeds
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// --------------------------------------------------------------------------------------------
+
+]]></Content>
+</UDLText>
+
+<Method name="CreateSubscriptionSet">
+<Description><![CDATA[
+[DEPRECATED] Creates and OPC UA subscription so as to receive updates 
+regarding changes made to monitored items on a server. The data elements 
+requested are specified in two lists of equal length, a list of lists 
+representing serialized node id objects, and a numeric list of attribute 
+identifiers. (This function is deprecated; 
+<method>CreateSubscriptionSetB</method> is preferred.)]]></Description>
+<Final>1</Final>
+<FormalSpec><![CDATA[*QueryHandle:%Integer,NodeIds:%List,NodeAttributes:%List,&PublishingInterval:%Double,&LifetimeCount:%Integer,&MaxKeepAliveCount:%Integer,MaxNotificationsPerPublish:%Integer]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+		
+		#dim NodeIdCLs as %List
+
+		Set NodeIdCLs = NodeIds
+
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfCreateSubscription,"",$LB(..Handle,NodeIdCLs,NodeAttributes,PublishingInterval,LifetimeCount,MaxKeepAliveCount,MaxNotificationsPerPublish))
+  
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+        #; Set output variables
+        Set QueryHandle = $LI(tRetval,2)
+		Set PublishingInterval = $LI(tRetval,3)	// server-accepted value
+		Set LifetimeCount = $LI(tRetval,4)		// server-accepted value
+		Set MaxKeepAliveCount = $LI(tRetval,5)	// server-accepted value
+
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="CreateSubscriptionSetB">
+<Description>
+Creates an OPC UA subscription so as to receive updates regarding 
+changes made to monitored items on a server. Data elements for which
+notifications are requested are detailed in a particular specification 
+format that is the output of the OPCUA.DataSource framework.
+The details of this format are the same as those indicated regarding
+the ReadBulkSetupC() function. The last four arguments of this 
+function, the PublishingInterval, the LifetimeCount, the 
+MaxKeepAliveCount, and the MaxNotificationsPerPublish are defined in
+section 5.13.2.2 of the OPC UA specification.</Description>
+<Final>1</Final>
+<FormalSpec><![CDATA[*QueryHandle:%Integer,Specification:%List,&PublishingInterval:%Double,&LifetimeCount:%Integer,&MaxKeepAliveCount:%Integer,MaxNotificationsPerPublish:%Integer,SamplingInterval:%Integer,QueueSize:%Integer,MaxInternalQueueSize:%Integer]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+		
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfCreateSubscriptionB,"",$LB(..Handle,Specification,PublishingInterval,LifetimeCount,MaxKeepAliveCount,MaxNotificationsPerPublish,SamplingInterval,QueueSize,MaxInternalQueueSize))
+  
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+        #; Set output variables
+        Set QueryHandle = $LI(tRetval,2)
+		Set PublishingInterval = $LI(tRetval,3)	// server-accepted value
+		Set LifetimeCount = $LI(tRetval,4)		// server-accepted value
+		Set MaxKeepAliveCount = $LI(tRetval,5)	// server-accepted value
+		Set SamplingInterval = $LI(tRetval,7)	// maximum of server-accepted values
+		Set QueueSize = $LI(tRetval,8)			// minimum of server-accepted values
+
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="PollSubscriptionSet">
+<Description><![CDATA[
+Polls a server for changes to a subscription set that has already been 
+created using <method>CreateSubscriptionSet</method> or 
+<method>CreateSubscriptionSetB</method>.
+Results are returned as a <class>%List</class>
+of <class>%List</class> for where each sublist consists of an
+output list of elements similar to that from the polling utility.
+Notice, here, that it is the sublist, and not the main list that bears
+resemblance to the output of some of the polling functions. This is
+because, unlike the polling functions, this function can return 
+multiple rows per invocation.]]></Description>
+<Final>1</Final>
+<FormalSpec>*Results:%List,QueryHandle:%Integer,PollingTimeout:%Integer=500,MaxLines:%Integer=0,ClientRegenOpt:%Integer=0</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+		
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfPollSubscription,"",$LB(..Handle,QueryHandle,PollingTimeout,MaxLines,ClientRegenOpt))
+
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+        Set Results = tRetval
+        
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="DeleteSubscriptionSet">
+<Description>
+Deletes a set of subscriptions with a given server.</Description>
+<Final>1</Final>
+<FormalSpec>QueryHandle:%Integer</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+		
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfDeleteSubscription,"",$LB(..Handle,QueryHandle))
+    
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<UDLText name="T">
+<Content><![CDATA[
+// --------------------------------------------------------------------------------------------
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// Miscellaneous
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// --------------------------------------------------------------------------------------------
+
+]]></Content>
+</UDLText>
+
+<Method name="ReadValueAttribute">
+<Description>
+Reads the current value from a node on a server.</Description>
+<Final>1</Final>
+<FormalSpec>*Results:%List,NodeId,NodeNamespace:%Integer,NodeIdType:%Integer=0</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+		
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfReadAttribute,"",$LB(..Handle,NodeId,NodeNamespace,NodeIdType,$$$OpcuaAttributeValue))
+
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+        Set Results = tRetval
+        
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="WriteValueAttribute">
+<Description><![CDATA[
+Writes a simple value to a single node on a server.
+<ul>
+<li>Datum -- The data element to be written. 
+<li>DataType -- A numeric value indicating the data type of the 
+data element to be written. (e.g. $$$OpcuaDataTypeString, 
+$$$OpcuaDataTypeInt32, etc.)
+<li>NodeId -- A numeric or string values indicating the primary
+identifier used to identify the requested node.</li>
+<li>NodeNamespace -- The namespace of the requested node.</li>
+<li>NodeIdType -- A numeric value indicating the data type used for
+the NodeId argument, either a string or an integer. (Use 
+$$$OpcuaNodeIdTypeString or $$$OpcuaNodeIdTypeNumeric.)</li>
+</ul>]]></Description>
+<Final>1</Final>
+<FormalSpec>Datum,DataType:%Integer,NodeId,NodeNamespace:%Integer,NodeIdType:%Integer=0</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {
+		
+		#; Call the library entry point
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfWriteAttribute,"",$LB(..Handle,Datum,DataType,NodeId,NodeNamespace,NodeIdType,$$$OpcuaAttributeValue))
+
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	
+	Quit tSC
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Routine name="OPCUA.Constants" type="INC" timestamp="65877,36506.272842"><![CDATA[
+
+
+#; *** zf Function Ordinals ***
+
+#define zfTest								1
+#define zfTestGetInt						2
+#define zfTestStatusCodeName				3
+#define zfReadLog							4
+#define zfGetStatusCodeNameB				5
+#define zfGetClientStateNameB				6
+#define zfGetSimpleErrorCodeNameB			7
+#define zfCreateClientB						8
+#define zfGetClientStateB					9
+#define zfGetClientStateC					10
+#define zfSetupClientB						11
+#define zfDestroyClientB					12
+#define zfConnectB							13
+#define zfDisconnectB						14
+#define zfReadBulkSetup						15
+#define zfReadBulkSetupB					16
+#define zfReadBulkSetupC					17
+#define zfReadBulkPoll						18
+#define zfReadBulkPollB						19
+#define zfReadBulkPollC						20
+#define zfReadBulkClear						21
+#define zfCreateSubscription				22
+#define zfCreateSubscriptionB				23
+#define zfPollSubscription					24
+#define zfDeleteSubscription				25
+#define zfReadAttribute						26
+#define zfReadValueAttribute				27
+#define zfWriteAttribute					28
+#define zfWriteValueAttributeIntB			29
+#define zfWriteValueAttributeStrB			30
+#define zfDateConvOPCUA2HOROLOG				31
+#define zfDateConvHOROLOG2OPCUA				32
+#define zfDateConvOPCUA2ODBC				33
+#define zfDateConvODBC2OPCUA				34
+#define zfDateConvOPCUA2UNIX				35
+#define zfDateConvUNIX2OPCUA				36
+
+#define zfGetClientStateD					37
+#define zfConnectUser                       38
+#define zfSetupClientC						39
+#define zfGetChannelStateName				40
+#define zfGetSessionStateName				41
+#define zfBrowse            				42
+#define zfBrowseNext        				43
+#define zfVersion           				44
+#define zfGetUStr           				45
+#define zfSetLogFile                        46
+
+
+
+#; *** OPC UA Constants ***
+
+#define OpcuaDateTimeFormatHOROLOG				0
+#define OpcuaDateTimeFormatOPCUA				1
+#define OpcuaDateTimeFormatODBC					2
+#define OpcuaDateTimeFormatUNIX					3
+
+#define OpcuaNodeIdTypeNumeric					0
+#define OpcuaNodeIdTypeString					3
+#define OpcuaNodeIdTypeGUID						4
+#define OpcuaNodeIdTypeByteString				5
+
+#define OpcuaVariantIsScalar					0
+#define OpcuaVariantIsEmptyScalar				1
+#define OpcuaVariantIsEmptyArray				2
+#define OpcuaVariantIsArray						3
+
+#define OpcuaDataTypeBoolean					0
+#define OpcuaDataTypeSByte						1
+#define OpcuaDataTypeByte						2
+#define OpcuaDataTypeInt16						3
+#define OpcuaDataTypeUInt16						4
+#define OpcuaDataTypeInt32						5
+#define OpcuaDataTypeUInt32						6
+#define OpcuaDataTypeInt64						7
+#define OpcuaDataTypeUInt64						8
+#define OpcuaDataTypeFloat						9
+#define OpcuaDataTypeDouble						10
+#define OpcuaDataTypeString						11
+#define OpcuaDataTypeDateTime					12
+#define OpcuaDataTypeGUID						13
+#define OpcuaDataTypeByteString					14
+#define OpcuaDataTypeXMLElement					15
+#define OpcuaDataTypeNodeId						16
+#define OpcuaDataTypeExpandedNodeId				17
+#define OpcuaDataTypeStatusCode					18
+#define OpcuaDataTypeQualifiedName				19
+#define OpcuaDataTypeLocalizedText				20
+#define OpcuaDataTypeExtensionObject			21
+#define OpcuaDataTypeDataValue					22
+#define OpcuaDataTypeVariant					23
+#define OpcuaDataTypeDiagnosticInfo				24
+#;#define OpcuaDataTypeDecimal					25
+#;#define OpcuaDataTypeEnum						26
+#;#define OpcuaDataTypeStructure				27
+#;#define OpcuaDataTypeOptStruct				28
+#;#define OpcuaDataTypeUnion					29
+#;#define OpcuaDataTypeBitFieldCluster			30
+
+#define OpcuaAttributeNodeId					1
+#define OpcuaAttributeNodeClass					2
+#define OpcuaAttributeBrowseName				3
+#define OpcuaAttributeDisplayName				4
+#define OpcuaAttributeDescription				5
+#define OpcuaAttributeWriteMask					6
+#define OpcuaAttributeUserWriteMask				7
+#define OpcuaAttributeIsAbstract				8
+#define OpcuaAttributeSymmetric					9
+#define OpcuaAttributeInverseName				10
+#define OpcuaAttributeContainsNoLoops			11
+#define OpcuaAttributeEventNotifier				12
+#define OpcuaAttributeValue						13
+#define OpcuaAttributeDataType					14
+#define OpcuaAttributeValueRank					15
+#define OpcuaAttributeArrayDimensions			16
+#define OpcuaAttributeAccessLevel				17
+#define OpcuaAttributeUserAccessLevel			18
+#define OpcuaAttributeMinimumSamplingInterval	19
+#define OpcuaAttributeHistorizing				20
+#define OpcuaAttributeExecutable				21
+#define OpcuaAttributeUserExecutable			22
+#define OpcuaAttributeDataTypeDefinition		23
+
+#define OpcuaMessageSecurityModeNone            1
+#define OpcuaMessageSecurityModeSignAndEncrypt  3
+
+
+
+#; *** Client Codes ***
+
+#define UAClientStateDisconnected			0
+#define UAClientStateWaitingForAck			1
+#define UAClientStateConnected				2
+#define UAClientStateSecureChannel			3
+#define UAClientStateSession				4
+#define UAClientStateSessionDisconnected	5
+#define UAClientStateSessionRenewed			6
+
+
+
+#; *** From %Net.MQTT.inc (not including zf function ordinals) ***
+
+#; Error Types (UACERR_TYPE)
+#define ErrorTypeNone		0
+#define ErrorTypeInfo		1
+#define ErrorTypeApp		2
+#define ErrorTypeCallin		3
+#define ErrorTypeOPCUA		4
+#define ErrorTypeClient		5
+#define ErrorTypeServer		6
+#define ErrorTypeUnknown	7
+
+#; Miscellaneous
+#define utf8			    $$$Text("utf-8 encoded string")
+
+
+
+#; *** From %occErrors.inc ***
+
+#;#define MQTTCLIENT                               27000
+#;#define MQTTParameterMustBe                      27001
+#;#define MQTTParameterMaxLength                   27002
+#;#define MQTTParameterIllegalValue                27003
+#;#define MQTTNoCAConfigured                       27004
+#;#define MQTTIllegalQOS                           27005
+#;#define MQTTSendTimedOut                         27006
+#define OPCUACLIENT                              29000
+#define OPCUAParameterMustBe                     29001
+
+
+
+#; *** From %callout.inc ***
+
+#;#define IrisMQTTLibrary                           1037
+#;#define IrisOPCUALibrary                          1038
+#define IrisOPCUALibrary                          1039
+
+
+
+
+]]></Routine>
+
+
+<Class name="OPCUA.DataSource.Definition">
+<Description><![CDATA[
+User-specified "DataSource" classes intended for use
+with each of <class>TCPPollingService</class> and
+<class>TCPSubscriptionService</class>, and indicating the 
+data types and node ids for data requested from an
+OPC UA server, should extend this class.]]></Description>
+<Abstract>1</Abstract>
+<PropertyClass>OPCUA.DataSource.PropertyClass</PropertyClass>
+<Super>%Persistent</Super>
+<TimeChanged>67556,48669.0628495</TimeChanged>
+<TimeCreated>67556,48669.0628495</TimeCreated>
+<NoExtent>1</NoExtent>
+
+<Projection name="OPCUADataSource">
+<Type>OPCUA.DataSource.Projection</Type>
+</Projection>
+
+<Parameter name="OPCUADATASOURCE">
+</Parameter>
+
+<Parameter name="OPCUDEFAULTANAMESPACE">
+</Parameter>
+
+<Method name="SaveSourcedData">
+<ClassMethod>1</ClassMethod>
+<CodeMode>objectgenerator</CodeMode>
+<FormalSpec><![CDATA[&pSourceData:%List,*pAssignedID:%String]]></FormalSpec>
+<Implementation><![CDATA[
+    Quit:%class.Name="OPCUA.DataSource.Definition" $$$OK
+
+    // %class is an instance of %Dictionary.ClassDefinition
+    Set tStorageGlobal = %class.Storages.GetAt(1).DataLocation
+
+    Do %code.WriteLine("#dim tSC as %Status = $$$OK")
+
+    Do %code.WriteLine(" try {")
+
+    Do %code.WriteLine(" Set pAssignedID = $Increment("_tStorageGlobal_")")
+    Do %code.WriteLine(" Set "_tStorageGlobal_"(pAssignedID) = pSourceData")
+
+    Do %code.WriteLine(" } catch (e) {")
+    Do %code.WriteLine(" Set tSC = e.AsStatus()")
+    Do %code.WriteLine(" }")
+
+    Do %code.WriteLine(" Quit tSC")
+
+    Quit $$$OK
+]]></Implementation>
+</Method>
+
+<Method name="CreateObjectFromSourceData">
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[&pSourceData:%List]]></FormalSpec>
+<ReturnType>OPCUA.DataSource.Definition</ReturnType>
+<Implementation><![CDATA[
+    Do ..SaveSourcedData(pSourceData, .assignedId)
+    Quit ..%OpenId(assignedId)
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="OPCUA.DataSource.Projection">
+<Description>
+Comes with OPCUA Adapter
+https://docs.intersystems.com/irislatest/csp/docbook/Doc.View.cls?KEY=GOBJ_projections</Description>
+<Super>%Projection.AbstractProjection</Super>
+<TimeChanged>67556,48670.5662153</TimeChanged>
+<TimeCreated>67556,48670.5662153</TimeCreated>
+
+<Method name="CreateProjection">
+<Description>
+This method is invoked when a class is compiled</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[cls:%String,&params]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+    #Dim oClassDef As %Dictionary.CompiledClass
+
+    Set tSC = $$$OK
+    Try 
+    {
+        // We don't do nothing when the basic OPCUA.DataSourceDef class definition is compiled
+        Quit:cls="OPCUA.DataSource.Definition"
+
+        Set oClassDef = ##class(%Dictionary.CompiledClass).%OpenId(cls)
+        
+        Set tDataSourceName = ..GetParameterValue(oClassDef, "OPCUADATASOURCE")
+
+        If tDataSourceName=""
+        {
+            Set tSC = $$$ERROR(5001, "OPCUADATASOURCE parameter is not defined in "_cls)
+            Quit
+        }
+
+        Set tOPCUADefaultNamespace = ..GetParameterValue(oClassDef, "OPCUDEFAULTANAMESPACE")        
+
+        Set tSC = ..ProcessObj(oClassDef, tOPCUADefaultNamespace, "", "["_tDataSourceName_"]", .lConfigSpec)
+        Quit:$$$ISERR(tSC)
+
+        Set tStorageGlobal = oClassDef.Storages.GetAt(1).DataLocation
+
+        Do ..CommitOPCUAConfigSpec(tDataSourceName, cls, tStorageGlobal, lConfigSpec)
+
+    }
+    Catch (oException)
+    {
+        Set tSC = oException.AsStatus()
+    }
+    
+    Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="ProcessObj">
+<Description>
+Called recursively</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>oObj:%CompiledClass,pOPCUADefaultNamespace:%String,pDefaultNodeName:%String,pPropertyPath:%String,*lConfigSpec</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+    Set lConfigSpec=""
+
+    Set oStorageDataEntries = oObj.Storages.GetAt(1).Data.GetAt(1).Values
+
+    // We must respect the storage entries order. We can't rely on the order of properties on the class definition.
+    For i=1:1:oStorageDataEntries.Count()
+    {
+        Set tPropName = oStorageDataEntries.GetAt(i).Value
+        Continue:$Extract(tPropName,1)="%"
+
+        // But we still need the property definition for each storage entry...
+        Set bPropFound=0
+        For iProp=1:1:oObj.Properties.Count()
+        {
+            Set oProp=oObj.Properties.GetAt(iProp)
+            If oProp.Name=tPropName 
+            {
+                Set bPropFound=1
+                Quit
+            }
+        }    
+        
+        // Someone may have deleted the property from the class definition and left the old storage definition. 
+        // That is ok!!!! So we must tell the OPCUA C layer to "put nothing" in there.
+        If 'bPropFound
+        {
+            Set lConfigSpec=lConfigSpec_$LB("")
+            Continue
+        }
+        
+        // Now I have the right propert definition for the storage entry
+
+        Set tOPCUANamespace = oProp.Parameters.GetAt("OPCUANAMESPACE")
+        If tOPCUANamespace="" Set tOPCUANamespace=pOPCUADefaultNamespace
+
+        If tOPCUANamespace=""
+        {
+            Set tSC = $$$ERROR(5001, "OPCUANAMESPACE parameter is not defined for property "_oProp.Name_" from class "_cls_" and there is no OPCUADEFAULTNAMESPACE parameter defined in class "_cls)
+            Quit
+        }
+
+        if '$System.Version.IsUnicode() {
+            set tSC = ##class(OPCUA.Utils).Initialize() // required for GetUStr on 8-bit IRIS
+            Quit:$$$ISERR(tSC) // if initialization fails, report the error (GetUStr will not)
+        }
+        Set tNodeName = ""
+        Set tNodeNameRaw = oProp.Parameters.GetAt("OPCUANODENAME")
+        Set tNodeName = ##class(OPCUA.Utils).GetUStr(tNodeNameRaw)
+        //Write !,"tNodeName for property ",pPropertyPath_"."_tPropName,": ",tNodeName
+
+        // Are we overwriting the previous node name? If after overwriting, we end up with a empty node name, we will be validating it later
+        // There are more opportunities to define the node name. This may be a CustomStructure
+        If tNodeName="" Set tNodeName=pDefaultNodeName
+
+        // Same here. We will be validating if we have a node attribute ID later
+        Set tNodeAttributeId = oProp.Parameters.GetAt("OPCUAATTRIBUTEID")
+        if tNodeAttributeId="" Set tNodeAttributeId=13 // Value Attribute
+
+        // We have three types of properties: 
+        // - Primitive values (code 1)
+        // - Standard OPCUA structures (code 2)
+        // - Custom structures (just a list)
+        
+        // Primitive values are identified when the user defines a simple data type on his/her class
+        If $classmethod(oProp.Type, "%Extends", "%DataType")
+        {
+            // Using code 1 on the first parameter to say this is just a primitive 
+            Set tSC = ..CreateConfigSpecEntry(1, pPropertyPath_"."_oProp.Name, tOPCUANamespace, tNodeName, tNodeAttributeId, .lConfigSpecEntry)
+            Quit:$$$ISERR(tSC)
+        }
+        // A custom structure must inherit from OPCUA.Structure.CustomStructure
+        ElseIf $classmethod(oProp.Type, "%Extends", "OPCUA.Structure.CustomStructure") 
+        {
+            Set oPropTypeClass = ##class(%Dictionary.CompiledClass).%OpenId(oProp.Type)
+            Set tSC = ..ProcessObj(oPropTypeClass, tOPCUANamespace, tNodeName, pPropertyPath_"."_oProp.Name, .lConfigSpecEntry)
+            Quit:$$$ISERR(tSC)
+        }
+        // A standard OPCUA structure belongs to the package OPCUA.Structure (or OPCUA.Types)
+        ElseIf $Extract(oProp.Type,1,16)="OPCUA.Structure."
+        {
+            // Using code 2 on the first parameter to say this is a standard OPCUA structure
+            Set tSC = ..CreateConfigSpecEntry(2, pPropertyPath_"."_oProp.Name, tOPCUANamespace, tNodeName, tNodeAttributeId, .lConfigSpecEntry)
+            Quit:$$$ISERR(tSC)
+        }
+        ElseIf $Extract(oProp.Type,1,12)="OPCUA.Types."
+        {
+            // Using code 2 on the first parameter to say this is a standard OPCUA structure
+            Set tSC = ..CreateConfigSpecEntry(2, pPropertyPath_"."_oProp.Name, tOPCUANamespace, tNodeName, tNodeAttributeId, .lConfigSpecEntry)
+            Quit:$$$ISERR(tSC)
+        }
+        Else 
+        {
+            Set tSC = $$$ERROR(5001, "Property "_oProp.Name_" has an invalid type for OPCUA: "_oProp.Type)
+            Quit    
+        }
+
+        Set lConfigSpec=lConfigSpec_$LB(lConfigSpecEntry)
+
+    } //For
+
+    Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="CreateConfigSpecEntry">
+<Description><![CDATA[
+pEntryType can be:
+1 - If if what we will find on this Namespace>NodeName>AttributeId is an atomic value of some type
+2 - If if what we will find on this Namespace>NodeName>AttributeId is a standard complex OPCUA structure
+]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pEntryType:%Integer,pPropertyPath:%String,pOPCUANamespace:%String,pNodeName:%String,pNodeAttributeId:%String,*pConfigSpecEntry</FormalSpec>
+<Private>1</Private>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+    Set tSC = $$$OK
+    Set pConfigSpecEntry=""
+
+    Try 
+    {
+        If pNodeName=""
+        {
+            Set tSC = $$$ERROR(5001, "Property "_pPropertyPath_" does not specify an OPCUANODENAME.")
+            Quit
+        }
+
+        If pNodeAttributeId=""
+        {
+            Set tSC = $$$ERROR(5001, "Property "_pPropertyPath_" does not specify an OPCUAATTRIBUTEID.")
+            Quit
+        }
+
+        Set pConfigSpecEntry=$LB(pEntryType, pPropertyPath, pOPCUANamespace, pNodeName, pNodeAttributeId)
+    } 
+    Catch (oException)
+    {
+        Set tSC = oException.AsStatus()
+    }
+
+    Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="CommitOPCUAConfigSpec">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pDataSourceName:%String,pClassName:%String,pStorageGlobal:%String,pConfigSpec:%List</FormalSpec>
+<Private>1</Private>
+<Implementation><![CDATA[
+    Set lFullSpec=$LB(pDataSourceName, pStorageGlobal, $LB("")_pConfigSpec)
+    Set ^OPCUA.DataSource(pClassName)=lFullSpec
+]]></Implementation>
+</Method>
+
+<Method name="GetOPCUAConfigSpec">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pClassName:%String</FormalSpec>
+<ReturnType>%List</ReturnType>
+<Implementation><![CDATA[
+    // Specifications are supplied in the form of %List
+    // 1. DataSource name
+    // 2. The name of the global on which to save the results
+    // 3. A multidimensional %List of property elements.
+    //		1. The first element is perhaps usually null (or the name of the class if a subclass?)
+    //		2. Property elements take the form of a list with elements:
+    //			1. The type of element: 1 = Primitives, 2 = Standard OPCUA, 3 = ?
+    //			2. The pPropertyPath_"."_oProp.Name e.g. "[MyDataSource2].Temperature"
+    //			3. The namespace
+    //			4. The node name, a string NodeId identifier
+    //			5. The AttributeId
+
+    return ^OPCUA.DataSource(pClassName)
+]]></Implementation>
+</Method>
+
+<Method name="GetParameterValue">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pClassDef:%Dictionary.CompiledClass,pParameterName:%String</FormalSpec>
+<ReturnType>%String</ReturnType>
+<Implementation><![CDATA[
+    #Dim oParam As %Dictionary.CompiledParameter
+
+    For i=1:1:pClassDef.Parameters.Count()
+    {
+        Set oParam = pClassDef.Parameters.GetAt(i)
+        If oParam.Name=pParameterName 
+        {
+            Return oParam.Default
+        }
+    }
+
+    Return ""
+]]></Implementation>
+</Method>
+
+<Method name="RemoveProjection">
+<Description>
+This method is invoked when a class is 'uncompiled'</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[cls:%String,&params,recompile:%Boolean]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+    Set tSC = $$$OK
+    Try 
+    {
+        Kill ^OPCUA.DataSource(cls)
+    } 
+    Catch (oException)
+    {
+        Set tSC = oException.AsStatus()
+    }
+    
+    QUIT tSC
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="OPCUA.DataSource.PropertyClass">
+<TimeChanged>67556,48669.0437474</TimeChanged>
+<TimeCreated>67556,48669.0437474</TimeCreated>
+
+<Parameter name="OPCUANAMESPACE">
+<Type>%String</Type>
+</Parameter>
+
+<Parameter name="OPCUANODENAME">
+<Type>%String</Type>
+</Parameter>
+
+<Parameter name="OPCUAATTRIBUTEID">
+<Type>%String</Type>
+</Parameter>
+</Class>
+
+
+<Class name="OPCUA.DateTimeUtils">
+<Description>
+Date and time-related utility functions used in conjunction with
+the OPC-UA connector.</Description>
+<IncludeCode>%callout,OPCUA.Constants,Ensemble</IncludeCode>
+<TimeChanged>67556,48669.0027308</TimeChanged>
+<TimeCreated>67556,48669.0027308</TimeCreated>
+
+<Method name="OPCUA2HOROLOG">
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[*pHOROLOG:%String,&pOPCUA:%Integer]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC as %Status = $$$OK
+
+	try {
+
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfDateConvOPCUA2HOROLOG,"",$LB(pOPCUA))
+    
+        If $List(tRetval,1)'=0 Set tSC=##class(OPCUA.Client).DecodeError(tRetval) Quit
+
+		set pHOROLOG = $List(tRetval,2)
+
+	} catch (e) {
+		set tSC = e.AsStatus()
+	}
+
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="HOROLOG2OPCUA">
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[*pOPCUA:%Integer,&pHOROLOG:%String]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC as %Status = $$$OK
+
+	try {
+
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfDateConvHOROLOG2OPCUA,"",$LB(pHOROLOG))
+    
+        If $List(tRetval,1)'=0 Set tSC=##class(OPCUA.Client).DecodeError(tRetval) Quit
+
+		set pOPCUA = $List(tRetval,2)
+
+	} catch (e) {
+		set tSC = e.AsStatus()
+	}
+
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="OPCUA2ODBC">
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[*pODBC:%String,&pOPCUA:%Integer]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC as %Status = $$$OK
+
+	try {
+
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfDateConvOPCUA2ODBC,"",$LB(pOPCUA))
+    
+        If $List(tRetval,1)'=0 Set tSC=##class(OPCUA.Client).DecodeError(tRetval) Quit
+
+		set pODBC = $List(tRetval,2)
+
+	} catch (e) {
+		set tSC = e.AsStatus()
+	}
+
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="ODBC2OPCUA">
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[*pOPCUA:%Integer,&pODBC:%String]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC as %Status = $$$OK
+
+	try {
+
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfDateConvODBC2OPCUA,"",$LB(pODBC))
+    
+        If $List(tRetval,1)'=0 Set tSC=##class(OPCUA.Client).DecodeError(tRetval) Quit
+
+		set pOPCUA = $List(tRetval,2)
+
+	} catch (e) {
+		set tSC = e.AsStatus()
+	}
+
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="OPCUA2UNIX">
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[*pUNIX:%Integer,&pOPCUA:%Integer]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC as %Status = $$$OK
+
+	try {
+
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfDateConvOPCUA2UNIX,"",$LB(pOPCUA))
+    
+        If $List(tRetval,1)'=0 Set tSC=##class(OPCUA.Client).DecodeError(tRetval) Quit
+
+		set pUNIX = $List(tRetVal,2)
+
+	} catch (e) {
+		set tSC = e.AsStatus()
+	}
+
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="UNIX2OPCUA">
+<ClassMethod>1</ClassMethod>
+<FormalSpec><![CDATA[*pOPCUA:%Integer,&pUNIX:%Integer]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC as %Status = $$$OK
+
+	try {
+
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfDateConvUNIX2OPCUA,"",$LB(pUNIX))
+    
+        If $List(tRetval,1)'=0 Set tSC=##class(OPCUA.Client).DecodeError(tRetval) Quit
+
+		set pOPCUA = $List(tRetVal,2)
+
+	} catch (e) {
+		set tSC = e.AsStatus()
+	}
+
+	Quit tSC
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="OPCUA.Service.TCPPollingSendService">
+<Super>OPCUA.Service.TCPPollingService,EnsLib.EDI.EDIFACT.Service.Standard</Super>
+<TimeChanged>67556,48837.0065471</TimeChanged>
+<TimeCreated>67556,48837.0065471</TimeCreated>
+
+<Property name="TargetConfigNames">
+<Type>%String</Type>
+<Parameter name="MAXLEN" value="1000"/>
+</Property>
+
+<Parameter name="SETTINGS">
+<Default><![CDATA[TargetConfigNames:Basic:selector?multiSelect=1&context={Ens.ContextSearch/ProductionItems?targets=1&productionName=@productionId}]]></Default>
+</Parameter>
+
+<Method name="OnProcessInput">
+<FormalSpec><![CDATA[&pInputAsList:%RegisteredObject,*pOutput:%RegisteredObject]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+        #dim tSC as %Status = $$$OK
+        try{
+    
+            set $LI(pInputAsList,1) = ""
+
+            set tSC = $CLASSMETHOD(..Adapter.DataSourceClass,"SaveSourcedData", .pInputAsList, .pAssignedID)
+
+            for iTarget=1:1:$L(..TargetConfigNames, ",") { 
+                Set tOneTarget=$ZStrip($P(..TargetConfigNames,",",iTarget),"<>W")  Continue:""=tOneTarget
+				//$$$sysTRACE("Sending EDIFACT document "_pDocIn_"/"_pDocIn.%Id()_" from "_pDocIn.Source_" to '"_tOneTarget_"'")
+				
+                Set tMsg = $CLASSMETHOD(..Adapter.DataSourceClass,"%OpenId",pAssignedID)
+                Set tSC1= ..SendRequestAsync(tOneTarget,tMsg)
+
+				Set:$$$ISERR(tSC1) tSC=$$$ADDSC(tSC,tSC1)
+			}
+
+        } catch (e) {
+            set tSC = e.AsStatus()
+        }
+
+        return tSC
+]]></Implementation>
+</Method>
+
+<Method name="OnGetConnections">
+<Description>
+Return an array of connections for drawing lines on the config diagram</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>*pArray:%String,pItem:Ens.Config.Item</FormalSpec>
+<Implementation><![CDATA[
+	Do ##super(.pArray,pItem)
+	If pItem.GetModifiedSetting("TargetConfigNames",.tValue) {
+		For i=1:1:$L(tValue,",") { Set tOne=$ZStrip($P(tValue,",",i),"<>W")  Continue:""=tOne  Set pArray(tOne)="" }
+	}
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="OPCUA.Service.TCPPollingService">
+<Description>
+A business service that uses the TCPPollingInboundAdpater
+to access data with OPC UA and append that data to a table.</Description>
+<IncludeCode>OPCUA.Constants</IncludeCode>
+<Super>Ens.BusinessService</Super>
+<TimeChanged>67556,48668.9474267</TimeChanged>
+<TimeCreated>67556,48668.9474267</TimeCreated>
+
+<Parameter name="ADAPTER">
+<Default>OPCUA.Adapter.TCPPollingInboundAdapter</Default>
+</Parameter>
+
+<Property name="Adapter">
+<Type>OPCUA.Adapter.TCPPollingInboundAdapter</Type>
+</Property>
+
+<Method name="OnInit">
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC as %Status = $$$OK
+
+	try {
+		
+		// Get the spec
+		set tSpecification = ##class(OPCUA.DataSource.Projection).GetOPCUAConfigSpec(..Adapter.DataSourceClass)
+
+		$$$LOGINFO("Configuring OPCUA polling adapter")
+		set tSC = ..Adapter.Configure(.tSpecification)
+	
+	} catch (e) {
+		set tSC = e.AsStatus()
+	}
+
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="OnProcessInput">
+<FormalSpec><![CDATA[&pInputAsList:%RegisteredObject,*pOutput:%RegisteredObject]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+ 	#dim tSC as %Status = $$$OK
+ 
+	try {
+	
+		set $LI(pInputAsList,1) = ""
+
+		set tSC = $CLASSMETHOD(..Adapter.DataSourceClass,"SaveSourcedData",.pInputAsList)
+
+	} catch (e) {
+		set tSC = e.AsStatus()
+	}
+
+	return tSC
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="OPCUA.Service.TCPSubscriptionSendService">
+<Super>OPCUA.Service.TCPSubscriptionService,EnsLib.EDI.EDIFACT.Service.Standard</Super>
+<TimeChanged>67556,48837.0063007</TimeChanged>
+<TimeCreated>67556,48837.0063007</TimeCreated>
+
+<Property name="TargetConfigNames">
+<Type>%String</Type>
+<Parameter name="MAXLEN" value="1000"/>
+</Property>
+
+<Parameter name="SETTINGS">
+<Default><![CDATA[TargetConfigNames:Basic:selector?multiSelect=1&context={Ens.ContextSearch/ProductionItems?targets=1&productionName=@productionId}]]></Default>
+</Parameter>
+
+<Method name="OnProcessInput">
+<FormalSpec><![CDATA[&pInputAsList:%RegisteredObject,*pOutput:%RegisteredObject]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+        #dim tSC as %Status = $$$OK
+        try{
+    
+            set $LI(pInputAsList,1) = ""
+
+            set tSC = $CLASSMETHOD(..Adapter.DataSourceClass,"SaveSourcedData", .pInputAsList, .pAssignedID)
+
+            for iTarget=1:1:$L(..TargetConfigNames, ",") { 
+                Set tOneTarget=$ZStrip($P(..TargetConfigNames,",",iTarget),"<>W")  Continue:""=tOneTarget
+				//$$$sysTRACE("Sending EDIFACT document "_pDocIn_"/"_pDocIn.%Id()_" from "_pDocIn.Source_" to '"_tOneTarget_"'")
+				
+                Set tMsg = $CLASSMETHOD(..Adapter.DataSourceClass,"%OpenId",pAssignedID)
+                Set tSC1= ..SendRequestAsync(tOneTarget,tMsg)
+
+				Set:$$$ISERR(tSC1) tSC=$$$ADDSC(tSC,tSC1)
+			}
+
+        } catch (e) {
+            set tSC = e.AsStatus()
+        }
+
+        return tSC
+]]></Implementation>
+</Method>
+
+<Method name="OnGetConnections">
+<Description>
+Return an array of connections for drawing lines on the config diagram</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>*pArray:%String,pItem:Ens.Config.Item</FormalSpec>
+<Implementation><![CDATA[
+	Do ##super(.pArray,pItem)
+	If pItem.GetModifiedSetting("TargetConfigNames",.tValue) {
+		For i=1:1:$L(tValue,",") { Set tOne=$ZStrip($P(tValue,",",i),"<>W")  Continue:""=tOne  Set pArray(tOne)="" }
+	}
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="OPCUA.Service.TCPSubscriptionService">
+<Description>
+A business service that uses the TCPSubscriptionInboundAdpater
+to access data with OPC UA and append that data to a table.</Description>
+<IncludeCode>OPCUA.Constants</IncludeCode>
+<Super>Ens.BusinessService</Super>
+<TimeChanged>67556,48670.5664069</TimeChanged>
+<TimeCreated>67556,48670.5664069</TimeCreated>
+
+<Parameter name="ADAPTER">
+<Default>OPCUA.Adapter.TCPSubscriptionInboundAdapter</Default>
+</Parameter>
+
+<Property name="Adapter">
+<Type>OPCUA.Adapter.TCPSubscriptionInboundAdapter</Type>
+</Property>
+
+<Method name="OnInit">
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC as %Status = $$$OK
+
+	try {
+		
+		// Get the spec
+		set tSpecification = ##class(OPCUA.DataSource.Projection).GetOPCUAConfigSpec(..Adapter.DataSourceClass)
+
+		$$$LOGINFO("Configuring OPCUA subscription adapter")
+		set tSC = ..Adapter.Configure(.tSpecification)
+	
+	} catch (e) {
+		set tSC = e.AsStatus()
+	}
+
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="OnProcessInput">
+<FormalSpec><![CDATA[&pInputAsList:%RegisteredObject,*pOutput:%RegisteredObject]]></FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+ 	#dim tSC as %Status = $$$OK
+ 
+	try {
+	
+		set $LI(pInputAsList,1) = ""
+
+		set tSC = $CLASSMETHOD(..Adapter.DataSourceClass,"SaveSourcedData",.pInputAsList)
+
+	} catch (e) {
+		set tSC = e.AsStatus()
+	}
+
+	return tSC
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="OPCUA.Tests.AttributesTestDS">
+<Super>%Persistent,OPCUA.DataSource.Definition</Super>
+<TimeChanged>67556,48670.8777688</TimeChanged>
+<TimeCreated>67556,48668.9960983</TimeCreated>
+
+<Parameter name="OPCUADATASOURCE">
+<Default>MyDataSource2</Default>
+</Parameter>
+
+<Parameter name="OPCUDEFAULTANAMESPACE">
+<Default>2</Default>
+</Parameter>
+
+<Property name="BrowseName">
+<Type>OPCUA.Types.QualifiedNameDataValue</Type>
+<Parameter name="OPCUAATTRIBUTEID" value="3"/>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.Double"/>
+</Property>
+
+<Property name="DisplayName">
+<Type>OPCUA.Types.LocalizedTextDataValue</Type>
+<Parameter name="OPCUAATTRIBUTEID" value="4"/>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.Double"/>
+</Property>
+
+<Property name="Description">
+<Type>OPCUA.Types.LocalizedTextDataValue</Type>
+<Parameter name="OPCUAATTRIBUTEID" value="5"/>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.Double"/>
+</Property>
+
+<Property name="WriteMask">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUAATTRIBUTEID" value="6"/>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.Double"/>
+</Property>
+
+<Property name="UserWriteMask">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUAATTRIBUTEID" value="7"/>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.Double"/>
+</Property>
+
+<Property name="Value">
+<Type>OPCUA.Types.DoubleDataValue</Type>
+<Parameter name="OPCUAATTRIBUTEID" value="13"/>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.Double"/>
+</Property>
+
+<Property name="DataType">
+<Type>OPCUA.Types.NodeIdDataValue</Type>
+<Parameter name="OPCUAATTRIBUTEID" value="14"/>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.Double"/>
+</Property>
+
+<Property name="ValueRank">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUAATTRIBUTEID" value="15"/>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.Double"/>
+</Property>
+
+<Property name="AccessLevel">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUAATTRIBUTEID" value="17"/>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.Double"/>
+</Property>
+
+<Property name="UserAccessLevel">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUAATTRIBUTEID" value="18"/>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.Double"/>
+</Property>
+
+<Property name="Historizing">
+<Type>OPCUA.Types.BooleanDataValue</Type>
+<Parameter name="OPCUAATTRIBUTEID" value="20"/>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.Double"/>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Persistent</Type>
+<DataLocation>^OPCUA.Tests.AttributesTestDSD</DataLocation>
+<DefaultData>AttributesTestDSDefaultData</DefaultData>
+<IdLocation>^OPCUA.Tests.AttributesTestDSD</IdLocation>
+<IndexLocation>^OPCUA.Tests.AttributesTestDSI</IndexLocation>
+<StreamLocation>^OPCUA.Tests.AttributesTestDSS</StreamLocation>
+<Data name="AttributesTestDSDefaultData">
+<Structure>listnode</Structure>
+<Subscript/>
+<Value name="1">
+<Value>%%CLASSNAME</Value>
+</Value>
+<Value name="2">
+<Value>BrowseName</Value>
+</Value>
+<Value name="3">
+<Value>DisplayName</Value>
+</Value>
+<Value name="4">
+<Value>Description</Value>
+</Value>
+<Value name="5">
+<Value>WriteMask</Value>
+</Value>
+<Value name="6">
+<Value>UserWriteMask</Value>
+</Value>
+<Value name="7">
+<Value>Value</Value>
+</Value>
+<Value name="8">
+<Value>DataType</Value>
+</Value>
+<Value name="9">
+<Value>ValueRank</Value>
+</Value>
+<Value name="10">
+<Value>AccessLevel</Value>
+</Value>
+<Value name="11">
+<Value>UserAccessLevel</Value>
+</Value>
+<Value name="12">
+<Value>Historizing</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="OPCUA.Tests.DataTest">
+<IncludeCode>OPCUA.Constants,Ensemble</IncludeCode>
+<TimeChanged>67556,48669.4529163</TimeChanged>
+<TimeCreated>67556,48669.4529163</TimeCreated>
+
+<Method name="Run">
+<ClassMethod>1</ClassMethod>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	
+	Try {		
+
+		/*
+
+		set tStmt = ##class(%SQL.Statement).%New()
+		set tSC = tStmt.%Prepare("DELETE FROM Examples_OCPUADS.DataTest")
+		Quit:$$$ISERR(tSC)
+
+		set tRet = tStmt.%Execute()
+		Quit:tRet'=0
+
+ 		&sql(DELETE FROM Examples_OPCUADS.DataTest)
+		if SQLCODE<0 {
+			w "Error deleting from DataTest table"
+			Quit
+		}
+
+		*/
+
+		set tStmt = ##class(%SQL.Statement).%New()
+		set tSC = tStmt.%Prepare("DELETE FROM OPCUA_Tests.DataTestDS")
+		zw tSC
+		//Quit:$$$ISERR(tSC)
+		if '$$$ISERR(tSC) {
+			set tRet = tStmt.%Execute()
+			if tRet '= 0 {
+				//w "Error deleting from DataTest table"
+				//zw tRet
+				//Quit
+			}
+		}
+
+		if ##class(Ens.Director).IsProductionRunning() {
+			set tSC = ##class(Ens.Director).StopProduction()
+			Quit:$$$ISERR(tSC)
+		}
+
+		set tSC = ##class(Ens.Director).StartProduction("OPCUA.Tests.Production")
+		Quit:$$$ISERR(tSC)
+
+		if '##class(Ens.Director).IsItemEnabled("DataTest",) {
+			set tSC = ##class(Ens.Director).EnableConfigItem("DataTest")
+			Quit:$$$ISERR(tSC)
+		}
+
+		w !!,"Gathering data..."
+		hang 2
+		w " Done.",!
+
+		do ##class(Ens.Director).StopProduction()
+
+		w !
+
+		set RecId = $GET(^OPCUA.Tests.DataTestDSD)
+		w !,"Using record #"_RecId
+
+		set TestData = ##class(OPCUA.Tests.DataTestDS).%OpenId(RecId)
+
+		set BooleanCD = 0
+		set SByteCD = 31
+		set ByteCD = 0
+		set Int16CD = 0
+		set UInt16CD = 600
+		set Int32CD = 50
+		set UInt32CD = 448
+		set Int64CD = 0
+		set UInt64CD = 700
+		set FloatCD = $double(77)
+		set DoubleCD = $double(4.5569875151026986159)
+		set StringCD = "Hello World!"
+		set TimeStampCD = "2021-02-22 01:02:58.5540300"
+		// Guid
+		// ByteString
+		set XMLElementCD = "<?xml version=""1.0"" encoding=""UTF-8""?>"_$c(0)
+		//set NodeIdCD = ##class(OPCUA.Types.NodeId).%New()
+		//set NodeIdCD.NamespaceIndex = 1
+		//set NodeIdCD.IdentifierType = 3
+		//set NodeIdCD.Identifier = "MyStringNodeId"
+		// ExpandedNodeId
+		set StatusCodeCD = 0
+		// QualifiedName
+		//set LocalizedTextCD = ##class(OPCUA.Types.LocalizedText).%New()
+		//set LocalizedTextCD.Text = "LocalizedText"
+		//set LocalizedText.Locale = "en"
+		// ExtensionObject
+
+		Quit:'##class(OPCUA.Tests.DataTest).TestDataValue("Boolean",TestData.Boolean.Value,BooleanCD)
+		Quit:'##class(OPCUA.Tests.DataTest).TestDataValue("SByte",TestData.SByte.Value,SByteCD)
+		Quit:'##class(OPCUA.Tests.DataTest).TestDataValue("Byte",TestData.Byte.Value,ByteCD)
+		Quit:'##class(OPCUA.Tests.DataTest).TestDataValue("Int16",TestData.Int16.Value,Int16CD)
+		Quit:'##class(OPCUA.Tests.DataTest).TestDataValue("UInt16",TestData.UInt16.Value,UInt16CD)
+		Quit:'##class(OPCUA.Tests.DataTest).TestDataValue("Int32",TestData.Int32.Value,Int32CD)
+		Quit:'##class(OPCUA.Tests.DataTest).TestDataValue("UInt32",TestData.UInt32.Value,UInt32CD)
+		Quit:'##class(OPCUA.Tests.DataTest).TestDataValue("Int64",TestData.Int64.Value,Int64CD)
+		Quit:'##class(OPCUA.Tests.DataTest).TestDataValue("UInt64",TestData.UInt64.Value,UInt64CD)
+		Quit:'##class(OPCUA.Tests.DataTest).TestDataValue("Float",TestData.Float.Value,FloatCD)
+		Quit:'##class(OPCUA.Tests.DataTest).TestDataValue("Double",TestData.Double.Value,DoubleCD)
+		//Quit:'##class(OPCUA.Tests.DataTest).TestDataValue("String",TestData.String.Value,StringCD)
+		Quit:'##class(OPCUA.Tests.DataTest).TestDataValue("TimeStamp",TestData.TimeStamp.Value,TimeStampCD)
+		// Guid
+		// ByteString
+		Quit:'##class(OPCUA.Tests.DataTest).TestDataValue("XMLElement",TestData.XMLElement.Value,XMLElementCD)
+		// NodeId
+		// ExpandedNodeId
+		Quit:'##class(OPCUA.Tests.DataTest).TestDataValue("StatusCode",TestData.StatusCode.Value,StatusCodeCD)
+		// QualifiedName
+		// LocalizedText
+		// ExtensionObject
+
+		/*
+		// Boolean
+		if TestData.Boolean '= BooleanCD {
+			w !,"Inconsistency encountered while testing Boolean ["_TestData.Boolean_","_BooleanCD_"]"
+			Quit
+		}
+		*/
+
+
+		// *** ARRAYS ***
+
+		set BooleanArrCD = $LB(1,1,1,1,1,1,1,1,1,1)
+		set SByteArrCD = $LB(-5,-4,-3,-2,-1,0,1,2,3,4)
+		set ByteArrCD = $LB(0,1,2,3,4,5,6,7,8,9)
+		//set Int16ArrCD = $LB(-7,-4,-3,-2,-1,0,1,2,3,4)
+		set Int16ArrCD = $LB(6,1,1,1,1,0,1,2,3,4)
+		set UInt16ArrCD = $LB(0,1,2,3,4,5,6,7,8,9)
+		set Int32ArrCD = $LB(-5,-4,-3,-2,-1,0,1,2,3,4)
+		set UInt32ArrCD = $LB(0,1,2,3,4,5,6,7,8,9)
+		set Int64ArrCD = $LB(-5,-4,-3,-2,-1,0,1,2,3,4)
+		set UInt64ArrCD = $LB(0,1,2,3,4,5,6,7,8,9)
+		set FloatArrCD = $LB($double(6.1167511940002441406),$double(20.100000381469726562),$double(20.200000762939453125),$double(20.299999237060546875),$double(20.399999618530273437),20.5,$double(20.600000381469726562),$double(20.700000762939453125),$double(20.799999237060546875),$double(20.899999618530273437))
+		set DoubleArrCD = $LB($double(10),$double(10.2),$double(10.4),$double(10.6),$double(10.8),$double(11),$double(11.2),$double(11.4),$double(11.6),$double(11.8))
+		// String array data omitted due to server issue
+		set TimeStampArrCD = $LB("2021-02-22 01:02:58.5540300","2021-02-22 01:02:58.5540300","2021-02-22 01:02:58.5540300","2021-02-22 01:02:58.5540300","2021-02-22 01:02:58.5540300","2021-02-22 01:02:58.5540300","2021-02-22 01:02:58.5540300","2021-02-22 01:02:58.5540300","2021-02-22 01:02:58.5540300","2021-02-22 01:02:58.5540300")
+		// Guid
+		// ByteString
+		set XmlElementArrCD = $LB("<?xml version=""1.0"" encoding=""UTF-8""?>"_$c(0),"<?xml version=""1.0"" encoding=""UTF-8""?>"_$c(0),"<?xml version=""1.0"" encoding=""UTF-8""?>"_$c(0),"<?xml version=""1.0"" encoding=""UTF-8""?>"_$c(0),"<?xml version=""1.0"" encoding=""UTF-8""?>"_$c(0),"<?xml version=""1.0"" encoding=""UTF-8""?>"_$c(0),"<?xml version=""1.0"" encoding=""UTF-8""?>"_$c(0),"<?xml version=""1.0"" encoding=""UTF-8""?>"_$c(0),"<?xml version=""1.0"" encoding=""UTF-8""?>"_$c(0),"<?xml version=""1.0"" encoding=""UTF-8""?>"_$c(0))
+		// NodeId
+		// ExpandedNodeId
+		set StatusCodeArrCD = $LB(0,$ZHEX("80310000"),$ZHEX("80330000"),$ZHEX("80360000"),$ZHEX("803A0000"),$ZHEX("80400000"),0,$ZHEX("80310000"),$ZHEX("80330000"),$ZHEX("80360000"))
+		// QualifiedName
+		//set LocalizedTextArrCD = $LB(1,1,1,1,1,1,1,1,1,1)
+		// ExtensionObject
+
+
+		// BooleanArr
+		set tAns = ##class(OPCUA.Tests.DataTest).TestElements(TestData.BooleanArr.Values, BooleanArrCD)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing BooleanArr ["_tAns_"]"
+			Quit
+		}
+
+		// SByteArr
+		set tAns = ##class(OPCUA.Tests.DataTest).TestElements(TestData.SByteArr.Values, SByteArrCD)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing SByteArr ["_tAns_"]"
+			Quit
+		}
+
+		// ByteArr
+		set tAns = ##class(OPCUA.Tests.DataTest).TestElements(TestData.ByteArr.Values, ByteArrCD)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing ByteArr ["_tAns_"]"
+			Quit
+		}
+
+		// Int16
+		set tAns = ##class(OPCUA.Tests.DataTest).TestElements(TestData.Int16Arr.Values, Int16ArrCD)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing Int16Arr ["_tAns_"]"
+			Quit
+		}
+
+		// UInt16
+		set tAns = ##class(OPCUA.Tests.DataTest).TestElements(TestData.UInt16Arr.Values, UInt16ArrCD)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing UInt16Arr ["_tAns_"]"
+			Quit
+		}
+
+		// Int32
+		set tAns = ##class(OPCUA.Tests.DataTest).TestElements(TestData.Int32Arr.Values, Int32ArrCD)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing Int32Arr ["_tAns_"]"
+			Quit
+		}
+
+		// UInt32
+		set tAns = ##class(OPCUA.Tests.DataTest).TestElements(TestData.UInt32Arr.Values, UInt32ArrCD)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing UInt32Arr ["_tAns_"]"
+			Quit
+		}
+
+		// Int64
+		set tAns = ##class(OPCUA.Tests.DataTest).TestElements(TestData.Int64Arr.Values, Int64ArrCD)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing Int64Arr ["_tAns_"]"
+			Quit
+		}
+
+		// UInt64
+		set tAns = ##class(OPCUA.Tests.DataTest).TestElements(TestData.UInt64Arr.Values, UInt64ArrCD)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing UInt64Arr ["_tAns_"]"
+			Quit
+		}
+
+		// FloatArr
+		set tAns = ##class(OPCUA.Tests.DataTest).TestElements(TestData.FloatArr.Values, FloatArrCD)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing FloatArr ["_tAns_"]"
+			Quit
+		}
+
+		// DoubleArr
+		set tAns = ##class(OPCUA.Tests.DataTest).TestElements(TestData.DoubleArr.Values, DoubleArrCD)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing DoubleArr ["_tAns_"]"
+			Quit
+		}
+	
+		// String array data omitted due to server issue
+
+		// TimeStampArr
+		set tAns = ##class(OPCUA.Tests.DataTest).TestElements(TestData.TimeStampArr.Values, TimeStampArrCD)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing TimeStampArr ["_tAns_"]"
+			Quit
+		}
+	
+		// XmlElementArr
+		set tAns = ##class(OPCUA.Tests.DataTest).TestElements(TestData.XMLElementArr.Values, XmlElementArrCD)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing XMLElementArr ["_tAns_"]"
+			Quit
+		}
+	
+		// StatusCodeArr
+		set tAns = ##class(OPCUA.Tests.DataTest).TestElements(TestData.StatusCodeArr.Values, StatusCodeArrCD)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing StatusCodeArr ["_tAns_"]"
+			Quit
+		}
+	
+		// LocalizedTextArr
+		//set tAns = ##class(OPCUA.Tests.DataTest).TestObjects(TestData.LocalizedTextArr.Values, LocalizedTextArrCD)
+		//if tAns >= 0 {
+		//	w !,"Inconsistency encountered while testing LocalizedTextArr ["_tAns_"]"
+		//	Quit
+		//}
+	
+
+		// *** MATRICES ***
+
+		set BooleanMatrixCD = $lb($lb($lb(0,1,0),$lb(1,0,1),$lb(0,1,0),$lb(1,0,1)),$lb($lb(0,1,0),$lb(1,0,1),$lb(0,1,0),$lb(1,0,1)))
+		set SByteMatrixCD = $lb($lb($lb(0,1,2),$lb(3,4,5),$lb(6,7,8),$lb(9,10,11)),$lb($lb(12,13,14),$lb(15,16,17),$lb(18,19,20),$lb(21,22,23)))
+		set Int16MatrixCD = $lb($lb($lb(0,1,2),$lb(3,4,5),$lb(6,7,8),$lb(9,10,11)),$lb($lb(12,13,14),$lb(15,16,17),$lb(18,19,20),$lb(21,22,23)))
+		set UInt16MatrixCD = $lb($lb($lb(0,1,2),$lb(3,4,5),$lb(6,7,8),$lb(9,10,11)),$lb($lb(12,13,14),$lb(15,16,17),$lb(18,19,20),$lb(21,22,23)))
+		set Int32MatrixCD = $lb($lb($lb(0,1,2),$lb(3,4,5),$lb(6,7,8),$lb(9,10,11)),$lb($lb(12,13,14),$lb(15,16,17),$lb(18,19,20),$lb(21,22,23)))
+		set UInt32MatrixCD = $lb($lb($lb(0,1,2),$lb(3,4,5),$lb(6,7,8),$lb(9,10,11)),$lb($lb(12,13,14),$lb(15,16,17),$lb(18,19,20),$lb(21,22,23)))
+		set Int64MatrixCD = $lb($lb($lb(0,1,2),$lb(3,4,5),$lb(6,7,8),$lb(9,10,11)),$lb($lb(12,13,14),$lb(15,16,17),$lb(18,19,20),$lb(21,22,23)))
+		set UInt64MatrixCD = $lb($lb($lb(0,1,2),$lb(3,4,5),$lb(6,7,8),$lb(9,10,11)),$lb($lb(12,13,14),$lb(15,16,17),$lb(18,19,20),$lb(21,22,23)))
+		set FloatMatrixCD = $lb($lb($lb($double(0),$double(3.1415927410125732421),$double(6.2831854820251464843)),$lb($double(9.424777984619140625),$double(12.566370964050292968),$double(15.707963943481445312)),$lb($double(18.84955596923828125),$double(21.99114990234375),$double(25.132741928100585937)),$lb($double(28.274333953857421875),$double(31.415927886962890625),$double(34.557521820068359375))),$lb($lb($double(37.6991119384765625),$double(40.84070587158203125),$double(43.9822998046875)),$lb($double(47.123889923095703125),$double(50.265483856201171875),$double(53.407077789306640625)),$lb($double(56.54866790771484375),$double(59.6902618408203125),$double(62.83185577392578125)),$lb($double(65.97344970703125),$double(69.11504364013671875),$double(72.25662994384765625))))
+		set DoubleMatrixCD = $lb($lb($lb($double(0),$double(3.1415926500000002086),$double(6.2831853000000004172)),$lb($double(9.4247779500000010699),$double(12.566370600000000834),$double(15.707963250000000599)),$lb($double(18.849555900000002139),$double(21.991148550000001904),$double(25.132741200000001668)),$lb($double(28.274333850000001433),$double(31.415926500000001198),$double(34.557519150000004516))),$lb($lb($double(37.699111800000004279),$double(40.840704450000004044),$double(43.982297100000003808)),$lb($double(47.123889750000003573),$double(50.265482400000003337),$double(53.407075050000003102)),$lb($double(56.548667700000002867),$double(59.690260350000002631),$double(62.831853000000002396)),$lb($double(65.973445650000002161),$double(69.115038300000009031),$double(72.256630950000001689))))
+		// String
+		// TimeStamp
+		// Guid
+		// ByteString (not present on server)
+		// XmlElement (not present on server)
+		// NodeId
+		// ExpandedNodeId
+		// StatusCode
+		// QualifiedName
+		// LocalizedText
+		// ExtensionObject
+
+
+		// BooleanMatrix
+		set tAns = ##class(OPCUA.Tests.DataTest).TestLists(TestData.BooleanMatrix.Values, BooleanMatrixCD, 3)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing BooleanMatrix ["_tAns_"]"
+			Quit
+		}
+
+		// SByteMatrix
+		set tAns = ##class(OPCUA.Tests.DataTest).TestLists(TestData.SByteMatrix.Values, SByteMatrixCD, 3)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing SByteMatrix ["_tAns_"]"
+			Quit
+		}
+
+		// Int16Matrix
+		set tAns = ##class(OPCUA.Tests.DataTest).TestLists(TestData.Int16Matrix.Values, Int16MatrixCD, 3)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing Int16Matrix ["_tAns_"]"
+			Quit
+		}
+
+		// UInt16Matrix
+		set tAns = ##class(OPCUA.Tests.DataTest).TestLists(TestData.UInt16Matrix.Values, UInt16MatrixCD, 3)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing UInt16Matrix ["_tAns_"]"
+			Quit
+		}
+
+		// Int32Matrix
+		set tAns = ##class(OPCUA.Tests.DataTest).TestLists(TestData.Int32Matrix.Values, Int32MatrixCD, 3)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing Int32Matrix ["_tAns_"]"
+			Quit
+		}
+
+		// UInt32Matrix
+		set tAns = ##class(OPCUA.Tests.DataTest).TestLists(TestData.UInt32Matrix.Values, UInt32MatrixCD, 3)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing UInt32Matrix ["_tAns_"]"
+			Quit
+		}
+
+		// Int64Matrix
+		set tAns = ##class(OPCUA.Tests.DataTest).TestLists(TestData.Int64Matrix.Values, Int64MatrixCD, 3)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing Int64Matrix ["_tAns_"]"
+			Quit
+		}
+
+		// UInt64Matrix
+		set tAns = ##class(OPCUA.Tests.DataTest).TestLists(TestData.UInt64Matrix.Values, UInt64MatrixCD, 3)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing UInt64Matrix ["_tAns_"]"
+			Quit
+		}
+
+		// FloatMatrix
+		set tAns = ##class(OPCUA.Tests.DataTest).TestLists(TestData.FloatMatrix.Values, FloatMatrixCD, 3)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing FloatMatrix ["_tAns_"]"
+			Quit
+		}
+
+		// DoubleMatrix
+		set tAns = ##class(OPCUA.Tests.DataTest).TestLists(TestData.DoubleMatrix.Values, DoubleMatrixCD, 3)
+		if tAns >= 0 {
+			w !,"Inconsistency encountered while testing DoubleMatrix ["_tAns_"]"
+			Quit
+		}
+
+
+		w !,"PASSES"
+
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+		w !
+		zw tSC
+	}
+	
+	w !!
+
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="TestDataValue">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>Name:%String,TestDatum,Comparison</FormalSpec>
+<ReturnType>%Boolean</ReturnType>
+<Implementation><![CDATA[
+	if TestDatum '= Comparison {
+		w !,"Inconsistency encountered while testing "_Name
+		w !!,"Test Data:",!
+		zzdump TestDatum
+		w !!,"Comparison Data:",!
+		zzdump Comparison
+		w !
+		return 0
+	} else {
+		return 1
+	}
+]]></Implementation>
+</Method>
+
+<Method name="TestLists">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>TestData:%List,Comparison:%List,QtyDims:%Integer=1</FormalSpec>
+<ReturnType>%Integer</ReturnType>
+<Implementation><![CDATA[
+	
+	set CurErr = ""
+
+	try {
+
+		set DimLens = $LB(0)
+		set CurItem = $LB(0)
+		set working = TestData
+		for i=1:1:QtyDims {
+			set $LI(DimLens,i) = $LL(working)
+			set $LI(CurItem,i) = 1
+			set working = $LI(working,1)
+		}
+
+		do {
+
+			set CurErr = ""
+			for i=1:1:QtyDims {
+				set CurErr = CurErr_"["_$LI(CurItem,i)_"]"
+			}
+
+			set working = TestData
+			for i=1:1:QtyDims {
+				set working = $LI(working,$LI(CurItem,i))
+			}
+			set TestDat = working
+
+			set working = Comparison
+			for i=1:1:QtyDims {
+				set working = $LI(working,$LI(CurItem,i))
+			}
+			set CompareDat = working
+
+			if (TestDat '= CompareDat) {
+
+				w !!,"Error Location: "_CurErr
+
+				w !!,"Test Data:",!
+				zzdump TestDat
+
+				w !!,"Comparison Data:",!
+				zzdump CompareDat
+
+				w !
+				return 0
+			}
+			
+			set i = QtyDims
+			do {
+				set $LI(CurItem,i) = $LI(CurItem,i) + 1
+				if $LI(CurItem,i) <= $LI(DimLens,i) {
+					Quit
+				}
+				if i = 1 {
+					// The job is done
+					return -1
+				}
+				set $LI(CurItem,i) = 1
+				set i = i - 1
+			} while i > 0
+
+		} while 1
+
+	} catch (e) {
+		w !!,"Unexpected error encountered while testing array elements "_CurErr
+
+		return 0
+	}
+]]></Implementation>
+</Method>
+
+<Method name="TestElements">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>TestData:%ListOfDataTypes,Comparison:%List</FormalSpec>
+<ReturnType>%Integer</ReturnType>
+<Implementation><![CDATA[
+	try {
+
+		if TestData.Count() '= $LL(Comparison) {
+			// Different lengths
+			w !!,"Test data and comparsion data arrays are of different lengths ["_TestData.Count()_","_$LL(Comparison)_"]",!
+			return 0
+		}
+
+		for i=1:1:TestData.Count() {
+			set TestDat = TestData.GetAt(i)
+			set CompareDat = $LI(Comparison,i)
+			if (TestDat '= CompareDat) {
+
+				w !!,"Test Data:",!
+				zzdump TestDat
+
+				w !!,"Comparison Data:",!
+				zzdump CompareDat
+
+				w !
+				return i
+			}
+		}
+
+		return -1
+
+	} catch (e) {
+		w !!,"Unexpected error encountered while testing array elements"
+
+		return 0
+	}
+]]></Implementation>
+</Method>
+
+<Method name="TestObjects">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>TestData:%ListOfObjects,Comparison:%List</FormalSpec>
+<ReturnType>%Integer</ReturnType>
+<Implementation><![CDATA[
+	try {
+
+		w " d1 "
+		if TestData.Count() '= $LL(Comparison) {
+			// Different lengths
+			w !!,"Test data and comparsion data arrays are of different lengths",!
+			return 0
+		}
+
+		w " d2 "
+		zw TestData.Count()
+		for i=1:1:TestData.Count() {
+			w " d3[i="_i_"] "
+			zw TestData
+			set TestDat = TestData.GetAt(i)
+			w " d4 "
+			set CompareDat = $LI(Comparison,i)
+			w " d5 "
+			if (TestDat '= CompareDat) {
+
+				w !!,"Test Data:",!
+				zzdump TestDat
+
+				w !!,"Comparison Data:",!
+				zzdump CompareDat
+
+				w !
+				return i
+			}
+		}
+
+		return -1
+
+	} catch (e) {
+		w !!,"Unexpected error encountered while testing array elements"
+
+		return 0
+	}
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="OPCUA.Tests.DataTestDS">
+<Super>%Persistent,OPCUA.DataSource.Definition</Super>
+<TimeChanged>67556,48670.9073806</TimeChanged>
+<TimeCreated>67556,48669.9612568</TimeCreated>
+
+<Parameter name="OPCUADATASOURCE">
+<Default>MyDataSource2</Default>
+</Parameter>
+
+<Parameter name="OPCUDEFAULTANAMESPACE">
+<Default>2</Default>
+</Parameter>
+
+<Property name="Boolean">
+<Type>OPCUA.Types.BooleanDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Scalar.Boolean"/>
+</Property>
+
+<Property name="SByte">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Scalar.SByte"/>
+</Property>
+
+<Property name="Byte">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Scalar.Byte"/>
+</Property>
+
+<Property name="Int16">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Scalar.Int16"/>
+</Property>
+
+<Property name="UInt16">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Scalar.UInt16"/>
+</Property>
+
+<Property name="Int32">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Scalar.Int32"/>
+</Property>
+
+<Property name="UInt32">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Scalar.UInt32"/>
+</Property>
+
+<Property name="Int64">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Scalar.Int64"/>
+</Property>
+
+<Property name="UInt64">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Scalar.UInt64"/>
+</Property>
+
+<Property name="Float">
+<Type>OPCUA.Types.FloatDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Scalar.Float"/>
+</Property>
+
+<Property name="Double">
+<Type>OPCUA.Types.DoubleDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Scalar.Double"/>
+</Property>
+
+<Property name="String">
+<Type>OPCUA.Types.StringDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Scalar.String"/>
+</Property>
+
+<Property name="TimeStamp">
+<Type>OPCUA.Types.TimeStampDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Scalar.DateTime"/>
+</Property>
+
+<UDLText name="T">
+<Content><![CDATA[
+// GUID 
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// ByteString
+
+]]></Content>
+</UDLText>
+
+<Property name="XMLElement">
+<Type>OPCUA.Types.StringDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Scalar.XmlElement"/>
+</Property>
+
+<Property name="NodeId">
+<Type>OPCUA.Types.NodeIdDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Scalar.NodeId"/>
+</Property>
+
+<UDLText name="T">
+<Content><![CDATA[
+// ExpandedNodeId
+
+]]></Content>
+</UDLText>
+
+<Property name="StatusCode">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Scalar.StatusCode"/>
+</Property>
+
+<Property name="QualifiedName">
+<Type>OPCUA.Types.QualifiedNameDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Scalar.QualifiedName"/>
+</Property>
+
+<Property name="LocalizedText">
+<Type>OPCUA.Types.LocalizedTextDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Scalar.LocalizedText"/>
+</Property>
+
+<UDLText name="T">
+<Content><![CDATA[
+// ExtensionObject
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// *** ARRAYS ***
+
+]]></Content>
+</UDLText>
+
+<Property name="BooleanArr">
+<Type>OPCUA.Types.ArrayDataValue.Boolean</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Arrays.Boolean"/>
+</Property>
+
+<Property name="SByteArr">
+<Type>OPCUA.Types.ArrayDataValue.Integer</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Arrays.SByte"/>
+</Property>
+
+<Property name="ByteArr">
+<Type>OPCUA.Types.ArrayDataValue.Integer</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Arrays.Byte"/>
+</Property>
+
+<Property name="Int16Arr">
+<Type>OPCUA.Types.ArrayDataValue.Integer</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Arrays.Int16"/>
+</Property>
+
+<Property name="UInt16Arr">
+<Type>OPCUA.Types.ArrayDataValue.Integer</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Arrays.UInt16"/>
+</Property>
+
+<Property name="Int32Arr">
+<Type>OPCUA.Types.ArrayDataValue.Integer</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Arrays.Int32"/>
+</Property>
+
+<Property name="UInt32Arr">
+<Type>OPCUA.Types.ArrayDataValue.Integer</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Arrays.UInt32"/>
+</Property>
+
+<Property name="Int64Arr">
+<Type>OPCUA.Types.ArrayDataValue.Integer</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Arrays.Int64"/>
+</Property>
+
+<Property name="UInt64Arr">
+<Type>OPCUA.Types.ArrayDataValue.Integer</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Arrays.UInt64"/>
+</Property>
+
+<Property name="FloatArr">
+<Type>OPCUA.Types.ArrayDataValue.Float</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Arrays.Float"/>
+</Property>
+
+<Property name="DoubleArr">
+<Type>OPCUA.Types.ArrayDataValue.Double</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Arrays.Double"/>
+</Property>
+
+<UDLText name="T">
+<Content><![CDATA[
+// Property StringArr As OPCUA.Types.ArrayDataValue.String(OPCUANODENAME = "Demo.Static.Arrays.String");
+
+]]></Content>
+</UDLText>
+
+<Property name="TimeStampArr">
+<Type>OPCUA.Types.ArrayDataValue.TimeStamp</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Arrays.DateTime"/>
+</Property>
+
+<UDLText name="T">
+<Content><![CDATA[
+// GUID 
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// ByteString
+
+]]></Content>
+</UDLText>
+
+<Property name="XMLElementArr">
+<Type>OPCUA.Types.ArrayDataValue.String</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Arrays.XmlElement"/>
+</Property>
+
+<UDLText name="T">
+<Content><![CDATA[
+// NodeId
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// ExpandedNodeId
+
+]]></Content>
+</UDLText>
+
+<Property name="StatusCodeArr">
+<Type>OPCUA.Types.ArrayDataValue.Integer</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Arrays.StatusCode"/>
+</Property>
+
+<UDLText name="T">
+<Content><![CDATA[
+// QualifiedName
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// LocalizedText
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// ExtensionObject
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// *** MATRICES ***
+
+]]></Content>
+</UDLText>
+
+<Property name="BooleanMatrix">
+<Type>OPCUA.Types.Multidimensional</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Matrix.Boolean"/>
+</Property>
+
+<Property name="SByteMatrix">
+<Type>OPCUA.Types.Multidimensional</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Matrix.SByte"/>
+</Property>
+
+<UDLText name="T">
+<Content><![CDATA[
+// Byte (not present on server)
+
+]]></Content>
+</UDLText>
+
+<Property name="Int16Matrix">
+<Type>OPCUA.Types.Multidimensional</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Matrix.Int16"/>
+</Property>
+
+<Property name="UInt16Matrix">
+<Type>OPCUA.Types.Multidimensional</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Matrix.UInt16"/>
+</Property>
+
+<Property name="Int32Matrix">
+<Type>OPCUA.Types.Multidimensional</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Matrix.Int32"/>
+</Property>
+
+<Property name="UInt32Matrix">
+<Type>OPCUA.Types.Multidimensional</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Matrix.UInt32"/>
+</Property>
+
+<Property name="Int64Matrix">
+<Type>OPCUA.Types.Multidimensional</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Matrix.Int64"/>
+</Property>
+
+<Property name="UInt64Matrix">
+<Type>OPCUA.Types.Multidimensional</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Matrix.UInt64"/>
+</Property>
+
+<Property name="FloatMatrix">
+<Type>OPCUA.Types.Multidimensional</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Matrix.Float"/>
+</Property>
+
+<Property name="DoubleMatrix">
+<Type>OPCUA.Types.Multidimensional</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Matrix.Double"/>
+</Property>
+
+<Property name="StringMatrix">
+<Type>OPCUA.Types.Multidimensional</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Matrix.String"/>
+</Property>
+
+<Property name="TimeStampMatrix">
+<Type>OPCUA.Types.Multidimensional</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Static.Matrix.DateTime"/>
+</Property>
+
+<UDLText name="T">
+<Content><![CDATA[
+// Guid
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// ByteString (not present on server)
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// XmlElement (not present on server)
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// NodeId
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// ExpandedNodeId
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// StatusCode
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// QualifiedName
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// LocalizedText
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// ExtensionObject
+
+]]></Content>
+</UDLText>
+
+<Storage name="Default">
+<Type>%Storage.Persistent</Type>
+<DataLocation>^OPCUA.Tests.DataTestDSD</DataLocation>
+<DefaultData>DataTestDSDefaultData</DefaultData>
+<IdLocation>^OPCUA.Tests.DataTestDSD</IdLocation>
+<IndexLocation>^OPCUA.Tests.DataTestDSI</IndexLocation>
+<StreamLocation>^OPCUA.Tests.DataTestDSS</StreamLocation>
+<Data name="DataTestDSDefaultData">
+<Structure>listnode</Structure>
+<Subscript/>
+<Value name="1">
+<Value>%%CLASSNAME</Value>
+</Value>
+<Value name="2">
+<Value>Boolean</Value>
+</Value>
+<Value name="3">
+<Value>SByte</Value>
+</Value>
+<Value name="4">
+<Value>Byte</Value>
+</Value>
+<Value name="5">
+<Value>Int16</Value>
+</Value>
+<Value name="6">
+<Value>UInt16</Value>
+</Value>
+<Value name="7">
+<Value>Int32</Value>
+</Value>
+<Value name="8">
+<Value>UInt32</Value>
+</Value>
+<Value name="9">
+<Value>Int64</Value>
+</Value>
+<Value name="10">
+<Value>UInt64</Value>
+</Value>
+<Value name="11">
+<Value>Float</Value>
+</Value>
+<Value name="12">
+<Value>Double</Value>
+</Value>
+<Value name="13">
+<Value>String</Value>
+</Value>
+<Value name="14">
+<Value>TimeStamp</Value>
+</Value>
+<Value name="15">
+<Value>XMLElement</Value>
+</Value>
+<Value name="16">
+<Value>NodeId</Value>
+</Value>
+<Value name="17">
+<Value>StatusCode</Value>
+</Value>
+<Value name="18">
+<Value>QualifiedName</Value>
+</Value>
+<Value name="19">
+<Value>LocalizedText</Value>
+</Value>
+<Value name="20">
+<Value>BooleanArr</Value>
+</Value>
+<Value name="21">
+<Value>SByteArr</Value>
+</Value>
+<Value name="22">
+<Value>ByteArr</Value>
+</Value>
+<Value name="23">
+<Value>Int16Arr</Value>
+</Value>
+<Value name="24">
+<Value>UInt16Arr</Value>
+</Value>
+<Value name="25">
+<Value>Int32Arr</Value>
+</Value>
+<Value name="26">
+<Value>UInt32Arr</Value>
+</Value>
+<Value name="27">
+<Value>Int64Arr</Value>
+</Value>
+<Value name="28">
+<Value>UInt64Arr</Value>
+</Value>
+<Value name="29">
+<Value>FloatArr</Value>
+</Value>
+<Value name="30">
+<Value>DoubleArr</Value>
+</Value>
+<Value name="31">
+<Value>TimeStampArr</Value>
+</Value>
+<Value name="32">
+<Value>XMLElementArr</Value>
+</Value>
+<Value name="33">
+<Value>StatusCodeArr</Value>
+</Value>
+<Value name="34">
+<Value>BooleanMatrix</Value>
+</Value>
+<Value name="35">
+<Value>SByteMatrix</Value>
+</Value>
+<Value name="36">
+<Value>Int16Matrix</Value>
+</Value>
+<Value name="37">
+<Value>UInt16Matrix</Value>
+</Value>
+<Value name="38">
+<Value>Int32Matrix</Value>
+</Value>
+<Value name="39">
+<Value>UInt32Matrix</Value>
+</Value>
+<Value name="40">
+<Value>Int64Matrix</Value>
+</Value>
+<Value name="41">
+<Value>UInt64Matrix</Value>
+</Value>
+<Value name="42">
+<Value>FloatMatrix</Value>
+</Value>
+<Value name="43">
+<Value>DoubleMatrix</Value>
+</Value>
+<Value name="44">
+<Value>StringMatrix</Value>
+</Value>
+<Value name="45">
+<Value>TimeStampMatrix</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="OPCUA.Tests.Production">
+<Super>Ens.Production</Super>
+<TimeChanged>67556,48669.4539405</TimeChanged>
+<TimeCreated>67556,48669.4539405</TimeCreated>
+
+<XData name="ProductionDefinition">
+<Data><![CDATA[
+<Production Name="Examples.OPCUADS.ExampleProduction" LogGeneralTraceEvents="false">
+  <Description></Description>
+  <ActorPoolSize>2</ActorPoolSize>
+  <Item Name="DataTest" Category="" ClassName="OPCUA.Service.TCPPollingService" PoolSize="1"
+ Enabled="false" Foreground="false" 
+ Comment="DataTest Data" 
+ LogTraceEvents="true" Schedule="">
+    <Setting Target="Adapter" Name="DataSourceClass">OPCUA.Tests.DataTestDS</Setting>
+    <Setting Target="Adapter" Name="URL">opc.tcp://opcuaserver.com:48010</Setting>
+    <Setting Target="Adapter" Name="CallInterval">5</Setting>
+  </Item>
+  <Item Name="AttributesTestDS" Category="" ClassName="OPCUA.Service.TCPPollingService" PoolSize="1"
+ Enabled="false" Foreground="false" 
+ Comment="Attributes Test Data" 
+ LogTraceEvents="true" Schedule="">
+    <Setting Target="Adapter" Name="DataSourceClass">OPCUA.Tests.AttributesTestDS</Setting>
+    <Setting Target="Adapter" Name="URL">opc.tcp://opcuaserver.com:48010</Setting>
+    <Setting Target="Adapter" Name="CallInterval">5</Setting>
+  </Item>
+  <Item Name="ScalarTypesTestDS" Category="" ClassName="OPCUA.Service.TCPPollingService" PoolSize="1"
+ Enabled="false" Foreground="false" 
+ Comment="Scalar Types Test Data"
+ LogTraceEvents="true" Schedule="">
+    <Setting Target="Adapter" Name="DataSourceClass">OPCUA.Tests.ScalarTypesTestDS</Setting>
+    <Setting Target="Adapter" Name="URL">opc.tcp://opcuaserver.com:48010</Setting>
+    <Setting Target="Adapter" Name="CallInterval">5</Setting>
+  </Item>
+  <Item Name="PollingExample" Category="" ClassName="OPCUA.Service.TCPPollingService" PoolSize="1"
+ Enabled="false" Foreground="false" 
+ Comment="This example repeatedly polls a locally-running OPC UA server for input." 
+ LogTraceEvents="true" Schedule="">
+    <Setting Target="Adapter" Name="DataSourceClass">Examples.OPCUADS.PollingExample</Setting>
+    <Setting Target="Adapter" Name="URL">opc.tcp://plc</Setting>
+    <Setting Target="Adapter" Name="CallInterval">1</Setting>
+  </Item>
+  <Item Name="SubscriptionExample" Category="" ClassName="OPCUA.Service.TCPSubscriptionService" PoolSize="1"
+ Enabled="false" Foreground="false" 
+ Comment="This example receives input data from a subscription to monitored items on a locally-running OPC UA server." 
+ LogTraceEvents="true" Schedule="">
+    <Setting Target="Adapter" Name="DataSourceClass">Examples.OPCUADS.SubscriptionExample</Setting>
+    <Setting Target="Adapter" Name="URL">opc.tcp://plc</Setting>
+    <Setting Target="Adapter" Name="RequestedPublishingInterval">300</Setting>
+    <Setting Target="Adapter" Name="RequestedSamplingInterval">0</Setting>
+    <Setting Target="Adapter" Name="RequestedQueueSize">5</Setting>
+  </Item>
+  <Item Name="SecureExample" Category="" ClassName="OPCUA.Service.TCPSubscriptionService" PoolSize="1"
+ Enabled="false" Foreground="false" 
+ Comment="This example receives input data from a server requiring mutual authentication and transmission encryption." 
+ LogTraceEvents="true" Schedule="">
+    <Setting Target="Adapter" Name="DataSourceClass">Examples.OPCUADS.SecureExample</Setting>
+    <Setting Target="Adapter" Name="URL">opc.tcp://certified-server</Setting>
+    <Setting Target="Adapter" Name="RequestedPublishingInterval">1000</Setting>
+    <Setting Target="Adapter" Name="RequestedSamplingInterval">250</Setting>
+    <Setting Target="Adapter" Name="RequestedQueueSize">5</Setting>
+    <Setting Target="Adapter" Name="Username">user1</Setting>
+    <Setting Target="Adapter" Name="Password">password</Setting>
+    <Setting Target="Adapter" Name="SecurityMode">3</Setting>
+    <Setting Target="Adapter" Name="ClientURI">urn:secuac</Setting>
+    <Setting Target="Adapter" Name="PublicCertificate">/usr/irissys/uac/certs/secuac.crt.der</Setting>
+    <Setting Target="Adapter" Name="PrivateKey">/usr/irissys/uac/certs/secuac.key.der</Setting>
+    <Setting Target="Adapter" Name="TrustListDir">/usr/irissys/uac/certs/trustdir</Setting>
+    <Setting Target="Adapter" Name="RevocationListDir">/usr/irissys/uac/certs/crldir</Setting>
+  </Item>
+  <Item Name="InternetPollingExample" Category="" ClassName="OPCUA.Service.TCPPollingService" PoolSize="1"
+ Enabled="false" Foreground="false" 
+ Comment="This example repeatedly polls a public OPC UA server at opcuaserver.com." 
+ LogTraceEvents="true" Schedule="">
+    <Setting Target="Adapter" Name="DataSourceClass">Examples.OPCUADS.InternetPollingExample</Setting>
+    <Setting Target="Adapter" Name="URL">opc.tcp://opcuaserver.com:48010</Setting>
+    <Setting Target="Adapter" Name="CallInterval">5</Setting>
+  </Item>
+  <Item Name="InternetSubscriptionExample" Category="" ClassName="OPCUA.Service.TCPSubscriptionService" PoolSize="1"
+ Enabled="false" Foreground="false" 
+ Comment="This example creates a subscription to monitored items on a pubic OPC UA server at opcuaserver.com."
+ LogTraceEvents="true" Schedule="">
+    <Setting Target="Adapter" Name="DataSourceClass">Examples.OPCUADS.InternetSubscriptionExample</Setting>
+    <Setting Target="Adapter" Name="URL">opc.tcp://opcuaserver.com:48010</Setting>
+    <Setting Target="Adapter" Name="CallInterval">5</Setting>
+    <Setting Target="Adapter" Name="ReestablishOnEmptyResult">3</Setting>
+  </Item>
+  <Item Name="ArrayExample" Category="" ClassName="OPCUA.Service.TCPPollingService" PoolSize="1"
+ Enabled="false" Foreground="false" 
+ Comment="Array Example" 
+ LogTraceEvents="true" Schedule="">
+    <Setting Target="Adapter" Name="DataSourceClass">Examples.OPCUADS.ArrayExample</Setting>
+    <Setting Target="Adapter" Name="URL">opc.tcp://opcuaserver.com:48010</Setting>
+    <Setting Target="Adapter" Name="CallInterval">5</Setting>
+  </Item>
+</Production>
+]]></Data>
+</XData>
+</Class>
+
+
+<Class name="OPCUA.Tests.ScalarTypesTestDS">
+<Super>%Persistent,OPCUA.DataSource.Definition</Super>
+<TimeChanged>67556,48670.8863525</TimeChanged>
+<TimeCreated>67556,48668.9668412</TimeCreated>
+
+<Parameter name="OPCUADATASOURCE">
+<Default>MyDataSource2</Default>
+</Parameter>
+
+<Parameter name="OPCUDEFAULTANAMESPACE">
+<Default>2</Default>
+</Parameter>
+
+<Property name="Boolean">
+<Type>OPCUA.Types.BooleanDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.Boolean"/>
+</Property>
+
+<Property name="SByte">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.SByte"/>
+</Property>
+
+<Property name="Byte">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.Byte"/>
+</Property>
+
+<Property name="Int16">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.Int16"/>
+</Property>
+
+<Property name="UInt16">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.UInt16"/>
+</Property>
+
+<Property name="Int32">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.Int32"/>
+</Property>
+
+<Property name="UInt32">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.UInt32"/>
+</Property>
+
+<Property name="Int64">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.Int64"/>
+</Property>
+
+<Property name="UInt64">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.UInt64"/>
+</Property>
+
+<Property name="Float">
+<Type>OPCUA.Types.FloatDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.Float"/>
+</Property>
+
+<Property name="Double">
+<Type>OPCUA.Types.DoubleDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.Double"/>
+</Property>
+
+<Property name="String">
+<Type>OPCUA.Types.StringDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.String"/>
+</Property>
+
+<Property name="TimeStamp">
+<Type>OPCUA.Types.TimeStampDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.DateTime"/>
+</Property>
+
+<UDLText name="T">
+<Content><![CDATA[
+// GUID
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// ByteString
+
+]]></Content>
+</UDLText>
+
+<Property name="XMLElement">
+<Type>OPCUA.Types.StringDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.XmlElement"/>
+</Property>
+
+<Property name="NodeId">
+<Type>OPCUA.Types.NodeIdDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.NodeId"/>
+</Property>
+
+<UDLText name="T">
+<Content><![CDATA[
+// ExpandedNodeId
+
+]]></Content>
+</UDLText>
+
+<Property name="StatusCode">
+<Type>OPCUA.Types.IntegerDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.StatusCode"/>
+</Property>
+
+<Property name="QualifiedName">
+<Type>OPCUA.Types.QualifiedNameDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.QualifiedName"/>
+</Property>
+
+<Property name="LocalizedText">
+<Type>OPCUA.Types.LocalizedTextDataValue</Type>
+<Parameter name="OPCUANODENAME" value="Demo.Dynamic.Scalar.LocalizedText"/>
+</Property>
+
+<UDLText name="T">
+<Content><![CDATA[
+// ExtensionObject
+
+]]></Content>
+</UDLText>
+
+<Storage name="Default">
+<Type>%Storage.Persistent</Type>
+<DataLocation>^OPCUA.Tests.ScalarTypesTestDSD</DataLocation>
+<DefaultData>ScalarTypesTestDSDefaultData</DefaultData>
+<IdLocation>^OPCUA.Tests.ScalarTypesTestDSD</IdLocation>
+<IndexLocation>^OPCUA.Tests.ScalarTypesTestDSI</IndexLocation>
+<StreamLocation>^OPCUA.Tests.ScalarTypesTestDSS</StreamLocation>
+<Data name="ScalarTypesTestDSDefaultData">
+<Structure>listnode</Structure>
+<Subscript/>
+<Value name="1">
+<Value>%%CLASSNAME</Value>
+</Value>
+<Value name="2">
+<Value>Boolean</Value>
+</Value>
+<Value name="3">
+<Value>SByte</Value>
+</Value>
+<Value name="4">
+<Value>Byte</Value>
+</Value>
+<Value name="5">
+<Value>Int16</Value>
+</Value>
+<Value name="6">
+<Value>UInt16</Value>
+</Value>
+<Value name="7">
+<Value>Int32</Value>
+</Value>
+<Value name="8">
+<Value>UInt32</Value>
+</Value>
+<Value name="9">
+<Value>Int64</Value>
+</Value>
+<Value name="10">
+<Value>UInt64</Value>
+</Value>
+<Value name="11">
+<Value>Float</Value>
+</Value>
+<Value name="12">
+<Value>Double</Value>
+</Value>
+<Value name="13">
+<Value>String</Value>
+</Value>
+<Value name="14">
+<Value>TimeStamp</Value>
+</Value>
+<Value name="15">
+<Value>XMLElement</Value>
+</Value>
+<Value name="16">
+<Value>NodeId</Value>
+</Value>
+<Value name="17">
+<Value>StatusCode</Value>
+</Value>
+<Value name="18">
+<Value>QualifiedName</Value>
+</Value>
+<Value name="19">
+<Value>LocalizedText</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="OPCUA.Types.AbstractDataValue">
+<Description>
+When you make a request to OPC-UA for the value of a Node, it comes with its SourceTimeStamp,
+ServerTimeStamp and Status. </Description>
+<PropertyClass>OPCUA.Types.PropertyClass</PropertyClass>
+<Super>%SerialObject</Super>
+<TimeChanged>67556,48669.9541296</TimeChanged>
+<TimeCreated>67556,48669.9541296</TimeCreated>
+
+<Property name="SourceTimeStamp">
+<Type>%TimeStamp</Type>
+</Property>
+
+<Property name="ServerTimeStamp">
+<Type>%TimeStamp</Type>
+</Property>
+
+<Property name="Status">
+<Type>%Integer</Type>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Serial</Type>
+<State>AbstractDataValueState</State>
+<StreamLocation>^OPCUA.Types.AbstractDataValueS</StreamLocation>
+<Data name="AbstractDataValueState">
+<Value name="1">
+<Value>SourceTimeStamp</Value>
+</Value>
+<Value name="2">
+<Value>ServerTimeStamp</Value>
+</Value>
+<Value name="3">
+<Value>Status</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="OPCUA.Types.ArrayDataValue.Boolean">
+<Super>OPCUA.Types.AbstractDataValue</Super>
+<TimeChanged>67556,48669.4369768</TimeChanged>
+<TimeCreated>67556,48669.4369768</TimeCreated>
+
+<Property name="Values">
+<Type>%Boolean</Type>
+<Collection>list</Collection>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Serial</Type>
+<Data name="AbstractDataValueState">
+<Value name="1">
+<Value>SourceTimeStamp</Value>
+</Value>
+<Value name="2">
+<Value>ServerTimeStamp</Value>
+</Value>
+<Value name="3">
+<Value>Status</Value>
+</Value>
+<Value name="4">
+<Value>Values</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="OPCUA.Types.ArrayDataValue.Double">
+<Super>OPCUA.Types.AbstractDataValue</Super>
+<TimeChanged>67556,48669.4402572</TimeChanged>
+<TimeCreated>67556,48669.4402572</TimeCreated>
+
+<Property name="Values">
+<Type>%Double</Type>
+<Collection>list</Collection>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Serial</Type>
+<Data name="AbstractDataValueState">
+<Value name="1">
+<Value>SourceTimeStamp</Value>
+</Value>
+<Value name="2">
+<Value>ServerTimeStamp</Value>
+</Value>
+<Value name="3">
+<Value>Status</Value>
+</Value>
+<Value name="4">
+<Value>Values</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="OPCUA.Types.ArrayDataValue.Float">
+<Super>OPCUA.Types.AbstractDataValue</Super>
+<TimeChanged>67556,48670.5654622</TimeChanged>
+<TimeCreated>67556,48670.5654622</TimeCreated>
+
+<Property name="Values">
+<Type>%Float</Type>
+<Collection>list</Collection>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Serial</Type>
+<Data name="AbstractDataValueState">
+<Value name="1">
+<Value>SourceTimeStamp</Value>
+</Value>
+<Value name="2">
+<Value>ServerTimeStamp</Value>
+</Value>
+<Value name="3">
+<Value>Status</Value>
+</Value>
+<Value name="4">
+<Value>Values</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="OPCUA.Types.ArrayDataValue.Integer">
+<Super>OPCUA.Types.AbstractDataValue</Super>
+<TimeChanged>67556,48669.9494261</TimeChanged>
+<TimeCreated>67556,48669.9494261</TimeCreated>
+
+<Property name="Values">
+<Type>%Integer</Type>
+<Collection>list</Collection>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Serial</Type>
+<Data name="AbstractDataValueState">
+<Value name="1">
+<Value>SourceTimeStamp</Value>
+</Value>
+<Value name="2">
+<Value>ServerTimeStamp</Value>
+</Value>
+<Value name="3">
+<Value>Status</Value>
+</Value>
+<Value name="4">
+<Value>Values</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="OPCUA.Types.ArrayDataValue.String">
+<Super>OPCUA.Types.AbstractDataValue</Super>
+<TimeChanged>67556,48669.4340855</TimeChanged>
+<TimeCreated>67556,48669.4340855</TimeCreated>
+
+<Property name="Values">
+<Type>%String</Type>
+<Collection>list</Collection>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Serial</Type>
+<Data name="AbstractDataValueState">
+<Value name="1">
+<Value>SourceTimeStamp</Value>
+</Value>
+<Value name="2">
+<Value>ServerTimeStamp</Value>
+</Value>
+<Value name="3">
+<Value>Status</Value>
+</Value>
+<Value name="4">
+<Value>Values</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="OPCUA.Types.ArrayDataValue.TimeStamp">
+<Super>OPCUA.Types.AbstractDataValue</Super>
+<TimeChanged>67556,48669.968636</TimeChanged>
+<TimeCreated>67556,48669.968636</TimeCreated>
+
+<Property name="Values">
+<Type>%TimeStamp</Type>
+<Collection>list</Collection>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Serial</Type>
+<Data name="AbstractDataValueState">
+<Value name="1">
+<Value>SourceTimeStamp</Value>
+</Value>
+<Value name="2">
+<Value>ServerTimeStamp</Value>
+</Value>
+<Value name="3">
+<Value>Status</Value>
+</Value>
+<Value name="4">
+<Value>Values</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="OPCUA.Types.BooleanDataValue">
+<Super>OPCUA.Types.AbstractDataValue</Super>
+<TimeChanged>67556,48669.4436024</TimeChanged>
+<TimeCreated>67556,48669.4436024</TimeCreated>
+
+<Property name="Value">
+<Type>%Boolean</Type>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Serial</Type>
+<Data name="AbstractDataValueState">
+<Value name="1">
+<Value>SourceTimeStamp</Value>
+</Value>
+<Value name="2">
+<Value>ServerTimeStamp</Value>
+</Value>
+<Value name="3">
+<Value>Status</Value>
+</Value>
+<Value name="4">
+<Value>Value</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="OPCUA.Types.DoubleDataValue">
+<Super>OPCUA.Types.AbstractDataValue</Super>
+<TimeChanged>67556,48668.9417371</TimeChanged>
+<TimeCreated>67556,48668.9417371</TimeCreated>
+
+<Property name="Value">
+<Type>%Double</Type>
+<Parameter name="OPCUAVALUETYPE" value="Double"/>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Serial</Type>
+<Data name="AbstractDataValueState">
+<Value name="1">
+<Value>SourceTimeStamp</Value>
+</Value>
+<Value name="2">
+<Value>ServerTimeStamp</Value>
+</Value>
+<Value name="3">
+<Value>Status</Value>
+</Value>
+<Value name="4">
+<Value>Value</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="OPCUA.Types.FloatDataValue">
+<Super>OPCUA.Types.AbstractDataValue</Super>
+<TimeChanged>67556,48668.9194803</TimeChanged>
+<TimeCreated>67556,48668.9194803</TimeCreated>
+
+<Property name="Value">
+<Type>%Float</Type>
+<Parameter name="OPCUAVALUETYPE" value="Float"/>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Serial</Type>
+<Data name="AbstractDataValueState">
+<Value name="1">
+<Value>SourceTimeStamp</Value>
+</Value>
+<Value name="2">
+<Value>ServerTimeStamp</Value>
+</Value>
+<Value name="3">
+<Value>Status</Value>
+</Value>
+<Value name="4">
+<Value>Value</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="OPCUA.Types.IntegerDataValue">
+<Super>OPCUA.Types.AbstractDataValue</Super>
+<TimeChanged>67556,48670.562392</TimeChanged>
+<TimeCreated>67556,48670.562392</TimeCreated>
+
+<Property name="Value">
+<Type>%Integer</Type>
+<Parameter name="OPCUAVALUETYPE" value="Int64"/>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Serial</Type>
+<Data name="AbstractDataValueState">
+<Value name="1">
+<Value>SourceTimeStamp</Value>
+</Value>
+<Value name="2">
+<Value>ServerTimeStamp</Value>
+</Value>
+<Value name="3">
+<Value>Status</Value>
+</Value>
+<Value name="4">
+<Value>Value</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="OPCUA.Types.LocalizedTextDataValue">
+<Super>OPCUA.Types.AbstractDataValue</Super>
+<TimeChanged>67556,48668.9534692</TimeChanged>
+<TimeCreated>67556,48668.9534692</TimeCreated>
+
+<Property name="Text">
+<Type>%String</Type>
+<Parameter name="MAXLEN"/>
+</Property>
+
+<Property name="Locale">
+<Type>%String</Type>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Serial</Type>
+<Data name="AbstractDataValueState">
+<Value name="1">
+<Value>SourceTimeStamp</Value>
+</Value>
+<Value name="2">
+<Value>ServerTimeStamp</Value>
+</Value>
+<Value name="3">
+<Value>Status</Value>
+</Value>
+<Value name="4">
+<Value>Text</Value>
+</Value>
+<Value name="5">
+<Value>Locale</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="OPCUA.Types.Multidimensional">
+<Description>
+A multi-dimensional value may have a number of dimensions. If it has just one dimension,
+consider using the Array types which are typed and can be easily iterated using the normal
+%Collection methods such as Count() and GetAt().
+
+But if it has more than one dimension, this is the perfect type for it. To keep things simple though,
+we are not enforcing the data type in the IRIS side. The "Values" property is just a %List (A $listbuild)
+that is actually a "list of lists". If you have two dimensions, each element of this list is another list like: 
+Example for getting row 1, column 1: $ListGet($ListGet(obj.Values, 1), 1).
+If you have three dimensions, this will be $ListGet($ListGet($ListGet(obj.Values, 1) , 1), 1).</Description>
+<Super>OPCUA.Types.AbstractDataValue</Super>
+<TimeChanged>67556,48669.0445792</TimeChanged>
+<TimeCreated>67556,48669.0445792</TimeCreated>
+
+<Property name="Values">
+<Type>%List</Type>
+</Property>
+
+<Property name="NumberOfDimensions">
+<Type>%Integer</Type>
+<InitialExpression>2</InitialExpression>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Serial</Type>
+<Data name="AbstractDataValueState">
+<Value name="1">
+<Value>SourceTimeStamp</Value>
+</Value>
+<Value name="2">
+<Value>ServerTimeStamp</Value>
+</Value>
+<Value name="3">
+<Value>Status</Value>
+</Value>
+<Value name="4">
+<Value>Values</Value>
+</Value>
+<Value name="5">
+<Value>NumberOfDimensions</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="OPCUA.Types.NodeIdDataValue">
+<Super>OPCUA.Types.AbstractDataValue</Super>
+<TimeChanged>67556,48668.9891415</TimeChanged>
+<TimeCreated>67556,48668.9891415</TimeCreated>
+
+<Property name="Namespace">
+<Type>%Integer</Type>
+</Property>
+
+<Property name="Identifier">
+</Property>
+
+<Property name="IdentifierType">
+<Type>%Integer</Type>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Serial</Type>
+<Data name="AbstractDataValueState">
+<Value name="1">
+<Value>SourceTimeStamp</Value>
+</Value>
+<Value name="2">
+<Value>ServerTimeStamp</Value>
+</Value>
+<Value name="3">
+<Value>Status</Value>
+</Value>
+<Value name="4">
+<Value>Namespace</Value>
+</Value>
+<Value name="5">
+<Value>Identifier</Value>
+</Value>
+<Value name="6">
+<Value>IdentifierType</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="OPCUA.Types.PropertyClass">
+<TimeChanged>67556,48669.041506</TimeChanged>
+<TimeCreated>67556,48669.041506</TimeCreated>
+
+<UDLText name="T">
+<Content><![CDATA[
+// Parameter OPCUANAMESPACE As %String;
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// Parameter OPCUANODENAME As %String;
+
+]]></Content>
+</UDLText>
+
+<UDLText name="T">
+<Content><![CDATA[
+// Parameter OPCUAATTRIBUTEID As %String;
+
+]]></Content>
+</UDLText>
+
+<Parameter name="OPCUAVALUETYPE">
+<Type>%String</Type>
+</Parameter>
+</Class>
+
+
+<Class name="OPCUA.Types.QualifiedNameDataValue">
+<Super>OPCUA.Types.AbstractDataValue</Super>
+<TimeChanged>67556,48669.9477442</TimeChanged>
+<TimeCreated>67556,48669.9477442</TimeCreated>
+
+<Property name="Name">
+<Type>%String</Type>
+</Property>
+
+<Property name="Namespace">
+<Type>%Integer</Type>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Serial</Type>
+<Data name="AbstractDataValueState">
+<Value name="1">
+<Value>SourceTimeStamp</Value>
+</Value>
+<Value name="2">
+<Value>ServerTimeStamp</Value>
+</Value>
+<Value name="3">
+<Value>Status</Value>
+</Value>
+<Value name="4">
+<Value>Name</Value>
+</Value>
+<Value name="5">
+<Value>Namespace</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="OPCUA.Types.StringDataValue">
+<Super>OPCUA.Types.AbstractDataValue</Super>
+<TimeChanged>67556,48669.9683974</TimeChanged>
+<TimeCreated>67556,48669.9683974</TimeCreated>
+
+<Property name="Value">
+<Type>%String</Type>
+<Parameter name="OPCUAVALUETYPE" value="String"/>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Serial</Type>
+<Data name="AbstractDataValueState">
+<Value name="1">
+<Value>SourceTimeStamp</Value>
+</Value>
+<Value name="2">
+<Value>ServerTimeStamp</Value>
+</Value>
+<Value name="3">
+<Value>Status</Value>
+</Value>
+<Value name="4">
+<Value>Value</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="OPCUA.Types.TimeStampDataValue">
+<Super>OPCUA.Types.AbstractDataValue</Super>
+<TimeChanged>67556,48668.9938245</TimeChanged>
+<TimeCreated>67556,48668.9938245</TimeCreated>
+
+<Property name="Value">
+<Type>%TimeStamp</Type>
+<Parameter name="OPCUAVALUETYPE" value="DateTime"/>
+</Property>
+
+<Storage name="Default">
+<Type>%Storage.Serial</Type>
+<Data name="AbstractDataValueState">
+<Value name="1">
+<Value>SourceTimeStamp</Value>
+</Value>
+<Value name="2">
+<Value>ServerTimeStamp</Value>
+</Value>
+<Value name="3">
+<Value>Status</Value>
+</Value>
+<Value name="4">
+<Value>Value</Value>
+</Value>
+</Data>
+</Storage>
+</Class>
+
+
+<Class name="OPCUA.Utils">
+<Description>
+Miscellaneous utility functions used in conjunction with
+the OPC-UA connector.</Description>
+<IncludeCode>%callout,OPCUA.Constants,Ensemble</IncludeCode>
+<TimeChanged>67556,48668.9486163</TimeChanged>
+<TimeCreated>67556,48668.9486163</TimeCreated>
+
+<Method name="Initialize">
+<Description><![CDATA[
+Used to load the dynamic library containing the native code
+for the OPC-UA connector. This function must be called prior
+to calling many of the methods 
+of the <class>OPCUA.Client</class> class.]]></Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+    try {
+
+        #; See ##class(OPCUA.Class).GetStatusCodeName()
+
+        set tOpcuaStatusCode = 0 // Status = "Good"
+
+        If '$Data(%ZUtilsIrisOpcuaLibraryId) throw ##class(%Exception.StatusException).CreateFromStatus(0)
+
+		//set tRetval=$ZF(-6,$$$IrisOPCUALibrary,$$$zfGetStatusCodeNameB,"",$LB(tOpcuaStatusCode))
+		set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfGetStatusCodeNameB,"",$LB(tOpcuaStatusCode))
+
+        If $List(tRetval,1)=0 return $$$OK // Library is already initialized
+
+    } catch (e) {
+        $$$TRACE("IrisOPCUA may not be loaded")
+    }
+
+    #dim tSC as %Status = $$$OK
+    #dim tPathname as %String = ""
+
+    try {
+
+        //set tPathname = ^OPCUA.Library.Pathname
+        set tSC = ##class(OPCUA.Utils).GetLibPathname(.tPathname)
+		$$$ThrowOnError(tSC)
+        
+        $$$TRACE("Attempting to load IrisOPCUA with pathname '"_tPathname_"'")
+
+        //do $ZF(-4,5,$$$IrisOPCUALibrary,tPathname)
+        set %ZUtilsIrisOpcuaLibraryId = $ZF(-4,1,tPathname)
+
+    } catch (e) {
+        set tSC = e.AsStatus()
+        $$$LOGERROR("Error thrown during IrisOPCUA handle assignment : "_$SYSTEM.Status.GetErrorText(tSC))
+    }
+
+    set tSC = $$$OK
+
+    try {
+
+        If '$Data(%ZUtilsIrisOpcuaLibraryId) throw ##class(%Exception.StatusException).CreateFromStatus(0)
+
+		//set tRetval=$ZF(-6,$$$IrisOPCUALibrary,$$$zfGetStatusCodeNameB,"",$LB(0))
+		set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfGetStatusCodeNameB,"",$LB(0))
+
+        If $List(tRetval,1)'=0 Set tSC=##class(OPCUA.Client).DecodeError(tRetval)
+
+        if $$$ISERR(tSC) {
+            $$$LOGERROR("Unable to load IrisOPCUA : Error returned : "_$SYSTEM.Status.GetErrorText(tSC))
+        } Else {
+
+            set tSC = ##class(OPCUA.Utils).GetVersion(.tRetval) // Reusing tRetval
+            Quit:$$$ISERR(tSC)
+            
+            set tVersion = "v"_$LI(tRetval,2)
+            $$$LOGINFO("IrisOPCUA loaded successfully : "_tVersion)
+        }
+
+    } catch (e) {
+        set tSC = e.AsStatus()
+        $$$LOGERROR("Unable to load IrisOPCUA : Error thrown : "_$SYSTEM.Status.GetErrorText(tSC))
+    }
+
+    Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="Install">
+<Description><![CDATA[
+Used to specify the pathname of a dynamic library, usually
+one named as <i>irisopcua.so</i>, 
+that contains the native code for the OPC-UA connector.]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pPathname:%String</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+    #dim tSC as %Status = $$$OK
+
+    try {    
+
+        set ^OPCUA.Library.Pathname = pPathname
+
+    } catch (e) {
+        set tSC = e.AsStatus()
+    }
+
+    Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="GetLibPathname">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>*pPathname:%String</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+    #dim tSC as %Status = $$$OK
+    
+    try {
+
+        if ($GET(^OPCUA.Library.Pathname) '= "") set pPathname = ^OPCUA.Library.Pathname Quit
+
+        set tPathname = $System.Util.BinaryDirectory()_"IrisOPCUA.dll"
+        if ##class(%File).Exists(tPathname) set pPathname = tPathname Quit
+
+        set tPathname = $System.Util.BinaryDirectory()_"irisopcua.so"
+        if ##class(%File).Exists(tPathname) set pPathname = tPathname Quit
+
+        set pPathname = ""
+        set tSC = $System.Status.Error(5012, "IrisOPCUA.dll/.so")
+
+    } catch (e) {
+        set pPathname = ""
+        set tSC = e.AsStatus()
+    }
+
+    Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="GetUStr">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pStr:%String</FormalSpec>
+<ReturnType>%String</ReturnType>
+<Implementation><![CDATA[
+    set tRet=""
+
+    try {
+
+        if $System.Version.IsUnicode() {
+
+            set tLen=$L(pStr),i=1
+            while i <= tLen {
+                set c = $E(pStr,i,i)
+                if c = "\" {
+                    if i + 1 > tLen Quit // ERROR
+                    set c = $E(pStr,i+1,i+1)
+                    if c = "\" {
+                        set tRet=tRet_"\",i=i+2
+                    } elseif c = "u" {
+                        if i + 5 > tLen Quit // ERROR
+                        set tRet=tRet_$C($SYSTEM.Util.HexToDecimal($E(pStr,i+2,i+5))),i=i+6
+                    } else { 
+                        Quit // ERROR
+                    }
+                } else { 
+                    set tRet=tRet_c,i=i+1
+                }
+            }
+
+        } else {
+
+            do ##class(OPCUA.Utils).Initialize() // just in case
+            set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfGetUStr,"",$LB(pStr,1))
+
+            #; Errors are not returned, fragments instead.
+            #; Ignore any error. Return the result.
+            set tRet = $LI(tRetval,2)
+
+        }
+
+
+    } catch (e) {
+        // Ignore errors. Return the result.
+    }
+
+    return tRet
+]]></Implementation>
+</Method>
+
+<Method name="ErrTextIsTypeInfo">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>ErrText:%String</FormalSpec>
+<ReturnType>%Boolean</ReturnType>
+<Implementation><![CDATA[
+	set tSubstr = "(Info / No Error"
+	return $FIND(ErrText,tSubstr) '= 0
+]]></Implementation>
+</Method>
+
+<Method name="AreSimilarOpcuaDisconnectErrors">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>ErrStr1:%String,ErrStr2:%String</FormalSpec>
+<ReturnType>%Boolean</ReturnType>
+<Implementation><![CDATA[
+    if $FIND(ErrStr1,"0x800A0000") {
+        return $FIND(ErrStr2,"0x80AD0000") || $FIND(ErrStr2,"0x80AE0000")
+    } elseif $FIND(ErrStr1,"0x80AD0000") {
+        return $FIND(ErrStr2,"0x800A0000") || $FIND(ErrStr2,"0x80AE0000")
+    } elseif $FIND(ErrStr1,"0x80AE0000") {
+        return $FIND(ErrStr2,"0x800A0000") || $FIND(ErrStr2,"0x80AD0000")
+    } else {
+        return 0
+    }
+    #; if $FIND(ErrStr1,"0x800A0000") {
+    #;     return $FIND(ErrStr2,"0x80AD0000")
+    #; } elseif $FIND(ErrStr1,"0x80AD0000") {
+    #;     return $FIND(ErrStr2,"0x800A0000")
+    #; } else {
+    #;     return 0
+    #; }
+]]></Implementation>
+</Method>
+
+<Method name="GetVersion">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>*pOut:%List</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+    #dim tSC as %Status = $$$OK
+
+    try {
+
+		set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfVersion,"")
+
+        #; Test for error condition
+        If $List(tRetval,1)'=0 Set tSC=##class(OPCUA.Client).DecodeError(tRetval) Quit
+
+        #; Set output variables
+        Set pOut = tRetval
+        
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+
+	Quit tSC
+]]></Implementation>
+</Method>
+</Class>
+</Export>

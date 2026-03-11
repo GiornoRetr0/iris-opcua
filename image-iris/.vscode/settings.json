@@ -1,0 +1,7 @@
+{
+    "objectscript.conn": {
+        "server": "opcua~iris",
+        "ns": "APPINT",
+        "active": true
+    }
+}

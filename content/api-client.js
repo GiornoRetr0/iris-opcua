@@ -1,0 +1,161 @@
+// api-client.js — REST communication layer for OPC UA endpoints
+(function () {
+  'use strict';
+
+  const NS = (window.__opcuaExt = window.__opcuaExt || {});
+
+  const DEFAULT_TIMEOUT = 15000;
+
+  // Connection params merged into every request body
+  let _config = {
+    serverUrl: '',
+    securityMode: 1,
+    username: '',
+    password: '',
+    apiBaseUrl: '',
+    apiUsername: '',
+    apiPassword: ''
+  };
+
+  function setConfig(cfg) {
+    Object.assign(_config, cfg);
+  }
+
+  function getConfig() {
+    return Object.assign({}, _config);
+  }
+
+  /** Build request headers including Basic Auth for the IRIS API. */
+  function buildHeaders(extra) {
+    const headers = Object.assign({}, extra || {});
+    if (_config.apiUsername) {
+      headers['Authorization'] = 'Basic ' + btoa(_config.apiUsername + ':' + (_config.apiPassword || ''));
+    }
+    return headers;
+  }
+
+  /**
+   * Core fetch wrapper.
+   * POST JSON to the given endpoint, merge connection params, handle envelope.
+   */
+  async function request(endpoint, params) {
+    if (!_config.apiBaseUrl) {
+      throw new Error('API Base URL not configured');
+    }
+
+    const url = _config.apiBaseUrl.replace(/\/+$/, '') + endpoint;
+
+    const body = Object.assign({
+      url: _config.serverUrl,
+      securityMode: _config.securityMode
+    }, params);
+
+    // Only include OPC UA auth fields if non-empty
+    if (_config.username) body.username = _config.username;
+    if (_config.password) body.password = _config.password;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT);
+
+    try {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: buildHeaders({ 'Content-Type': 'application/json' }),
+        credentials: 'same-origin',
+        body: JSON.stringify(body),
+        signal: controller.signal
+      });
+
+      clearTimeout(timer);
+
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error('HTTP ' + resp.status + ': ' + (text || resp.statusText));
+      }
+
+      const json = await resp.json();
+
+      if (json.status === 'error') {
+        throw new Error(json.error || 'Unknown API error');
+      }
+
+      return json.data;
+    } catch (err) {
+      clearTimeout(timer);
+      if (err.name === 'AbortError') {
+        throw new Error('Request timed out after ' + (DEFAULT_TIMEOUT / 1000) + 's');
+      }
+      throw err;
+    }
+  }
+
+  /** Health check — GET only, no body needed. */
+  async function ping() {
+    if (!_config.apiBaseUrl) {
+      throw new Error('API Base URL not configured');
+    }
+    const url = _config.apiBaseUrl.replace(/\/+$/, '') + '/ping';
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT);
+    try {
+      const resp = await fetch(url, {
+        method: 'GET',
+        headers: buildHeaders(),
+        credentials: 'same-origin',
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const json = await resp.json();
+      return json.data;
+    } catch (err) {
+      clearTimeout(timer);
+      if (err.name === 'AbortError') throw new Error('Ping timed out');
+      throw err;
+    }
+  }
+
+  /**
+   * Browse children of a node.
+   * @param {number} nodeNs - Namespace index (default 0)
+   * @param {string|number} nodeId - Node identifier (default 84 = Objects)
+   * @param {number} nodeIdType - 0=numeric, 3=string
+   * @returns {Array} Array of child node descriptors
+   */
+  async function browse(nodeNs, nodeId, nodeIdType) {
+    const params = {};
+    if (nodeNs != null) params.nodeNs = nodeNs;
+    if (nodeId != null) params.nodeId = String(nodeId);
+    if (nodeIdType != null) params.nodeIdType = nodeIdType;
+    return request('/browse', params);
+  }
+
+  /**
+   * Read a single node value.
+   * @returns {Object} {nodeNs, nodeId, nodeIdType, value, sourceTimestamp, serverTimestamp, statusCode, inferredType, readError?}
+   */
+  async function read(nodeNs, nodeId, nodeIdType) {
+    const params = {};
+    if (nodeNs != null) params.nodeNs = nodeNs;
+    if (nodeId != null) params.nodeId = String(nodeId);
+    if (nodeIdType != null) params.nodeIdType = nodeIdType;
+    return request('/read', params);
+  }
+
+  /**
+   * Test OPC UA server connectivity.
+   * @returns {Object} {url, connected, responseTimeMs, error?}
+   */
+  async function test() {
+    return request('/test', {});
+  }
+
+  NS.ApiClient = {
+    setConfig: setConfig,
+    getConfig: getConfig,
+    ping: ping,
+    browse: browse,
+    read: read,
+    test: test
+  };
+})();

@@ -1,0 +1,24 @@
+.vscode/*
+*.DS_Store
+certgen/temp
+*/certs
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+.eggs/
+*.so
+.venv/
+venv/
+env/
+.env
+*.pyo
+.python-version
+pip-log.txt
+pip-delete-this-directory.txt
