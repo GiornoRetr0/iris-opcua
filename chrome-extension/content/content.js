@@ -35,13 +35,25 @@
   }
 
   async function bootstrap() {
-    // Load config from chrome.storage
+    if (!NS.ApiClient) return;
+
+    // Derive API URL from current page
+    var apiBaseUrl = NS.ApiClient.deriveApiBaseUrl();
+    if (!apiBaseUrl) return;
+
+    // Probe the API to check if OPC UA adapter is installed
+    // Try with default creds first, then without auth
+    var reachable = await NS.ApiClient.pingUrl(apiBaseUrl, 'SuperUser', 'SYS');
+    if (!reachable) {
+      reachable = await NS.ApiClient.pingUrl(apiBaseUrl, '', '');
+    }
+    if (!reachable) return; // OPC UA adapter not available — stay silent
+
+    // Load per-instance config from chrome.storage
     if (NS.ConfigPanel) {
       var cfg = await NS.ConfigPanel.load();
-      // Initialize ApiClient with saved config
-      if (NS.ApiClient) {
-        NS.ApiClient.setConfig(cfg);
-      }
+      // Initialize ApiClient with loaded config (apiBaseUrl is always derived)
+      NS.ApiClient.setConfig(cfg);
     }
 
     // Wire config change callback

@@ -8,11 +8,16 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "permissions": ["storage"],
-  "host_permissions": ["http://localhost/*"],
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": ["http://*/*", "https://*/*"],
   "content_scripts": [
     {
-      "matches": ["http://localhost/*/csp/sys/%25CSP.Portal.Home.zen*"],
+      "matches": [
+        "http://*/*/csp/sys/%25CSP.Portal.Home.zen*",
+        "https://*/*/csp/sys/%25CSP.Portal.Home.zen*",
+        "http://*/csp/sys/%25CSP.Portal.Home.zen*",
+        "https://*/csp/sys/%25CSP.Portal.Home.zen*"
+      ],
       "css": ["content/content.css"],
       "js": [
         "content/api-client.js",

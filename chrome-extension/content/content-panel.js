@@ -187,7 +187,7 @@
 
     // Load tree if server URL is set
     var cfg = NS.ConfigPanel ? NS.ConfigPanel.getConfig() : {};
-    if (cfg.serverUrl && cfg.apiBaseUrl) {
+    if (cfg.serverUrl) {
       updateConnectionStatus();
       if (NS.TreeBrowser) NS.TreeBrowser.loadRoot();
     } else {

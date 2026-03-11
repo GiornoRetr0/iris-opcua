@@ -150,12 +150,55 @@
     return request('/test', {});
   }
 
+  /**
+   * Derive the OPC UA API base URL from the current page URL.
+   * Strips everything from '/csp/' onward and appends '/opcua/api'.
+   */
+  function deriveApiBaseUrl() {
+    var href = window.location.href;
+    var idx = href.indexOf('/csp/');
+    if (idx === -1) return '';
+    return href.substring(0, idx) + '/opcua/api';
+  }
+
+  /**
+   * Standalone ping to a given API base URL.
+   * Returns true if the OPC UA REST API responds, false otherwise.
+   */
+  async function pingUrl(apiBaseUrl, apiUser, apiPass) {
+    if (!apiBaseUrl) return false;
+    var url = apiBaseUrl.replace(/\/+$/, '') + '/ping';
+    var headers = {};
+    if (apiUser) {
+      headers['Authorization'] = 'Basic ' + btoa(apiUser + ':' + (apiPass || ''));
+    }
+    var controller = new AbortController();
+    var timer = setTimeout(function () { controller.abort(); }, 5000);
+    try {
+      var resp = await fetch(url, {
+        method: 'GET',
+        headers: headers,
+        credentials: 'same-origin',
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      if (!resp.ok) return false;
+      var json = await resp.json();
+      return json.status === 'ok';
+    } catch (err) {
+      clearTimeout(timer);
+      return false;
+    }
+  }
+
   NS.ApiClient = {
     setConfig: setConfig,
     getConfig: getConfig,
     ping: ping,
+    pingUrl: pingUrl,
     browse: browse,
     read: read,
-    test: test
+    test: test,
+    deriveApiBaseUrl: deriveApiBaseUrl
   };
 })();

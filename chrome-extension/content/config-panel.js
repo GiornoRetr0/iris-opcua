@@ -4,14 +4,16 @@
 
   const NS = (window.__opcuaExt = window.__opcuaExt || {});
 
-  const STORAGE_KEY = 'opcuaExtConfig';
+  function storageKey() {
+    var base = NS.ApiClient ? NS.ApiClient.deriveApiBaseUrl() : '';
+    return 'opcuaExtConfig::' + base;
+  }
 
   const DEFAULTS = {
-    serverUrl: 'opc.tcp://localhost:48010',
+    serverUrl: '',
     securityMode: 1,
     username: '',
     password: '',
-    apiBaseUrl: 'http://localhost/iris251/csp/opcua/api',
     apiUsername: 'SuperUser',
     apiPassword: 'SYS',
     autoRefreshInterval: 5,
@@ -28,28 +30,35 @@
     _onConfigChange = cb;
   }
 
-  /** Load config from chrome.storage, returns merged config */
+  /** Load config from chrome.storage (per-instance), returns merged config */
   async function load() {
+    var key = storageKey();
     return new Promise((resolve) => {
       if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-        chrome.storage.local.get(STORAGE_KEY, (result) => {
-          if (result && result[STORAGE_KEY]) {
-            Object.assign(_config, result[STORAGE_KEY]);
+        chrome.storage.local.get(key, (result) => {
+          if (result && result[key]) {
+            Object.assign(_config, result[key]);
           }
+          // Always derive apiBaseUrl from current page
+          _config.apiBaseUrl = NS.ApiClient ? NS.ApiClient.deriveApiBaseUrl() : '';
           resolve(_config);
         });
       } else {
+        _config.apiBaseUrl = NS.ApiClient ? NS.ApiClient.deriveApiBaseUrl() : '';
         resolve(_config);
       }
     });
   }
 
-  /** Save current config to chrome.storage */
+  /** Save current config to chrome.storage (per-instance, strips derived fields) */
   async function save() {
+    var key = storageKey();
     return new Promise((resolve) => {
       if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        const toSave = Object.assign({}, _config);
+        delete toSave.apiBaseUrl; // never persist derived value
         const data = {};
-        data[STORAGE_KEY] = Object.assign({}, _config);
+        data[key] = toSave;
         chrome.storage.local.set(data, () => resolve());
       } else {
         resolve();
@@ -97,8 +106,8 @@
           '</div>' +
         '</div>' +
         '<div class="opcua-config-group">' +
-          '<label>API Base URL</label>' +
-          '<input type="text" id="opcua-cfg-apiBaseUrl" placeholder="http://localhost/iris251/csp/opcua/api">' +
+          '<label>API Base URL (auto-detected)</label>' +
+          '<div id="opcua-cfg-apiBaseUrl" style="padding:4px 6px;background:#f0f0f0;border:1px solid #ccc;border-radius:3px;font-size:12px;word-break:break-all;color:#555;"></div>' +
         '</div>' +
         '<div class="opcua-config-group opcua-config-row">' +
           '<div class="opcua-config-half">' +
@@ -145,7 +154,7 @@
     _panel.querySelector('#opcua-cfg-securityMode').value = String(_config.securityMode || 1);
     _panel.querySelector('#opcua-cfg-username').value = _config.username || '';
     _panel.querySelector('#opcua-cfg-password').value = _config.password || '';
-    _panel.querySelector('#opcua-cfg-apiBaseUrl').value = _config.apiBaseUrl || '';
+    _panel.querySelector('#opcua-cfg-apiBaseUrl').textContent = _config.apiBaseUrl || '';
     _panel.querySelector('#opcua-cfg-apiUsername').value = _config.apiUsername || '';
     _panel.querySelector('#opcua-cfg-apiPassword').value = _config.apiPassword || '';
     _panel.querySelector('#opcua-cfg-rootNodeId').value = _config.rootNodeId || '84';
@@ -159,7 +168,6 @@
     _config.securityMode = parseInt(_panel.querySelector('#opcua-cfg-securityMode').value, 10) || 1;
     _config.username = _panel.querySelector('#opcua-cfg-username').value.trim();
     _config.password = _panel.querySelector('#opcua-cfg-password').value;
-    _config.apiBaseUrl = _panel.querySelector('#opcua-cfg-apiBaseUrl').value.trim();
     _config.apiUsername = _panel.querySelector('#opcua-cfg-apiUsername').value.trim();
     _config.apiPassword = _panel.querySelector('#opcua-cfg-apiPassword').value;
     _config.rootNodeId = _panel.querySelector('#opcua-cfg-rootNodeId').value.trim() || '84';
