@@ -6,15 +6,15 @@
 
   /** Derive API base URL from a portal page URL */
   function deriveApiBaseUrl(pageUrl) {
-    var idx = pageUrl.indexOf('/csp/');
+    var idx = pageUrl.indexOf('/csp/sys/');
     if (idx === -1) return '';
-    return pageUrl.substring(0, idx) + '/opcua/api';
+    return pageUrl.substring(0, idx) + '/csp/opcua/api';
   }
 
   /** Derive portal link from an API base URL */
   function derivePortalUrl(apiBaseUrl) {
     // apiBaseUrl looks like http://host:port/prefix/opcua/api
-    var match = apiBaseUrl.match(/^(https?:\/\/[^/]+)(.*?)\/opcua\/api$/);
+    var match = apiBaseUrl.match(/^(https?:\/\/[^/]+)(.*?)\/csp\/opcua\/api$/);
     if (match) {
       return match[1] + match[2] + '/csp/sys/%25CSP.Portal.Home.zen?$NAMESPACE=OPCUA&';
     }

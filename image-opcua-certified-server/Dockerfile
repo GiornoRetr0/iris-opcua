@@ -1,8 +1,8 @@
-FROM intersystemsdc/irisdemo-base-gcc:version-1.0.0 as gcc
+FROM ubuntu:22.04 AS gcc
 
-# libmbedtls-dev/stable,now 2.16.0-1 amd64
 RUN apt-get update -y && \
-    apt-get install -y libmbedtls-dev
+    apt-get install -y --no-install-recommends build-essential cmake libmbedtls-dev && \
+    rm -rf /var/lib/apt/lists/*
 
 ADD ./cmakemod  /tmp/cmakemod/
 ADD ./src       /tmp/src/
@@ -11,17 +11,17 @@ WORKDIR /tmp/src
 
 RUN mkdir ./build && \
     cd ./build && \
-    cmake ../ && \
+    cmake -DCMAKE_C_FLAGS="-fcommon" ../ && \
     make
 
 
-
-FROM library/ubuntu
+FROM ubuntu:22.04
 
 WORKDIR /app
 
 RUN apt-get update -y && \
-    apt-get install -y libmbedtls-dev
+    apt-get install -y --no-install-recommends libmbedtls14 && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY --from=gcc /tmp/src/build/secserver /app
 
@@ -31,5 +31,6 @@ ADD ./certs/myCA.crt.der   /app/trustdir/
 ADD ./certs/myCA.crl       /app/crldir/
 
 ADD ./scripts /app/scripts
+RUN chmod +x /app/scripts/run.bash
 
 ENTRYPOINT [ "/app/scripts/run.bash" ]

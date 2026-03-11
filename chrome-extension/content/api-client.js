@@ -54,6 +54,13 @@
     if (_config.username) body.username = _config.username;
     if (_config.password) body.password = _config.password;
 
+    // Include certificate paths for Sign & Encrypt mode
+    if (_config.certPath) body.certPath = _config.certPath;
+    if (_config.keyPath) body.keyPath = _config.keyPath;
+    if (_config.trustDir) body.trustDir = _config.trustDir;
+    if (_config.crlDir) body.crlDir = _config.crlDir;
+    if (_config.clientURI) body.clientURI = _config.clientURI;
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT);
 
@@ -156,9 +163,9 @@
    */
   function deriveApiBaseUrl() {
     var href = window.location.href;
-    var idx = href.indexOf('/csp/');
+    var idx = href.indexOf('/csp/sys/');
     if (idx === -1) return '';
-    return href.substring(0, idx) + '/opcua/api';
+    return href.substring(0, idx) + '/csp/opcua/api';
   }
 
   /**

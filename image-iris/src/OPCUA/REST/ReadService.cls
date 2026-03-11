@@ -13,7 +13,7 @@ ClassMethod Read(pBody As %DynamicObject, Output pResult As %DynamicObject) As %
 	#dim tClient As OPCUA.Client
 	Try {
 		// Extract connection params
-		set tSC = ##class(OPCUA.REST.ClientManager).ExtractConnectionParams(pBody, .tURL, .tSecMode, .tUser, .tPass)
+		set tSC = ##class(OPCUA.REST.ClientManager).ExtractConnectionParams(pBody, .tURL, .tSecMode, .tUser, .tPass, .tCert, .tKey, .tTrust, .tCrl, .tClientURI)
 		Quit:$$$ISERR(tSC)
 
 		// Node parameters
@@ -35,7 +35,7 @@ ClassMethod Read(pBody As %DynamicObject, Output pResult As %DynamicObject) As %
 		}
 
 		// Connect
-		set tSC = ##class(OPCUA.REST.ClientManager).Connect(.tClient, tURL, tSecMode, tUser, tPass)
+		set tSC = ##class(OPCUA.REST.ClientManager).Connect(.tClient, tURL, tSecMode, tUser, tPass, tCert, tKey, tTrust, tCrl, tClientURI)
 		Quit:$$$ISERR(tSC)
 
 		// Read and parse — delegated to a separate method so its Try/Catch

@@ -1,22 +1,30 @@
-FROM intersystemsdc/irisdemo-base-irisint-community:version-1.6
+FROM intersystems/iris-community:2025.3
 
-# Name of the project folder ex.: my-atelier-project
-ARG IRIS_PROJECT_FOLDER_NAME=src 
-
-# Adding source code that will be loaded by the installer
-ADD --chown=irisowner:irisuser ./${IRIS_PROJECT_FOLDER_NAME}/ $IRIS_APP_SOURCEDIR
-
-ADD --chown=irisowner:irisuser ./uacbin /usr/irissys/bin/
-
-ADD ./certs/secuac.crt.der /usr/irissys/uac/certs/
-ADD ./certs/secuac.key.der /usr/irissys/uac/certs/
-ADD ./certs/myCA.crt.der   /usr/irissys/uac/certs/trustdir/
-ADD ./certs/myCA.crl       /usr/irissys/uac/certs/crldir/
-
-# Running the installer. This will load the source from our project.
-RUN /usr/irissys/demo/irisdemoinstaller.sh 
-
-# libmbedtls-dev/stable,now 2.16.0-1 amd64 (omits libmbedcrypto3)
 USER root
 RUN apt-get update -y && \
-    apt-get install -y libmbedtls-dev
+    apt-get install -y --no-install-recommends libmbedtls-dev && \
+    rm -rf /var/lib/apt/lists/* && \
+    mkdir -p /usr/irissys/uac/certs/trustdir /usr/irissys/uac/certs/crldir && \
+    mkdir -p /usr/irissys/mgr/opcua && chmod 777 /usr/irissys/mgr/opcua
+
+USER irisowner
+
+# Source code
+COPY --chown=irisowner:irisgroup src/ /opt/irisapp/src/
+
+# C++ binaries
+COPY --chown=irisowner:irisgroup uacbin/ /usr/irissys/bin/
+
+# TLS certificates (readable by IRIS process)
+COPY --chown=irisowner:irisgroup certs/secuac.crt.der /usr/irissys/uac/certs/
+COPY --chown=irisowner:irisgroup certs/secuac.key.der /usr/irissys/uac/certs/
+COPY --chown=irisowner:irisgroup certs/myCA.crt.der   /usr/irissys/uac/certs/trustdir/
+COPY --chown=irisowner:irisgroup certs/myCA.crl       /usr/irissys/uac/certs/crldir/
+
+# Install script (credentials + ObjectScript commands)
+COPY --chown=irisowner:irisgroup iris-install.script /tmp/iris-install.script
+
+# Start IRIS, run installer, stop IRIS
+RUN iris start IRIS && \
+    iris session IRIS -U %SYS < /tmp/iris-install.script && \
+    iris stop IRIS quietly

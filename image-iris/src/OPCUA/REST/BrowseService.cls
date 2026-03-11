@@ -14,7 +14,7 @@ ClassMethod Browse(pBody As %DynamicObject, Output pResult As %DynamicArray) As 
 	#dim tClient As OPCUA.Client
 	Try {
 		// Extract connection params
-		set tSC = ##class(OPCUA.REST.ClientManager).ExtractConnectionParams(pBody, .tURL, .tSecMode, .tUser, .tPass)
+		set tSC = ##class(OPCUA.REST.ClientManager).ExtractConnectionParams(pBody, .tURL, .tSecMode, .tUser, .tPass, .tCert, .tKey, .tTrust, .tCrl, .tClientURI)
 		Quit:$$$ISERR(tSC)
 
 		// Node parameters with defaults (Root/Objects folder)
@@ -33,7 +33,7 @@ ClassMethod Browse(pBody As %DynamicObject, Output pResult As %DynamicArray) As 
 		}
 
 		// Connect
-		set tSC = ##class(OPCUA.REST.ClientManager).Connect(.tClient, tURL, tSecMode, tUser, tPass)
+		set tSC = ##class(OPCUA.REST.ClientManager).Connect(.tClient, tURL, tSecMode, tUser, tPass, tCert, tKey, tTrust, tCrl, tClientURI)
 		Quit:$$$ISERR(tSC)
 
 		// Browse

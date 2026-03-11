@@ -1,0 +1,7 @@
+_SYSTEM
+SYS
+set sc = $System.OBJ.Load("/opt/irisapp/src/IRISConfig/Installer.cls", "ck")
+if sc'=1 { do $System.Status.DisplayError(sc) do $zutil(4,$job,1) }
+set sc = ##class(IRISConfig.Installer).Install()
+if sc'=1 { do $System.Status.DisplayError(sc) do $zutil(4,$job,1) }
+halt

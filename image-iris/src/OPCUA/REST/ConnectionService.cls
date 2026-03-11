@@ -13,14 +13,14 @@ ClassMethod Test(pBody As %DynamicObject, Output pResult As %DynamicObject) As %
 	#dim tClient As OPCUA.Client
 	Try {
 		// Extract connection params
-		set tSC = ##class(OPCUA.REST.ClientManager).ExtractConnectionParams(pBody, .tURL, .tSecMode, .tUser, .tPass)
+		set tSC = ##class(OPCUA.REST.ClientManager).ExtractConnectionParams(pBody, .tURL, .tSecMode, .tUser, .tPass, .tCert, .tKey, .tTrust, .tCrl, .tClientURI)
 		Quit:$$$ISERR(tSC)
 
 		// Measure connection time
 		set tStart = $ZH
 
 		// Connect
-		set tSC = ##class(OPCUA.REST.ClientManager).Connect(.tClient, tURL, tSecMode, tUser, tPass)
+		set tSC = ##class(OPCUA.REST.ClientManager).Connect(.tClient, tURL, tSecMode, tUser, tPass, tCert, tKey, tTrust, tCrl, tClientURI)
 
 		set tElapsed = $ZH - tStart
 		set tElapsedMs = $FNumber(tElapsed * 1000, "", 0)

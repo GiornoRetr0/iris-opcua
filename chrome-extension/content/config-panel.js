@@ -14,6 +14,11 @@
     securityMode: 1,
     username: '',
     password: '',
+    clientURI: '',
+    certPath: '',
+    keyPath: '',
+    trustDir: '',
+    crlDir: '',
     apiUsername: 'SuperUser',
     apiPassword: 'SYS',
     autoRefreshInterval: 5,
@@ -95,6 +100,28 @@
             '<option value="3">Sign & Encrypt</option>' +
           '</select>' +
         '</div>' +
+        '<div id="opcua-cfg-cert-section" style="display:none;">' +
+          '<div class="opcua-config-group">' +
+            '<label>Client URI (must match certificate)</label>' +
+            '<input type="text" id="opcua-cfg-clientURI" placeholder="urn:secuac">' +
+          '</div>' +
+          '<div class="opcua-config-group">' +
+            '<label>Client Certificate (DER path on IRIS server)</label>' +
+            '<input type="text" id="opcua-cfg-certPath" placeholder="/path/to/client.crt.der">' +
+          '</div>' +
+          '<div class="opcua-config-group">' +
+            '<label>Private Key (DER path on IRIS server)</label>' +
+            '<input type="text" id="opcua-cfg-keyPath" placeholder="/path/to/client.key.der">' +
+          '</div>' +
+          '<div class="opcua-config-group">' +
+            '<label>Trust List Directory (on IRIS server)</label>' +
+            '<input type="text" id="opcua-cfg-trustDir" placeholder="/path/to/trustdir/">' +
+          '</div>' +
+          '<div class="opcua-config-group">' +
+            '<label>Revocation List Directory (on IRIS server)</label>' +
+            '<input type="text" id="opcua-cfg-crlDir" placeholder="/path/to/crldir/">' +
+          '</div>' +
+        '</div>' +
         '<div class="opcua-config-group opcua-config-row">' +
           '<div class="opcua-config-half">' +
             '<label>Username</label>' +
@@ -145,7 +172,21 @@
     _panel.querySelector('#opcua-cfg-test').addEventListener('click', handleTest);
     _panel.querySelector('#opcua-cfg-save').addEventListener('click', handleSave);
 
+    // Toggle certificate fields based on security mode
+    var secSelect = _panel.querySelector('#opcua-cfg-securityMode');
+    secSelect.addEventListener('change', function () {
+      toggleCertSection(secSelect.value);
+    });
+
     return _panel;
+  }
+
+  function toggleCertSection(secMode) {
+    if (!_panel) return;
+    var section = _panel.querySelector('#opcua-cfg-cert-section');
+    if (section) {
+      section.style.display = (String(secMode) === '3') ? 'block' : 'none';
+    }
   }
 
   function populateFields() {
@@ -154,12 +195,18 @@
     _panel.querySelector('#opcua-cfg-securityMode').value = String(_config.securityMode || 1);
     _panel.querySelector('#opcua-cfg-username').value = _config.username || '';
     _panel.querySelector('#opcua-cfg-password').value = _config.password || '';
+    _panel.querySelector('#opcua-cfg-clientURI').value = _config.clientURI || '';
+    _panel.querySelector('#opcua-cfg-certPath').value = _config.certPath || '';
+    _panel.querySelector('#opcua-cfg-keyPath').value = _config.keyPath || '';
+    _panel.querySelector('#opcua-cfg-trustDir').value = _config.trustDir || '';
+    _panel.querySelector('#opcua-cfg-crlDir').value = _config.crlDir || '';
     _panel.querySelector('#opcua-cfg-apiBaseUrl').textContent = _config.apiBaseUrl || '';
     _panel.querySelector('#opcua-cfg-apiUsername').value = _config.apiUsername || '';
     _panel.querySelector('#opcua-cfg-apiPassword').value = _config.apiPassword || '';
     _panel.querySelector('#opcua-cfg-rootNodeId').value = _config.rootNodeId || '84';
     _panel.querySelector('#opcua-cfg-rootNodeNs').value = _config.rootNodeNs != null ? _config.rootNodeNs : 0;
     _panel.querySelector('#opcua-cfg-autoRefreshInterval').value = _config.autoRefreshInterval || 5;
+    toggleCertSection(_config.securityMode);
   }
 
   function readFields() {
@@ -168,6 +215,11 @@
     _config.securityMode = parseInt(_panel.querySelector('#opcua-cfg-securityMode').value, 10) || 1;
     _config.username = _panel.querySelector('#opcua-cfg-username').value.trim();
     _config.password = _panel.querySelector('#opcua-cfg-password').value;
+    _config.clientURI = _panel.querySelector('#opcua-cfg-clientURI').value.trim();
+    _config.certPath = _panel.querySelector('#opcua-cfg-certPath').value.trim();
+    _config.keyPath = _panel.querySelector('#opcua-cfg-keyPath').value.trim();
+    _config.trustDir = _panel.querySelector('#opcua-cfg-trustDir').value.trim();
+    _config.crlDir = _panel.querySelector('#opcua-cfg-crlDir').value.trim();
     _config.apiUsername = _panel.querySelector('#opcua-cfg-apiUsername').value.trim();
     _config.apiPassword = _panel.querySelector('#opcua-cfg-apiPassword').value;
     _config.rootNodeId = _panel.querySelector('#opcua-cfg-rootNodeId').value.trim() || '84';
