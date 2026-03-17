@@ -114,7 +114,9 @@
 
 .opcua-split-right {
   flex: 1;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   min-width: 200px;
 }
 
@@ -538,4 +540,264 @@
 #cat_OPCUA .selectorInnerTD {
   font-size: 12px;
   padding-left: 4px;
+}
+
+/* ============================================================
+   Tab Bar (right pane)
+   ============================================================ */
+
+.opcua-tabs {
+  display: flex;
+  border-bottom: 1px solid rgb(203, 203, 203);
+  background: rgb(247, 247, 247);
+  flex-shrink: 0;
+}
+
+.opcua-tab {
+  padding: 7px 16px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: #666;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+
+.opcua-tab:hover {
+  color: rgb(51, 54, 149);
+  background: rgba(51, 54, 149, 0.04);
+}
+
+.opcua-tab-active {
+  color: rgb(51, 54, 149);
+  border-bottom-color: rgb(51, 54, 149);
+  font-weight: bold;
+}
+
+.opcua-tab-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.opcua-tab-content-hidden {
+  display: none !important;
+}
+
+/* ============================================================
+   Data Access View
+   ============================================================ */
+
+.opcua-dav {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.opcua-dav-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid #eee;
+  flex-shrink: 0;
+}
+
+.opcua-dav-toolbar .opcua-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.opcua-dav-status {
+  font-size: 11px;
+  color: #888;
+  margin-left: auto;
+}
+
+.opcua-dav-table-wrapper {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.opcua-dav-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.opcua-dav-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.opcua-dav-table th {
+  background: rgb(247, 247, 247);
+  border-bottom: 1px solid rgb(203, 203, 203);
+  padding: 5px 8px;
+  text-align: left;
+  font-size: 11px;
+  color: #666;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.opcua-dav-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid #f0f0f0;
+  vertical-align: middle;
+}
+
+.opcua-dav-table tr:hover {
+  background: rgba(0, 137, 132, 0.05);
+}
+
+.opcua-dav-col-idx {
+  width: 30px;
+  color: #aaa;
+  text-align: center;
+}
+
+.opcua-dav-col-nodeid {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 11px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opcua-dav-col-name {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opcua-dav-col-value {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  font-weight: bold;
+  color: #222;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opcua-dav-col-status {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.opcua-dav-status-good {
+  color: #155724;
+}
+
+.opcua-dav-status-bad {
+  color: #c0392b;
+}
+
+.opcua-dav-col-ts {
+  font-size: 10px;
+  color: #888;
+  white-space: nowrap;
+}
+
+.opcua-dav-col-remove {
+  width: 28px;
+  text-align: center;
+}
+
+.opcua-dav-remove-btn {
+  border: none;
+  background: none;
+  color: #ccc;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.opcua-dav-remove-btn:hover {
+  color: #c0392b;
+}
+
+.opcua-dav-null {
+  color: #ccc;
+}
+
+.opcua-dav-array {
+  font-size: 11px;
+}
+
+.opcua-dav-empty {
+  color: #888;
+  font-style: italic;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+/* Value flash animation */
+@keyframes opcua-dav-flash {
+  0%   { background-color: rgba(0, 137, 132, 0.25); }
+  100% { background-color: transparent; }
+}
+
+.opcua-dav-flash td.opcua-dav-col-value {
+  animation: opcua-dav-flash 0.6s ease-out;
+}
+
+/* ============================================================
+   Tree hover "+" button for DAV
+   ============================================================ */
+
+.opcua-tree-add-dav {
+  display: none;
+  border: none;
+  background: rgba(0, 137, 132, 0.1);
+  color: rgb(0, 137, 132);
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+  padding: 0 5px;
+  margin-left: auto;
+  border-radius: 3px;
+  line-height: 18px;
+  flex-shrink: 0;
+}
+
+.opcua-tree-add-dav:hover {
+  background: rgba(0, 137, 132, 0.2);
+}
+
+.opcua-tree-item:hover .opcua-tree-add-dav {
+  display: inline-block;
+}
+
+/* ============================================================
+   Node Detail "Add to DAV" button
+   ============================================================ */
+
+.opcua-detail-add-dav-btn {
+  font-size: 11px;
+  padding: 4px 10px;
+}
+
+/* DAV tab badge */
+.opcua-tab-badge {
+  display: inline-block;
+  background: rgb(0, 137, 132);
+  color: #fff;
+  font-size: 10px;
+  font-weight: bold;
+  padding: 1px 5px;
+  border-radius: 8px;
+  margin-left: 4px;
+  min-width: 14px;
+  text-align: center;
+  line-height: 14px;
 }

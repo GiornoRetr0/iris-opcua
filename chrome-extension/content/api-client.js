@@ -150,6 +150,15 @@
   }
 
   /**
+   * Bulk-read multiple node values in a single connection.
+   * @param {Array} nodes - Array of {nodeNs, nodeId, nodeIdType}
+   * @returns {Object} {nodes: [{nodeNs, nodeId, nodeIdType, value, sourceTimestamp, serverTimestamp, statusCode, readError}]}
+   */
+  async function readBulk(nodes) {
+    return request('/read-bulk', { nodes: nodes });
+  }
+
+  /**
    * Test OPC UA server connectivity.
    * @returns {Object} {url, connected, responseTimeMs, error?}
    */
@@ -205,6 +214,7 @@
     pingUrl: pingUrl,
     browse: browse,
     read: read,
+    readBulk: readBulk,
     test: test,
     deriveApiBaseUrl: deriveApiBaseUrl
   };

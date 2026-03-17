@@ -53,6 +53,7 @@
       html +=
         '<div class="opcua-detail-actions">' +
           '<button class="opcua-btn opcua-btn-secondary opcua-detail-read-btn">Read</button>' +
+          '<button class="opcua-btn opcua-btn-primary opcua-detail-add-dav-btn">+ DAV</button>' +
           '<label class="opcua-detail-autorefresh">' +
             '<input type="checkbox" class="opcua-detail-autorefresh-cb"' +
               (_autoRefreshEnabled ? ' checked' : '') + '>' +
@@ -75,6 +76,18 @@
     const readBtn = _container.querySelector('.opcua-detail-read-btn');
     if (readBtn) {
       readBtn.addEventListener('click', readCurrentNode);
+    }
+    const davBtn = _container.querySelector('.opcua-detail-add-dav-btn');
+    if (davBtn) {
+      davBtn.addEventListener('click', function () {
+        if (_currentNode && NS.DataAccessView) {
+          NS.DataAccessView.addNode(_currentNode);
+          if (NS.ContentPanel) {
+            NS.ContentPanel.switchToTab('dav');
+            NS.ContentPanel.updateDAVBadge();
+          }
+        }
+      });
     }
     const cb = _container.querySelector('.opcua-detail-autorefresh-cb');
     if (cb) {

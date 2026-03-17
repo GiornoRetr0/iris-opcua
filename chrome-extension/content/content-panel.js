@@ -83,11 +83,51 @@
     handle.className = 'opcua-split-handle';
     splitPane.appendChild(handle);
 
-    // Right: detail
+    // Right: tabs + content
     const rightPane = document.createElement('div');
     rightPane.className = 'opcua-split-right';
+
+    // Tab bar
+    const tabBar = document.createElement('div');
+    tabBar.className = 'opcua-tabs';
+
+    const tabDetail = document.createElement('button');
+    tabDetail.className = 'opcua-tab opcua-tab-active';
+    tabDetail.dataset.tab = 'detail';
+    tabDetail.textContent = 'Node Detail';
+    tabBar.appendChild(tabDetail);
+
+    const tabDAV = document.createElement('button');
+    tabDAV.className = 'opcua-tab';
+    tabDAV.dataset.tab = 'dav';
+    tabDAV.innerHTML = 'Data Access View<span class="opcua-tab-badge opcua-dav-badge" style="display:none;">0</span>';
+    tabBar.appendChild(tabDAV);
+
+    rightPane.appendChild(tabBar);
+
+    // Tab content: detail
+    const detailContent = document.createElement('div');
+    detailContent.className = 'opcua-tab-content';
+    detailContent.dataset.tabContent = 'detail';
     const detailPanel = NS.NodeDetail ? NS.NodeDetail.createPanel() : document.createElement('div');
-    rightPane.appendChild(detailPanel);
+    detailContent.appendChild(detailPanel);
+    rightPane.appendChild(detailContent);
+
+    // Tab content: DAV
+    const davContent = document.createElement('div');
+    davContent.className = 'opcua-tab-content opcua-tab-content-hidden';
+    davContent.dataset.tabContent = 'dav';
+    const davPanel = NS.DataAccessView ? NS.DataAccessView.createPanel() : document.createElement('div');
+    davContent.appendChild(davPanel);
+    rightPane.appendChild(davContent);
+
+    // Tab click handler
+    tabBar.addEventListener('click', function (e) {
+      var tab = e.target.closest('.opcua-tab');
+      if (!tab) return;
+      switchToTab(tab.dataset.tab);
+    });
+
     splitPane.appendChild(rightPane);
 
     _panel.appendChild(splitPane);
@@ -177,6 +217,19 @@
       }
     }
 
+    // Hide sibling TDs to the right (e.g. "System Information" panel)
+    // and force the content cell to fill the remaining width
+    if (parent.tagName === 'TD') {
+      var sibling = parent.nextElementSibling;
+      while (sibling) {
+        _hiddenElements.push({ el: sibling, display: sibling.style.display });
+        sibling.style.display = 'none';
+        sibling = sibling.nextElementSibling;
+      }
+      _hiddenElements.push({ el: parent, prop: 'style.width', val: parent.style.width });
+      parent.style.width = '100%';
+    }
+
     // Insert or show our panel
     if (!_panel) createPanel();
 
@@ -196,6 +249,45 @@
     }
   }
 
+  function switchToTab(tabName) {
+    if (!_panel) return;
+    // Update tab buttons
+    var tabs = _panel.querySelectorAll('.opcua-tab');
+    for (var i = 0; i < tabs.length; i++) {
+      if (tabs[i].dataset.tab === tabName) {
+        tabs[i].classList.add('opcua-tab-active');
+      } else {
+        tabs[i].classList.remove('opcua-tab-active');
+      }
+    }
+    // Show/hide content
+    var contents = _panel.querySelectorAll('.opcua-tab-content');
+    for (var j = 0; j < contents.length; j++) {
+      if (contents[j].dataset.tabContent === tabName) {
+        contents[j].classList.remove('opcua-tab-content-hidden');
+      } else {
+        contents[j].classList.add('opcua-tab-content-hidden');
+      }
+    }
+    // Notify DAV visibility
+    if (NS.DataAccessView) {
+      NS.DataAccessView.setVisible(tabName === 'dav');
+    }
+  }
+
+  function updateDAVBadge() {
+    if (!_panel) return;
+    var badge = _panel.querySelector('.opcua-dav-badge');
+    if (!badge) return;
+    var count = NS.DataAccessView ? NS.DataAccessView.getNodeCount() : 0;
+    if (count > 0) {
+      badge.textContent = count;
+      badge.style.display = 'inline-block';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+
   function deactivate() {
     if (!_active) return;
     _active = false;
@@ -203,14 +295,21 @@
     // Hide our panel
     if (_panel) _panel.style.display = 'none';
 
-    // Restore hidden elements
+    // Restore hidden elements and properties
     _hiddenElements.forEach(function (h) {
-      h.el.style.display = h.display;
+      if (h.prop === 'style.width') {
+        h.el.style.width = h.val;
+      } else if (h.prop) {
+        h.el[h.prop] = h.val;
+      } else {
+        h.el.style.display = h.display;
+      }
     });
     _hiddenElements = [];
 
     // Stop auto-refresh
     if (NS.NodeDetail) NS.NodeDetail.stopAutoRefresh();
+    if (NS.DataAccessView) NS.DataAccessView.stopAutoRefresh();
   }
 
   function isActive() {
@@ -236,6 +335,8 @@
     activate: activate,
     deactivate: deactivate,
     isActive: isActive,
-    updateConnectionStatus: updateConnectionStatus
+    updateConnectionStatus: updateConnectionStatus,
+    switchToTab: switchToTab,
+    updateDAVBadge: updateDAVBadge
   };
 })();

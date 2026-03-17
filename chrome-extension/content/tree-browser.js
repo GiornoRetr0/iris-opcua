@@ -103,6 +103,25 @@
     label.title = 'ns=' + n.nodeNs + '; id=' + n.nodeId;
     row.appendChild(label);
 
+    // "+" button for adding Variable nodes to DAV
+    if (isVariable) {
+      const addBtn = document.createElement('button');
+      addBtn.className = 'opcua-tree-add-dav';
+      addBtn.textContent = '+';
+      addBtn.title = 'Add to Data Access View';
+      addBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (NS.DataAccessView) {
+          NS.DataAccessView.addNode(n);
+          if (NS.ContentPanel) {
+            NS.ContentPanel.switchToTab('dav');
+            NS.ContentPanel.updateDAVBadge();
+          }
+        }
+      });
+      row.appendChild(addBtn);
+    }
+
     // Click: toggle on arrow, select on label
     arrow.addEventListener('click', function (e) {
       e.stopPropagation();
