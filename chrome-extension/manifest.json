@@ -16,7 +16,11 @@
         "http://*/*/csp/sys/%25CSP.Portal.Home.zen*",
         "https://*/*/csp/sys/%25CSP.Portal.Home.zen*",
         "http://*/csp/sys/%25CSP.Portal.Home.zen*",
-        "https://*/csp/sys/%25CSP.Portal.Home.zen*"
+        "https://*/csp/sys/%25CSP.Portal.Home.zen*",
+        "http://*/*/csp/sys/UtilHome.csp*",
+        "https://*/*/csp/sys/UtilHome.csp*",
+        "http://*/csp/sys/UtilHome.csp*",
+        "https://*/csp/sys/UtilHome.csp*"
       ],
       "css": ["content/content.css"],
       "js": [
