@@ -44,7 +44,7 @@
       nodeNs: rootNs,
       nodeId: rootId,
       nodeIdType: 0,
-      nodeClass: 'Object',
+      nodeCategory: 'folder',
       hasChildren: true
     };
 
@@ -66,23 +66,32 @@
     await toggleNode(key);
   }
 
+  // Node category icons and CSS classes
+  var CATEGORY_ICONS = {
+    folder:   '\uD83D\uDCC1',  // folder
+    object:   '\uD83D\uDCE6',  // package/box
+    variable: '\uD83D\uDCCA',  // bar chart (data point)
+    property: '\uD83D\uDD27'   // wrench (metadata)
+  };
+
   function renderNode(entry, depth) {
     const n = entry.node;
     const key = nodeKey(n.nodeNs, n.nodeId, n.nodeIdType);
-    const isVariable = (n.nodeClass === 'Variable');
+    const cat = n.nodeCategory || 'object';
+    const expandable = n.hasChildren !== false;
 
     const row = document.createElement('div');
-    row.className = 'opcua-tree-item';
+    row.className = 'opcua-tree-item opcua-tree-cat-' + cat;
     row.dataset.key = key;
     if (_selectedKey === key) row.classList.add('opcua-tree-selected');
 
     // Indent
     row.style.paddingLeft = (12 + depth * 18) + 'px';
 
-    // Toggle arrow (only for non-variable nodes with children)
+    // Toggle arrow
     const arrow = document.createElement('span');
     arrow.className = 'opcua-tree-arrow';
-    if (!isVariable && n.hasChildren !== false) {
+    if (expandable) {
       arrow.textContent = entry.expanded ? '\u25BE' : '\u25B8';
       arrow.classList.add('opcua-tree-arrow-active');
     } else {
@@ -90,44 +99,24 @@
     }
     row.appendChild(arrow);
 
-    // Icon
+    // Icon — category-based
     const icon = document.createElement('span');
     icon.className = 'opcua-tree-icon';
-    icon.textContent = isVariable ? '\uD83C\uDFF7\uFE0F' : '\uD83D\uDCC1';
+    icon.textContent = CATEGORY_ICONS[cat] || CATEGORY_ICONS.object;
     row.appendChild(icon);
 
     // Label
     const label = document.createElement('span');
     label.className = 'opcua-tree-label';
     label.textContent = n.displayName;
-    label.title = 'ns=' + n.nodeNs + '; id=' + n.nodeId;
+    label.title = 'ns=' + n.nodeNs + '; id=' + n.nodeId +
+      (n.referenceType ? ' (' + n.referenceType + ')' : '');
     row.appendChild(label);
-
-    // "+" button for adding Variable nodes to DAV
-    if (isVariable) {
-      const addBtn = document.createElement('button');
-      addBtn.className = 'opcua-tree-add-dav';
-      addBtn.textContent = '+';
-      addBtn.title = 'Add to Data Access View';
-      addBtn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        if (NS.DataAccessView) {
-          NS.DataAccessView.addNode(n);
-          if (NS.ContentPanel) {
-            NS.ContentPanel.switchToTab('dav');
-            NS.ContentPanel.updateDAVBadge();
-          }
-        }
-      });
-      row.appendChild(addBtn);
-    }
 
     // Click: toggle on arrow, select on label
     arrow.addEventListener('click', function (e) {
       e.stopPropagation();
-      if (!isVariable && n.hasChildren !== false) {
-        toggleNode(key);
-      }
+      if (expandable) toggleNode(key);
     });
 
     row.addEventListener('click', function (e) {
@@ -137,9 +126,7 @@
 
     row.addEventListener('dblclick', function (e) {
       e.stopPropagation();
-      if (!isVariable && n.hasChildren !== false) {
-        toggleNode(key);
-      }
+      if (expandable) toggleNode(key);
     });
 
     entry.element = row;

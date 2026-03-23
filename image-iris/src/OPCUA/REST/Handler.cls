@@ -31,9 +31,7 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/browse" Method="POST" Call="Browse" />
   <Route Url="/read" Method="GET" Call="Read" />
   <Route Url="/read" Method="POST" Call="Read" />
-  <Route Url="/read-bulk" Method="GET" Call="ReadBulk" />
-  <Route Url="/read-bulk" Method="POST" Call="ReadBulk" />
-  <Route Url="/generate" Method="GET" Call="Generate" />
+<Route Url="/generate" Method="GET" Call="Generate" />
   <Route Url="/generate" Method="POST" Call="Generate" />
   <Route Url="/test" Method="GET" Call="Test" />
   <Route Url="/test" Method="POST" Call="Test" />
@@ -78,25 +76,6 @@ ClassMethod Read() As %Status
 		Quit:$$$ISERR(tSC)
 
 		set tSC = ##class(OPCUA.REST.ReadService).Read(tBody, .tResult)
-		Quit:$$$ISERR(tSC)
-	} Catch (e) {
-		set tSC = e.AsStatus()
-	}
-	if $$$ISERR(tSC) {
-		Quit ..SendError($System.Status.GetErrorText(tSC))
-	}
-	Quit ..SendOK(tResult)
-}
-
-/// Bulk-read multiple node values in a single connection.
-ClassMethod ReadBulk() As %Status
-{
-	#dim tSC As %Status = $$$OK
-	Try {
-		set tSC = ..GetRequestParams(.tBody)
-		Quit:$$$ISERR(tSC)
-
-		set tSC = ##class(OPCUA.REST.BulkReadService).ReadBulk(tBody, .tResult)
 		Quit:$$$ISERR(tSC)
 	} Catch (e) {
 		set tSC = e.AsStatus()

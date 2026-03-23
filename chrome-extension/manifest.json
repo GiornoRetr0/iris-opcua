@@ -27,7 +27,6 @@
         "content/api-client.js",
         "content/config-panel.js",
         "content/node-detail.js",
-        "content/data-access-view.js",
         "content/tree-browser.js",
         "content/content-panel.js",
         "content/sidebar-injector.js",

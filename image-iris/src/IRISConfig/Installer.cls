@@ -3,6 +3,29 @@ Include %occInclude
 Class IRISConfig.Installer
 {
 
+/// Manifest that creates the OPCUA namespace with interoperability enabled.
+/// Uses %Installer framework which handles database creation, namespace setup,
+/// and Ensemble temp directories in one coordinated operation.
+XData setup
+{
+<Manifest>
+  <Default Name="Namespace" Value="OPCUA"/>
+  <Default Name="database" Value="opcua"/>
+
+  <Namespace Name="${Namespace}" Code="${Namespace}" Data="${Namespace}" Create="yes" Ensemble="1">
+    <Configuration>
+      <Database Name="${Namespace}" Dir="${mgrdir}${database}" Create="yes" Resource="%DB_${Namespace}"/>
+    </Configuration>
+  </Namespace>
+</Manifest>
+}
+
+/// Generated method from the manifest above.
+ClassMethod setup(ByRef pVars, pLogLevel As %Integer = 3, pInstaller As %Installer.Installer, pLogger As %Installer.AbstractLogger) As %Status [ CodeMode = objectgenerator, Internal ]
+{
+	Quit ##class(%Installer.Manifest).%Generate(%compiledclass, %code, "setup")
+}
+
 /// Main entry point — creates OPCUA namespace, imports source, configures everything.
 /// Must be called from %SYS namespace.
 ClassMethod Install() As %Status
@@ -10,28 +33,8 @@ ClassMethod Install() As %Status
 	Set tSC = $$$OK
 	Try
 	{
-		Set tDBDir = "/usr/irissys/mgr/opcua/"
-
-		// Create database directory
-		Do ##class(%File).CreateDirectoryChain(tDBDir)
-
-		// Create database
-		Set tSC = ##class(SYS.Database).CreateDatabase(tDBDir)
-		$$$ThrowOnError(tSC)
-
-		// Register database in config
-		Set tDBProps("Directory") = tDBDir
-		Set tSC = ##class(Config.Databases).Create("OPCUA", .tDBProps)
-		$$$ThrowOnError(tSC)
-
-		// Create namespace
-		Set tNSProps("Globals") = "OPCUA"
-		Set tNSProps("Routines") = "OPCUA"
-		Set tSC = ##class(Config.Namespaces).Create("OPCUA", .tNSProps)
-		$$$ThrowOnError(tSC)
-
-		// Enable interoperability
-		Set tSC = ##class(%EnsembleMgr).EnableNamespace("OPCUA")
+		// Create namespace + database + enable interoperability via manifest
+		Set tSC = ..setup()
 		$$$ThrowOnError(tSC)
 
 		// Switch to OPCUA namespace and import source

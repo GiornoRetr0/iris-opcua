@@ -56,23 +56,15 @@
       NS.ApiClient.setConfig(cfg);
     }
 
-    // Restore persisted DAV nodes
-    if (NS.DataAccessView) {
-      await NS.DataAccessView.loadMonitoredNodes();
-    }
-
     // Wire config change callback
     if (NS.ConfigPanel) {
       NS.ConfigPanel.setChangeCallback(function (config, serverChanged) {
         if (NS.ApiClient) NS.ApiClient.setConfig(config);
         if (serverChanged) {
-          if (NS.DataAccessView) NS.DataAccessView.clearAll();
           if (NS.ContentPanel && NS.ContentPanel.isActive()) {
             if (NS.TreeBrowser) NS.TreeBrowser.loadRoot();
             NS.ContentPanel.updateConnectionStatus();
           }
-          // Reload DAV nodes for new server
-          if (NS.DataAccessView) NS.DataAccessView.loadMonitoredNodes();
         }
       });
     }

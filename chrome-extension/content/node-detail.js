@@ -20,14 +20,23 @@
     return _container;
   }
 
+  // Category display config
+  var CATEGORY_INFO = {
+    folder:   { icon: '\uD83D\uDCC1', label: 'Folder',   readable: false },
+    object:   { icon: '\uD83D\uDCE6', label: 'Object',   readable: false },
+    variable: { icon: '\uD83D\uDCCA', label: 'Variable', readable: true },
+    property: { icon: '\uD83D\uDD27', label: 'Property', readable: true }
+  };
+
   function showNode(nodeData) {
     if (!_container) return;
     _currentNode = nodeData;
     stopAutoRefresh();
     render();
 
-    // Auto-read for Variable nodes
-    if (nodeData.nodeClass === 'Variable') {
+    // Auto-read for readable nodes (variables and properties)
+    var info = CATEGORY_INFO[nodeData.nodeCategory] || {};
+    if (info.readable) {
       readCurrentNode();
     }
   }
@@ -35,25 +44,28 @@
   function render() {
     if (!_container || !_currentNode) return;
     const n = _currentNode;
-    const isVariable = (n.nodeClass === 'Variable');
+    const cat = n.nodeCategory || 'object';
+    const info = CATEGORY_INFO[cat] || CATEGORY_INFO.object;
 
     let html =
       '<div class="opcua-detail-header">' +
-        '<span class="opcua-detail-icon">' + (isVariable ? '\uD83C\uDFF7\uFE0F' : '\uD83D\uDCC1') + '</span>' +
+        '<span class="opcua-detail-icon">' + info.icon + '</span>' +
         '<span class="opcua-detail-name">' + escHtml(n.displayName) + '</span>' +
+        (cat === 'property' ? '<span class="opcua-detail-badge opcua-detail-badge-meta">metadata</span>' : '') +
       '</div>' +
       '<table class="opcua-detail-meta">' +
         '<tr><td class="opcua-detail-label">Node ID</td><td>' + escHtml(String(n.nodeId)) + '</td></tr>' +
         '<tr><td class="opcua-detail-label">Namespace</td><td>' + n.nodeNs + '</td></tr>' +
         '<tr><td class="opcua-detail-label">ID Type</td><td>' + nodeIdTypeLabel(n.nodeIdType) + '</td></tr>' +
-        '<tr><td class="opcua-detail-label">Class</td><td>' + escHtml(n.nodeClass || 'Unknown') + '</td></tr>' +
+        '<tr><td class="opcua-detail-label">Category</td><td>' + escHtml(info.label) + '</td></tr>' +
+        (n.referenceType ? '<tr><td class="opcua-detail-label">Reference</td><td>' + escHtml(n.referenceType) + '</td></tr>' : '') +
+        (n.typeDefId ? '<tr><td class="opcua-detail-label">TypeDefinition</td><td>ns=' + n.typeDefNs + '; i=' + n.typeDefId + '</td></tr>' : '') +
       '</table>';
 
-    if (isVariable) {
+    if (info.readable) {
       html +=
         '<div class="opcua-detail-actions">' +
           '<button class="opcua-btn opcua-btn-secondary opcua-detail-read-btn">Read</button>' +
-          '<button class="opcua-btn opcua-btn-primary opcua-detail-add-dav-btn">+ DAV</button>' +
           '<label class="opcua-detail-autorefresh">' +
             '<input type="checkbox" class="opcua-detail-autorefresh-cb"' +
               (_autoRefreshEnabled ? ' checked' : '') + '>' +
@@ -63,10 +75,15 @@
         '<div class="opcua-detail-value-section">' +
           renderValueSection() +
         '</div>';
+    } else if (cat === 'folder') {
+      html +=
+        '<div class="opcua-detail-object-msg">' +
+          'This is a folder node. Expand it in the tree to browse its contents.' +
+        '</div>';
     } else {
       html +=
         '<div class="opcua-detail-object-msg">' +
-          'This is an Object node. Expand it in the tree to browse its children.' +
+          'This is an object node. Expand it in the tree to browse its child variables.' +
         '</div>';
     }
 
@@ -76,18 +93,6 @@
     const readBtn = _container.querySelector('.opcua-detail-read-btn');
     if (readBtn) {
       readBtn.addEventListener('click', readCurrentNode);
-    }
-    const davBtn = _container.querySelector('.opcua-detail-add-dav-btn');
-    if (davBtn) {
-      davBtn.addEventListener('click', function () {
-        if (_currentNode && NS.DataAccessView) {
-          NS.DataAccessView.addNode(_currentNode);
-          if (NS.ContentPanel) {
-            NS.ContentPanel.switchToTab('dav');
-            NS.ContentPanel.updateDAVBadge();
-          }
-        }
-      });
     }
     const cb = _container.querySelector('.opcua-detail-autorefresh-cb');
     if (cb) {
@@ -139,7 +144,8 @@
   }
 
   async function readCurrentNode() {
-    if (!_currentNode || _currentNode.nodeClass !== 'Variable') return;
+    var info = _currentNode ? (CATEGORY_INFO[_currentNode.nodeCategory] || {}) : {};
+    if (!_currentNode || !info.readable) return;
 
     _currentNode._reading = true;
     _currentNode._readError = null;
@@ -175,7 +181,8 @@
     const cfg = NS.ConfigPanel ? NS.ConfigPanel.getConfig() : {};
     const interval = (cfg.autoRefreshInterval || 5) * 1000;
     _autoRefreshTimer = setInterval(function () {
-      if (_currentNode && _currentNode.nodeClass === 'Variable') {
+      var info = _currentNode ? (CATEGORY_INFO[_currentNode.nodeCategory] || {}) : {};
+      if (_currentNode && info.readable) {
         readCurrentNode();
       }
     }, interval);
