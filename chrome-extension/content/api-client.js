@@ -61,8 +61,10 @@
     if (_config.crlDir) body.crlDir = _config.crlDir;
     if (_config.clientURI) body.clientURI = _config.clientURI;
 
+    const timeout = params._timeout || DEFAULT_TIMEOUT;
+    delete params._timeout;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT);
+    const timer = setTimeout(() => controller.abort(), timeout);
 
     try {
       const resp = await fetch(url, {
@@ -90,7 +92,7 @@
     } catch (err) {
       clearTimeout(timer);
       if (err.name === 'AbortError') {
-        throw new Error('Request timed out after ' + (DEFAULT_TIMEOUT / 1000) + 's');
+        throw new Error('Request timed out after ' + (timeout / 1000) + 's');
       }
       throw err;
     }
@@ -150,6 +152,40 @@
   }
 
   /**
+   * Deploy a data pipeline (generate DataSource + Production, compile, start).
+   * @param {Object} params - {nodes, className, dataSourceName, productionName, mode, ...}
+   * @returns {Object} {dataSourceClass, productionClass, tableName, deployed, compiled, started, error?}
+   */
+  async function deploy(params) {
+    params._timeout = 60000;
+    return request('/deploy', params);
+  }
+
+  /**
+   * List all deployed pipelines.
+   * @returns {Array} Array of pipeline objects with status, nodes, settings
+   */
+  async function listPipelines() {
+    return request('/pipelines', {});
+  }
+
+  /**
+   * Toggle a pipeline service on/off.
+   * @param {string} name - Pipeline service name
+   */
+  async function togglePipeline(name) {
+    return request('/pipelines/toggle', { name: name });
+  }
+
+  /**
+   * Delete a pipeline.
+   * @param {string} name - Pipeline service name
+   */
+  async function deletePipeline(name) {
+    return request('/pipelines/delete', { name: name });
+  }
+
+  /**
    * Test OPC UA server connectivity.
    * @returns {Object} {url, connected, responseTimeMs, error?}
    */
@@ -205,6 +241,10 @@
     pingUrl: pingUrl,
     browse: browse,
     read: read,
+    deploy: deploy,
+    listPipelines: listPipelines,
+    togglePipeline: togglePipeline,
+    deletePipeline: deletePipeline,
     test: test,
     deriveApiBaseUrl: deriveApiBaseUrl
   };

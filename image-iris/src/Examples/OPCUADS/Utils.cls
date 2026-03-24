@@ -3,8 +3,8 @@ Class Examples.OPCUADS.Utils
 
 ClassMethod LoadOnInstallation()
 {
-	set ^Ens.AutoStart = "Examples.OPCUADS.Production"
-	set ^Ens.AutoStart("StartupPriority") = 0
+	// No auto-start — pipelines are managed via the wizard UI
+	kill ^Ens.AutoStart
 }
 
 }

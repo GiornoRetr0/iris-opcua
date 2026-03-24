@@ -87,12 +87,73 @@
     const rightPane = document.createElement('div');
     rightPane.className = 'opcua-split-right';
 
-    // Detail panel (right pane content)
+    // Tab bar for right pane
+    const tabBar = document.createElement('div');
+    tabBar.className = 'opcua-right-tabs';
+
+    const detailTab = document.createElement('button');
+    detailTab.className = 'opcua-right-tab opcua-right-tab-active';
+    detailTab.dataset.tab = 'detail';
+    detailTab.textContent = 'Node Detail';
+    tabBar.appendChild(detailTab);
+
+    const wizardTab = document.createElement('button');
+    wizardTab.className = 'opcua-right-tab';
+    wizardTab.dataset.tab = 'wizard';
+    var badgeCount = NS.PipelineWizard ? NS.PipelineWizard.getSelectionCount() : 0;
+    wizardTab.innerHTML = 'Pipeline Wizard <span class="opcua-wizard-badge" id="opcua-wizard-badge"' +
+      (badgeCount === 0 ? ' style="display:none"' : '') + '>' + badgeCount + '</span>';
+    tabBar.appendChild(wizardTab);
+
+    const dashTab = document.createElement('button');
+    dashTab.className = 'opcua-right-tab';
+    dashTab.dataset.tab = 'dashboard';
+    dashTab.textContent = 'Pipelines';
+    tabBar.appendChild(dashTab);
+
+    rightPane.appendChild(tabBar);
+
+    // Detail panel content
     const detailContent = document.createElement('div');
     detailContent.className = 'opcua-tab-content';
     const detailPanel = NS.NodeDetail ? NS.NodeDetail.createPanel() : document.createElement('div');
     detailContent.appendChild(detailPanel);
     rightPane.appendChild(detailContent);
+
+    // Wizard panel content
+    const wizardContent = document.createElement('div');
+    wizardContent.className = 'opcua-tab-content';
+    wizardContent.style.display = 'none';
+    const wizardPanel = NS.PipelineWizard ? NS.PipelineWizard.createPanel() : document.createElement('div');
+    wizardContent.appendChild(wizardPanel);
+    rightPane.appendChild(wizardContent);
+
+    // Dashboard panel content
+    const dashContent = document.createElement('div');
+    dashContent.className = 'opcua-tab-content';
+    dashContent.style.display = 'none';
+    const dashPanel = NS.PipelineDashboard ? NS.PipelineDashboard.createPanel() : document.createElement('div');
+    dashContent.appendChild(dashPanel);
+    rightPane.appendChild(dashContent);
+
+    // Tab switching
+    var allTabs = [detailTab, wizardTab, dashTab];
+    var allContents = { detail: detailContent, wizard: wizardContent, dashboard: dashContent };
+    tabBar.addEventListener('click', function (e) {
+      var tab = e.target.closest('.opcua-right-tab');
+      if (!tab) return;
+      var tabName = tab.dataset.tab;
+      for (var t = 0; t < allTabs.length; t++) {
+        allTabs[t].classList.toggle('opcua-right-tab-active', allTabs[t].dataset.tab === tabName);
+      }
+      for (var key in allContents) {
+        allContents[key].style.display = key === tabName ? '' : 'none';
+      }
+      // Notify dashboard of visibility
+      if (NS.PipelineDashboard) {
+        NS.PipelineDashboard.setVisible(tabName === 'dashboard');
+      }
+    });
 
     splitPane.appendChild(rightPane);
 
@@ -256,11 +317,20 @@
     }
   }
 
+  function updateWizardBadge() {
+    var badge = document.getElementById('opcua-wizard-badge');
+    if (!badge) return;
+    var count = NS.PipelineWizard ? NS.PipelineWizard.getSelectionCount() : 0;
+    badge.textContent = count;
+    badge.style.display = count > 0 ? 'inline-block' : 'none';
+  }
+
   NS.ContentPanel = {
     createPanel: createPanel,
     activate: activate,
     deactivate: deactivate,
     isActive: isActive,
-    updateConnectionStatus: updateConnectionStatus
+    updateConnectionStatus: updateConnectionStatus,
+    updateWizardBadge: updateWizardBadge
   };
 })();

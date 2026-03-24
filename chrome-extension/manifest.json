@@ -27,6 +27,8 @@
         "content/api-client.js",
         "content/config-panel.js",
         "content/node-detail.js",
+        "content/pipeline-wizard.js",
+        "content/pipeline-dashboard.js",
         "content/tree-browser.js",
         "content/content-panel.js",
         "content/sidebar-injector.js",

@@ -88,6 +88,23 @@
     // Indent
     row.style.paddingLeft = (12 + depth * 18) + 'px';
 
+    // Checkbox for variable nodes (pipeline selection)
+    if (cat === 'variable' && NS.PipelineWizard) {
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'opcua-tree-checkbox';
+      cb.checked = NS.PipelineWizard.isNodeSelected(key);
+      cb.addEventListener('click', function (e) { e.stopPropagation(); });
+      cb.addEventListener('change', function () {
+        if (this.checked) {
+          NS.PipelineWizard.addNode(n);
+        } else {
+          NS.PipelineWizard.removeNode(key);
+        }
+      });
+      row.appendChild(cb);
+    }
+
     // Toggle arrow
     const arrow = document.createElement('span');
     arrow.className = 'opcua-tree-arrow';
@@ -305,9 +322,18 @@
     return d.innerHTML;
   }
 
+  function uncheckNode(key) {
+    var entry = _nodes.get(key);
+    if (entry && entry.element) {
+      var cb = entry.element.querySelector('.opcua-tree-checkbox');
+      if (cb) cb.checked = false;
+    }
+  }
+
   NS.TreeBrowser = {
     createPanel: createPanel,
     loadRoot: loadRoot,
-    clear: clear
+    clear: clear,
+    uncheckNode: uncheckNode
   };
 })();

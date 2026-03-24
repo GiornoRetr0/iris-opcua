@@ -313,7 +313,7 @@ ClassMethod InferTypeFromValue(pClient As OPCUA.Client, pNodeNS As %Integer, pNo
 
 /// Sanitize a node display name for use as an ObjectScript property name.
 /// Replaces non-alphanumeric characters, handles leading digits, and deduplicates.
-ClassMethod SanitizePropertyName(pName As %String, ByRef pUsedNames) As %String [ Private ]
+ClassMethod SanitizePropertyName(pName As %String, ByRef pUsedNames) As %String
 {
 	set tClean = ""
 	set tPrevUnderscore = 0

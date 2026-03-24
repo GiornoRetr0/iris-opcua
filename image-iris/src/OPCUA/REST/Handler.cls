@@ -35,6 +35,11 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/generate" Method="POST" Call="Generate" />
   <Route Url="/test" Method="GET" Call="Test" />
   <Route Url="/test" Method="POST" Call="Test" />
+  <Route Url="/deploy" Method="POST" Call="Deploy" />
+  <Route Url="/pipelines" Method="GET" Call="Pipelines" />
+  <Route Url="/pipelines" Method="POST" Call="Pipelines" />
+  <Route Url="/pipelines/toggle" Method="POST" Call="PipelinesToggle" />
+  <Route Url="/pipelines/delete" Method="POST" Call="PipelinesDelete" />
 </Routes>
 }
 
@@ -114,6 +119,79 @@ ClassMethod Test() As %Status
 		Quit:$$$ISERR(tSC)
 
 		set tSC = ##class(OPCUA.REST.ConnectionService).Test(tBody, .tResult)
+		Quit:$$$ISERR(tSC)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	if $$$ISERR(tSC) {
+		Quit ..SendError($System.Status.GetErrorText(tSC))
+	}
+	Quit ..SendOK(tResult)
+}
+
+/// Deploy a data pipeline (DataSource + Production).
+ClassMethod Deploy() As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+
+		set tSC = ##class(OPCUA.REST.DeployService).Deploy(tBody, .tResult)
+		Quit:$$$ISERR(tSC)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	if $$$ISERR(tSC) {
+		Quit ..SendError($System.Status.GetErrorText(tSC))
+	}
+	Quit ..SendOK(tResult)
+}
+
+/// List all pipelines.
+ClassMethod Pipelines() As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+		set tSC = ##class(OPCUA.REST.PipelineService).List(tBody, .tResult)
+		Quit:$$$ISERR(tSC)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	if $$$ISERR(tSC) {
+		Quit ..SendError($System.Status.GetErrorText(tSC))
+	}
+	Quit ..SendOK(tResult)
+}
+
+/// Toggle a pipeline on/off.
+ClassMethod PipelinesToggle() As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+		set tSC = ##class(OPCUA.REST.PipelineService).Toggle(tBody, .tResult)
+		Quit:$$$ISERR(tSC)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	if $$$ISERR(tSC) {
+		Quit ..SendError($System.Status.GetErrorText(tSC))
+	}
+	Quit ..SendOK(tResult)
+}
+
+/// Delete a pipeline.
+ClassMethod PipelinesDelete() As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+		set tSC = ##class(OPCUA.REST.PipelineService).Delete(tBody, .tResult)
 		Quit:$$$ISERR(tSC)
 	} Catch (e) {
 		set tSC = e.AsStatus()
