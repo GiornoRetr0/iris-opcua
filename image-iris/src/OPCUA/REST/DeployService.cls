@@ -433,8 +433,13 @@ ClassMethod DeployV2(pBody As %DynamicObject, Output pResult As %DynamicObject) 
 		for iRS=0:1:tRowSources.%Size()-1 {
 			set tRS = tRowSources.%Get(iRS)
 			set tChildren = tRS.%Get("childNodes")
-			if '$IsObject($Get(tChildren)) || (tChildren.%Size() '= tColCount) {
-				set tSC = $$$ERROR($$$GeneralError, "Row source '"_tRS.%Get("displayName")_"' has "_$Select($IsObject($Get(tChildren)):tChildren.%Size(), 1:0)_" child nodes, expected "_tColCount)
+			if '$IsObject($Get(tChildren)) || (tChildren.%Size() = 0) {
+				set tSC = $$$ERROR($$$GeneralError, "Row source '"_tRS.%Get("displayName")_"' has no child nodes")
+				Quit
+			}
+			// Row sources may have fewer children than union columns (missing columns → NULL)
+			if tChildren.%Size() > tColCount {
+				set tSC = $$$ERROR($$$GeneralError, "Row source '"_tRS.%Get("displayName")_"' has more child nodes ("_tChildren.%Size()_") than columns ("_tColCount_")")
 				Quit
 			}
 		}
@@ -583,7 +588,9 @@ ClassMethod GenerateDataSourceTextV2(pBody As %DynamicObject, pColumns As %Dynam
 	Quit tSC
 }
 
-/// Store row source metadata in ^OPCUA.RowSource global for runtime use by TCPPollingRowSourceService.
+/// Store row source metadata in ^OPCUA.RowSource global for runtime use by row-source services.
+/// Computes a column mask per row source: which union columns each RS has (by matching childNode displayNames).
+/// Missing columns will be NULL at runtime.
 ClassMethod StoreRowSourceMetadata(pClassName As %String, pRowSources As %DynamicArray, pColumns As %DynamicArray) As %Status [ Private ]
 {
 	#dim tSC As %Status = $$$OK
@@ -591,7 +598,15 @@ ClassMethod StoreRowSourceMetadata(pClassName As %String, pRowSources As %Dynami
 		set tRSCount = pRowSources.%Size()
 		set tColCount = pColumns.%Size()
 
-		// Build the row source list: $LB($LB(path, ns, id, idType, $LB($LB(ns,id,idType), ...)), ...)
+		// Build ordered column name list for matching
+		for c=0:1:tColCount-1 {
+			set tColNames(c) = pColumns.%Get(c).%Get("displayName")
+		}
+
+		// Build row source list with column masks
+		// Each RS entry: $LB(path, ns, id, idType, columnMask, absNodeRefs)
+		//   columnMask = $LB(1,0,1,...) — M entries, 1=has column, 0=NULL
+		//   absNodeRefs = $LB($LB(ns,id,type),...) — only for mask=1 columns, in mask order
 		set tRSList = ""
 		for i=0:1:tRSCount-1 {
 			set tRS = pRowSources.%Get(i)
@@ -600,15 +615,30 @@ ClassMethod StoreRowSourceMetadata(pClassName As %String, pRowSources As %Dynami
 			set tNodeId = tRS.%Get("nodeId")
 			set tNodeIdType = +tRS.%Get("nodeIdType")
 
-			// Collect absolute node IDs for each column from this row source's childNodes
+			// Build a lookup: childNode displayName → child object
 			set tChildren = tRS.%Get("childNodes")
-			set tAbsNodeRefs = ""
+			kill tChildMap
 			for j=0:1:tChildren.%Size()-1 {
 				set tChild = tChildren.%Get(j)
-				set tAbsNodeRefs = tAbsNodeRefs _ $LB($LB(+tChild.%Get("nodeNs"), tChild.%Get("nodeId"), +tChild.%Get("nodeIdType")))
+				set tChildMap(tChild.%Get("displayName")) = tChild
 			}
 
-			set tRSList = tRSList _ $LB($LB(tPath, tNodeNs, tNodeId, tNodeIdType, tAbsNodeRefs))
+			// Build column mask and abs node refs by iterating union columns in order
+			set tMask = ""
+			set tAbsNodeRefs = ""
+			for c=0:1:tColCount-1 {
+				if $Data(tChildMap(tColNames(c))) {
+					// This row source has this column
+					set tChild = tChildMap(tColNames(c))
+					set tMask = tMask _ $LB(1)
+					set tAbsNodeRefs = tAbsNodeRefs _ $LB($LB(+tChild.%Get("nodeNs"), tChild.%Get("nodeId"), +tChild.%Get("nodeIdType")))
+				} else {
+					// Missing column → NULL at runtime
+					set tMask = tMask _ $LB(0)
+				}
+			}
+
+			set tRSList = tRSList _ $LB($LB(tPath, tNodeNs, tNodeId, tNodeIdType, tMask, tAbsNodeRefs))
 		}
 
 		// Store: $LB(rowSourceCount, columnCount, rowSourceList)

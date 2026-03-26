@@ -593,34 +593,94 @@ export class PipelineWizardComponent {
     return groups;
   });
 
-  // Derived: merge parents with matching schemas into pipeline groups
+  // Derived: merge parents with overlapping columns into pipeline groups (union merge).
+  // Groups that share ANY column name get merged; columns become the union.
+  // Groups with zero column overlap stay separate.
   pipelineGroups = computed<PipelineGroup[]>(() => {
     const groups = this.parentGroups();
-    const schemaMap = new Map<string, PipelineGroup>();
 
+    // Build entries: one per parent group
+    const entries: { columnNames: Set<string>; rowSource: RowSource }[] = [];
     for (const [, group] of groups) {
-      const columnNames = group.children.map((c) => c.node.displayName).sort();
-      const schemaKey = columnNames.join('|');
-
-      if (!schemaMap.has(schemaKey)) {
-        schemaMap.set(schemaKey, {
-          schemaKey,
-          columns: columnNames.map((name) => ({ displayName: name, nodeCategory: 'variable' })),
-          rowSources: [],
-        });
-      }
-
-      schemaMap.get(schemaKey)!.rowSources.push({
-        displayName: group.parent.displayName,
-        nodeNs: group.parent.nodeNs,
-        nodeId: group.parent.nodeId,
-        nodeIdType: group.parent.nodeIdType,
-        path: group.parent.path,
-        childNodes: group.children.map((c) => c.node),
+      entries.push({
+        columnNames: new Set(group.children.map((c) => c.node.displayName)),
+        rowSource: {
+          displayName: group.parent.displayName,
+          nodeNs: group.parent.nodeNs,
+          nodeId: group.parent.nodeId,
+          nodeIdType: group.parent.nodeIdType,
+          path: group.parent.path,
+          childNodes: group.children.map((c) => c.node),
+        },
       });
     }
 
-    return Array.from(schemaMap.values());
+    // Connected-components merge: groups sharing any column name get merged
+    const used = new Set<number>();
+    const clusters: { columnNames: Set<string>; rowSources: RowSource[] }[] = [];
+
+    for (let i = 0; i < entries.length; i++) {
+      if (used.has(i)) continue;
+      used.add(i);
+
+      const cluster = {
+        columnNames: new Set(entries[i].columnNames),
+        rowSources: [entries[i].rowSource],
+      };
+
+      // Keep merging until no more overlapping groups found
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (let j = 0; j < entries.length; j++) {
+          if (used.has(j)) continue;
+          const hasOverlap = [...entries[j].columnNames].some((c) => cluster.columnNames.has(c));
+          if (hasOverlap) {
+            used.add(j);
+            entries[j].columnNames.forEach((c) => cluster.columnNames.add(c));
+            cluster.rowSources.push(entries[j].rowSource);
+            changed = true;
+          }
+        }
+      }
+
+      clusters.push(cluster);
+    }
+
+    // Auto-discover: for each row source, check its parent tree node's loaded children
+    // for any union columns the user didn't explicitly select. If the node exists, include it.
+    const treeRoots = this.treeRoots();
+    for (const cluster of clusters) {
+      for (const rs of cluster.rowSources) {
+        const parentTreeNode = this.findTreeNode(treeRoots, rs.nodeNs, rs.nodeId);
+        if (!parentTreeNode?.children) continue;
+
+        const existingNames = new Set(rs.childNodes.map((c) => c.displayName));
+        for (const colName of cluster.columnNames) {
+          if (existingNames.has(colName)) continue;
+          // Check if this parent actually has a child variable with this name
+          const child = parentTreeNode.children.find(
+            (c) => c.displayName === colName && c.nodeCategory === 'variable'
+          );
+          if (child) {
+            rs.childNodes = [
+              ...rs.childNodes,
+              { displayName: child.displayName, nodeNs: child.nodeNs, nodeId: child.nodeId, nodeIdType: child.nodeIdType },
+            ];
+          }
+        }
+      }
+    }
+
+    // Convert to PipelineGroup format
+    return clusters.map((cluster) => {
+      const sortedColumns = [...cluster.columnNames].sort();
+      return {
+        schemaKey: sortedColumns.join('|'),
+        columns: sortedColumns.map((name) => ({ displayName: name, nodeCategory: 'variable' })),
+        rowSources: cluster.rowSources,
+      };
+    });
   });
 
   // v2: one deploy per pipeline group (not per row source)
@@ -885,6 +945,17 @@ export class PipelineWizardComponent {
       nodeIdType: 0,
       path: 'Objects',
     };
+  }
+
+  private findTreeNode(roots: TreeNode[], nodeNs: number, nodeId: string | number): TreeNode | undefined {
+    for (const node of roots) {
+      if (node.nodeNs === nodeNs && String(node.nodeId) === String(nodeId)) return node;
+      if (node.children) {
+        const found = this.findTreeNode(node.children, nodeNs, nodeId);
+        if (found) return found;
+      }
+    }
+    return undefined;
   }
 
   buildNodePath(node: TreeNode): string {
