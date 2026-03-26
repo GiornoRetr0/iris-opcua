@@ -121,14 +121,17 @@ import { Pipeline } from '../../core/models/opcua.models';
                           class="p-2 text-on-surface-variant hover:text-error transition-colors rounded-lg hover:bg-error-container/20">
                     <span class="material-symbols-outlined">stop_circle</span>
                   </button>
-                  <button class="p-2 text-on-surface-variant hover:text-primary transition-colors rounded-lg hover:bg-primary-fixed/20">
-                    <span class="material-symbols-outlined">edit_square</span>
-                  </button>
                 } @else {
                   <button (click)="togglePipeline(pipeline)"
                           class="p-2 text-on-surface-variant hover:text-tertiary transition-colors rounded-lg hover:bg-tertiary-fixed/20">
                     <span class="material-symbols-outlined">play_circle</span>
                   </button>
+                }
+                <button (click)="editPipeline(pipeline)"
+                        class="p-2 text-on-surface-variant hover:text-primary transition-colors rounded-lg hover:bg-primary-fixed/20">
+                  <span class="material-symbols-outlined">edit_square</span>
+                </button>
+                @if (isStopped(pipeline)) {
                   <button (click)="deletePipeline(pipeline)"
                           class="p-2 text-on-surface-variant hover:text-error transition-colors rounded-lg hover:bg-error-container/20">
                     <span class="material-symbols-outlined">delete</span>
@@ -287,6 +290,10 @@ export class PipelinesDashboardComponent implements OnInit {
     });
   }
 
+  editPipeline(pipeline: Pipeline): void {
+    this.router.navigate(['/pipelines/edit', pipeline.name]);
+  }
+
   deletePipeline(pipeline: Pipeline): void {
     if (!confirm(`Delete pipeline "${pipeline.name}"?`)) return;
     this.api.deletePipeline(pipeline.name).subscribe({
@@ -396,11 +403,9 @@ export class PipelinesDashboardComponent implements OnInit {
 
   /** API returns: callInterval="5" (polling), publishingInterval="1000" (subscription) */
   getIntervalLabel(p: Pipeline): string {
+    if (p.mode === 'subscription') return 'event-driven';
     const ci: any = (p as any).callInterval;
     if (ci && ci !== '' && ci !== '0') return `every ${ci}s`;
-    const pi: any = (p as any).publishingInterval;
-    if (pi && pi !== '' && pi !== '0') return `every ${Number(pi) / 1000}s`;
-    if (p.mode === 'subscription') return 'event-driven';
     return 'every 5s';
   }
 }

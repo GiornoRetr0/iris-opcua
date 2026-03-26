@@ -47,7 +47,13 @@ export interface Pipeline {
   callInterval?: number;
   serverUrl?: string;
   pipelineVersion?: number;
-  rowSources?: { path: string; nodeNs: number; nodeId: string | number; nodeIdType: number }[];
+  rowSources?: {
+    path: string;
+    nodeNs: number;
+    nodeId: string | number;
+    nodeIdType: number;
+    childNodes?: { displayName: string; nodeNs: number; nodeId: string | number; nodeIdType: number }[];
+  }[];
   [key: string]: any; // allow extra fields from API
 }
 

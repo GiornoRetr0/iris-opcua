@@ -27,4 +27,11 @@ export const routes: Routes = [
         (m) => m.PipelineWizardComponent
       ),
   },
+  {
+    path: 'pipelines/edit/:name',
+    loadComponent: () =>
+      import('./pages/pipeline-wizard/pipeline-wizard.component').then(
+        (m) => m.PipelineWizardComponent
+      ),
+  },
 ];

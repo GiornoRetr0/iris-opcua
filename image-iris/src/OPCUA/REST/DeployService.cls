@@ -355,7 +355,7 @@ ClassMethod GenerateDataSourceText(pBody As %DynamicObject, pNodes As %DynamicAr
 }
 
 /// Write class text to a temp file and compile it.
-ClassMethod WriteAndCompile(pClassName As %String, pText As %String) As %Status [ Private ]
+ClassMethod WriteAndCompile(pClassName As %String, pText As %String) As %Status
 {
 	#dim tSC As %Status = $$$OK
 	Try {
@@ -591,7 +591,7 @@ ClassMethod GenerateDataSourceTextV2(pBody As %DynamicObject, pColumns As %Dynam
 /// Store row source metadata in ^OPCUA.RowSource global for runtime use by row-source services.
 /// Computes a column mask per row source: which union columns each RS has (by matching childNode displayNames).
 /// Missing columns will be NULL at runtime.
-ClassMethod StoreRowSourceMetadata(pClassName As %String, pRowSources As %DynamicArray, pColumns As %DynamicArray) As %Status [ Private ]
+ClassMethod StoreRowSourceMetadata(pClassName As %String, pRowSources As %DynamicArray, pColumns As %DynamicArray) As %Status
 {
 	#dim tSC As %Status = $$$OK
 	Try {
@@ -651,7 +651,7 @@ ClassMethod StoreRowSourceMetadata(pClassName As %String, pRowSources As %Dynami
 }
 
 /// Map OPCUA.Types.*DataValue to plain IRIS types for v2 flat columns.
-ClassMethod MapToPlainType(pInferredType As %String) As %String [ Private ]
+ClassMethod MapToPlainType(pInferredType As %String) As %String
 {
 	if pInferredType = "" Quit "%String"
 	if pInferredType = "OPCUA.Types.DoubleDataValue" Quit "%Double"

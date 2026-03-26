@@ -124,4 +124,8 @@ export class ApiService {
   deletePipeline(name: string): Observable<any> {
     return this.post('/pipelines/delete', { name });
   }
+
+  editPipeline(params: Record<string, any>): Observable<any> {
+    return this.post('/pipelines/edit', params, 60000);
+  }
 }

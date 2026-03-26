@@ -353,6 +353,176 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 	Quit tSC
 }
 
+/// Edit (update) an existing v2 pipeline: stop service, regenerate DataSource class
+/// with type preservation, update row source metadata, restart service.
+ClassMethod Edit(pBody As %DynamicObject, Output pResult As %DynamicObject) As %Status
+{
+	#dim tSC As %Status = $$$OK
+	set pResult = {}
+	set pResult.updated = 0
+	Try {
+		// --- Validate inputs ---
+		set tClassName = pBody.%Get("existingClassName")
+		if tClassName = "" {
+			set tSC = $$$ERROR($$$GeneralError, "Missing existingClassName")
+			Quit
+		}
+
+		if '##class(%Dictionary.ClassDefinition).%ExistsId(tClassName) {
+			set tSC = $$$ERROR($$$GeneralError, "Class '"_tClassName_"' does not exist")
+			Quit
+		}
+
+		set tColumns = pBody.%Get("columns")
+		set tRowSources = pBody.%Get("rowSources")
+		if '$IsObject($Get(tColumns)) || (tColumns.%Size() = 0) {
+			set tSC = $$$ERROR($$$GeneralError, "No columns defined")
+			Quit
+		}
+		if '$IsObject($Get(tRowSources)) || (tRowSources.%Size() = 0) {
+			set tSC = $$$ERROR($$$GeneralError, "No row sources defined")
+			Quit
+		}
+
+		set tDataSourceName = pBody.%Get("dataSourceName")
+		if tDataSourceName = "" set tDataSourceName = $Piece(tClassName, ".", *)
+
+		set tMode = pBody.%Get("mode")
+		if (tMode '= "polling") && (tMode '= "subscription") set tMode = "polling"
+
+		// --- Step 1: Read existing column types before deleting ---
+		kill tExistingTypes
+		set tClassDef = ##class(%Dictionary.CompiledClass).%OpenId(tClassName)
+		if $IsObject(tClassDef) {
+			for i=1:1:tClassDef.Properties.Count() {
+				set tProp = tClassDef.Properties.GetAt(i)
+				if tProp.Name = "NodePath" continue
+				if tProp.Name = "ServerTimeStamp" continue
+				if tProp.Name = "SourceTimeStamp" continue
+				if $Extract(tProp.Name, 1) = "%" continue
+				set tExistingTypes(tProp.Name) = tProp.Type
+			}
+		}
+
+		// --- Step 2: Stop the service item if running ---
+		do ##class(Ens.Director).GetProductionStatus(.tRunningProd, .tProdState)
+		set tProdRunning = (tRunningProd = ..#ProductionClass) && (tProdState = 1)
+		if tProdRunning {
+			if ##class(Ens.Director).IsItemEnabled(tDataSourceName, .tSCCheck) {
+				do ##class(Ens.Director).EnableConfigItem(tDataSourceName, 0)
+				do ##class(Ens.Director).UpdateProduction()
+			}
+		}
+
+		// --- Step 3: Delete old class and metadata ---
+		do $System.OBJ.Delete(tClassName, "-d")
+		Kill ^OPCUA.RowSource(tClassName)
+		Kill ^OPCUA.DataSource(tClassName)
+
+		// --- Step 4: Generate new DataSource class with type preservation ---
+		set tNL = $Char(10)
+
+		// Determine default namespace
+		set tFirstRS = tRowSources.%Get(0)
+		set tChildren = tFirstRS.%Get("childNodes")
+		for iC=0:1:tChildren.%Size()-1 {
+			set tNS = +tChildren.%Get(iC).%Get("nodeNs")
+			set tNSCount(tNS) = $Get(tNSCount(tNS), 0) + 1
+		}
+		set tDefaultNS = 0
+		set tMaxCount = 0
+		set tNS = ""
+		for {
+			set tNS = $Order(tNSCount(tNS))
+			if tNS = "" Quit
+			if tNSCount(tNS) > tMaxCount {
+				set tMaxCount = tNSCount(tNS)
+				set tDefaultNS = tNS
+			}
+		}
+
+		// Build class text
+		set tText = "/// Auto-generated OPC UA DataSource class (v2 row-source model)."_tNL
+		set tText = tText_"Class "_tClassName_" Extends (%Persistent, OPCUA.DataSource.Definition)"_tNL
+		set tText = tText_"{"_tNL
+		set tText = tText_tNL
+		set tText = tText_"Parameter OPCUADATASOURCE = """_tDataSourceName_""";"_tNL
+		set tText = tText_tNL
+		set tText = tText_"Parameter OPCUDEFAULTANAMESPACE = "_tDefaultNS_";"_tNL
+		set tText = tText_tNL
+		set tText = tText_"Parameter OPCUAPIPELINEVERSION = 2;"_tNL
+		set tText = tText_tNL
+		set tText = tText_"Property NodePath As %String(MAXLEN = 500);"_tNL
+		set tText = tText_tNL
+		set tText = tText_"Property ServerTimeStamp As %TimeStamp;"_tNL
+		set tText = tText_tNL
+		set tText = tText_"Property SourceTimeStamp As %TimeStamp;"_tNL
+
+		// Generate column properties with type preservation
+		for iC=0:1:tColumns.%Size()-1 {
+			set tCol = tColumns.%Get(iC)
+			set tDisplayName = tCol.%Get("displayName")
+
+			// Sanitize property name
+			set tPropName = ##class(OPCUA.DataSource.Generator).SanitizePropertyName(tDisplayName, .tUsedNames)
+
+			// Preserve existing type if available, otherwise infer
+			if $Data(tExistingTypes(tPropName)) {
+				set tType = tExistingTypes(tPropName)
+			} else {
+				set tType = ##class(OPCUA.REST.DeployService).MapToPlainType(tCol.%Get("inferredType"))
+			}
+
+			// Use first row source's child node namespace
+			set tChildNS = tDefaultNS
+			if iC < tChildren.%Size() {
+				set tChildNS = +tChildren.%Get(iC).%Get("nodeNs")
+			}
+
+			set tText = tText_tNL
+			set tText = tText_"Property "_tPropName_" As "_tType_"(OPCUANODENAME = """_tDisplayName_""""
+			if tChildNS '= tDefaultNS {
+				set tText = tText_", OPCUANAMESPACE = """_tChildNS_""""
+			}
+			set tText = tText_");"_tNL
+		}
+
+		set tText = tText_tNL_"}"_tNL
+
+		// --- Step 5: Write and compile ---
+		set tSC = ##class(OPCUA.REST.DeployService).WriteAndCompile(tClassName, tText)
+		if $$$ISERR(tSC) {
+			set pResult.error = "Compilation failed: "_$System.Status.GetErrorText(tSC)
+			set tSC = $$$OK
+			Quit
+		}
+
+		// --- Step 6: Update row source metadata ---
+		set tSC = ##class(OPCUA.REST.DeployService).StoreRowSourceMetadata(tClassName, tRowSources, tColumns)
+		if $$$ISERR(tSC) {
+			set pResult.error = "Failed to update row source metadata: "_$System.Status.GetErrorText(tSC)
+			set tSC = $$$OK
+			Quit
+		}
+
+		// --- Step 7: Re-enable and restart ---
+		if tProdRunning {
+			do ##class(Ens.Director).EnableConfigItem(tDataSourceName, 1)
+			do ##class(Ens.Director).UpdateProduction()
+		}
+
+		set pResult.updated = 1
+		set pResult.dataSourceClass = tClassName
+		set tPackage = $Piece(tClassName, ".", 1, *-1)
+		set tShort = $Piece(tClassName, ".", *)
+		set pResult.tableName = $Select(tPackage="":tShort, 1:$Replace(tPackage, ".", "_")_"."_tShort)
+
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit tSC
+}
+
 /// Remove an Item element from the production XData by name.
 /// Returns the DataSourceClass value so the caller can delete it.
 ClassMethod RemoveItemFromXData(pItemName As %String, Output pDSClass As %String) As %Status [ Private ]
@@ -443,6 +613,8 @@ ClassMethod RemoveItemFromXData(pItemName As %String, Output pDSClass As %String
 }
 
 /// Get row source information for a v2 pipeline from ^OPCUA.RowSource global.
+/// Returns path, nodeNs, nodeId, nodeIdType, and childNodes per row source.
+/// childNodes are resolved by cross-referencing column masks with column names from the compiled class.
 ClassMethod GetRowSourceInfo(pClassName As %String) As %DynamicArray [ Private ]
 {
 	set tResult = []
@@ -451,7 +623,42 @@ ClassMethod GetRowSourceInfo(pClassName As %String) As %DynamicArray [ Private ]
 		if tRSData = "" Quit
 
 		set tRSCount = $LI(tRSData, 1)
+		set tColCount = $LI(tRSData, 2)
 		set tRSList = $LI(tRSData, 3)
+
+		// Get column names from compiled class (OPCUANODENAME params, in storage order)
+		// These correspond to the column mask positions
+		kill tColNames
+		set tColIdx = 0
+		set tClassDef = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
+		if $IsObject(tClassDef) {
+			// Read storage entries in order (same order Projection uses)
+			set tStorage = tClassDef.Storages.GetAt(1)
+			if $IsObject(tStorage) {
+				set tDataDef = tStorage.Data.GetAt(1)
+				if $IsObject(tDataDef) {
+					for iS=1:1:tDataDef.Values.Count() {
+						set tPropName = tDataDef.Values.GetAt(iS).Value
+						// Skip system/metadata properties
+						if $Extract(tPropName,1)="%" continue
+						if tPropName="NodePath" continue
+						if tPropName="ServerTimeStamp" continue
+						if tPropName="SourceTimeStamp" continue
+						// This is a column property
+						set tColIdx = tColIdx + 1
+						// Get its OPCUANODENAME
+						for iP=1:1:tClassDef.Properties.Count() {
+							set tProp = tClassDef.Properties.GetAt(iP)
+							if tProp.Name = tPropName {
+								set tColNames(tColIdx) = tProp.Parameters.GetAt("OPCUANODENAME")
+								Quit
+							}
+						}
+						if '$Data(tColNames(tColIdx)) set tColNames(tColIdx) = tPropName
+					}
+				}
+			}
+		}
 
 		for i=1:1:tRSCount {
 			set tRS = $LI(tRSList, i)
@@ -460,6 +667,28 @@ ClassMethod GetRowSourceInfo(pClassName As %String) As %DynamicArray [ Private ]
 			set tInfo.nodeNs = $LI(tRS, 2)
 			set tInfo.nodeId = $LI(tRS, 3)
 			set tInfo.nodeIdType = $LI(tRS, 4)
+
+			// Build childNodes from column mask + absolute node refs
+			set tChildren = []
+			if $LL(tRS) >= 6 {
+				set tMask = $LI(tRS, 5)
+				set tAbsRefs = $LI(tRS, 6)
+				set tRefIdx = 0
+				for c=1:1:tColCount {
+					if +$LI(tMask, c) {
+						set tRefIdx = tRefIdx + 1
+						set tRef = $LI(tAbsRefs, tRefIdx)
+						set tChild = {}
+						set tChild.displayName = $Get(tColNames(c), "Column"_c)
+						set tChild.nodeNs = $LI(tRef, 1)
+						set tChild.nodeId = $LI(tRef, 2)
+						set tChild.nodeIdType = $LI(tRef, 3)
+						do tChildren.%Push(tChild)
+					}
+				}
+			}
+			set tInfo.childNodes = tChildren
+
 			do tResult.%Push(tInfo)
 		}
 	} Catch (e) {}

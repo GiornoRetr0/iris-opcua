@@ -40,6 +40,7 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/pipelines" Method="POST" Call="Pipelines" />
   <Route Url="/pipelines/toggle" Method="POST" Call="PipelinesToggle" />
   <Route Url="/pipelines/delete" Method="POST" Call="PipelinesDelete" />
+  <Route Url="/pipelines/edit" Method="POST" Call="PipelinesEdit" />
 </Routes>
 }
 
@@ -192,6 +193,24 @@ ClassMethod PipelinesDelete() As %Status
 		set tSC = ..GetRequestParams(.tBody)
 		Quit:$$$ISERR(tSC)
 		set tSC = ##class(OPCUA.REST.PipelineService).Delete(tBody, .tResult)
+		Quit:$$$ISERR(tSC)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	if $$$ISERR(tSC) {
+		Quit ..SendError($System.Status.GetErrorText(tSC))
+	}
+	Quit ..SendOK(tResult)
+}
+
+/// Edit (update) an existing pipeline.
+ClassMethod PipelinesEdit() As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+		set tSC = ##class(OPCUA.REST.PipelineService).Edit(tBody, .tResult)
 		Quit:$$$ISERR(tSC)
 	} Catch (e) {
 		set tSC = e.AsStatus()

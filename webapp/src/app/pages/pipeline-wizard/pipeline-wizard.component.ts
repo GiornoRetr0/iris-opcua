@@ -1,13 +1,14 @@
 import { Component, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { Router, ActivatedRoute } from '@angular/router';
 import { ApiService } from '../../core/services/api.service';
 import { ConfigService } from '../../core/services/config.service';
 import {
   TreeNode,
   OpcuaNode,
   SelectedNode,
+  Pipeline,
   DeployV2Request,
   V2Selection,
   PipelineGroup,
@@ -105,7 +106,16 @@ import {
                 </div>
               </div>
 
-              <h1 class="text-2xl font-semibold text-on-surface mb-3 tracking-tight mt-8">Select Data Nodes</h1>
+              @if (editMode()) {
+                <div class="mb-6 px-4 py-3 bg-primary/10 border border-primary/20 rounded-lg flex items-center gap-2">
+                  <span class="material-symbols-outlined text-primary">edit_note</span>
+                  <span class="text-sm font-semibold text-primary">Editing: {{ editPipelineName() }}</span>
+                </div>
+              }
+
+              <h1 class="text-2xl font-semibold text-on-surface mb-3 tracking-tight mt-8">
+                {{ editMode() ? 'Modify Pipeline Nodes' : 'Select Data Nodes' }}
+              </h1>
               <p class="text-on-surface-variant text-center max-w-md mb-10 text-sm leading-relaxed">
                 Browse the OPC UA address space and select devices or individual sensors.
                 Checking a device auto-selects all its child attributes as columns.
@@ -114,7 +124,7 @@ import {
                 <button (click)="nextStep()"
                         [disabled]="selectedNodes().length === 0"
                         class="px-8 py-3 bg-primary text-on-primary font-bold rounded-lg shadow-xl shadow-primary/30 flex items-center gap-2 hover:brightness-110 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
-                  Review Selection
+                  {{ editMode() ? 'Review Changes' : 'Review Selection' }}
                   <span class="material-symbols-outlined">arrow_forward</span>
                 </button>
                 <button (click)="cancel()"
@@ -323,21 +333,21 @@ import {
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div class="space-y-1">
                         <label class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Package Path</label>
-                        <input type="text" [(ngModel)]="packagePath"
-                               class="w-full bg-surface-container-lowest border-outline-variant/20 rounded-lg text-sm focus:ring-2 focus:ring-primary focus:border-transparent transition-all px-4 py-3"
+                        <input type="text" [(ngModel)]="packagePath" [disabled]="editMode()"
+                               class="w-full bg-surface-container-lowest border-outline-variant/20 rounded-lg text-sm focus:ring-2 focus:ring-primary focus:border-transparent transition-all px-4 py-3 disabled:opacity-50"
                                placeholder="OPCUA.DS">
                       </div>
                       <div class="space-y-1">
                         <label class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Class Name</label>
-                        <input type="text" [(ngModel)]="className"
-                               class="w-full bg-surface-container-lowest border-outline-variant/20 rounded-lg text-sm focus:ring-2 focus:ring-primary focus:border-transparent transition-all px-4 py-3"
+                        <input type="text" [(ngModel)]="className" [disabled]="editMode()"
+                               class="w-full bg-surface-container-lowest border-outline-variant/20 rounded-lg text-sm focus:ring-2 focus:ring-primary focus:border-transparent transition-all px-4 py-3 disabled:opacity-50"
                                placeholder="MyDataSource">
                       </div>
                     </div>
                     <div class="space-y-1">
                       <label class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Data Source Name</label>
-                      <input type="text" [(ngModel)]="dataSourceName"
-                             class="w-full bg-surface-container-lowest border-outline-variant/20 rounded-lg text-sm focus:ring-2 focus:ring-primary focus:border-transparent transition-all px-4 py-3"
+                      <input type="text" [(ngModel)]="dataSourceName" [disabled]="editMode()"
+                             class="w-full bg-surface-container-lowest border-outline-variant/20 rounded-lg text-sm focus:ring-2 focus:ring-primary focus:border-transparent transition-all px-4 py-3 disabled:opacity-50"
                              placeholder="Production_Line_1">
                     </div>
                   </div>
@@ -435,11 +445,11 @@ import {
                           [disabled]="deploying() || !className || !dataSourceName"
                           class="w-full py-4 bg-gradient-to-br from-primary to-primary-container text-on-primary rounded-xl font-bold shadow-lg shadow-primary/20 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-40">
                     @if (deploying()) {
-                      Deploying{{ totalDeployUnits() > 1 ? ' (' + deployProgress() + '/' + totalDeployUnits() + ')' : '' }}...
+                      {{ editMode() ? 'Updating' : 'Deploying' }}{{ totalDeployUnits() > 1 ? ' (' + deployProgress() + '/' + totalDeployUnits() + ')' : '' }}...
                     } @else {
-                      Deploy {{ totalDeployUnits() > 1 ? totalDeployUnits() + ' Pipelines' : 'Pipeline' }}
+                      {{ editMode() ? 'Update Pipeline' : totalDeployUnits() > 1 ? 'Deploy ' + totalDeployUnits() + ' Pipelines' : 'Deploy Pipeline' }}
                     }
-                    <span class="material-symbols-outlined text-sm filled">rocket_launch</span>
+                    <span class="material-symbols-outlined text-sm filled">{{ editMode() ? 'sync' : 'rocket_launch' }}</span>
                   </button>
                   <button (click)="prevStep()"
                           class="w-full py-4 text-primary font-bold hover:bg-white/50 rounded-xl transition-colors border border-outline-variant/20 flex items-center justify-center gap-2">
@@ -464,7 +474,7 @@ import {
                  [class]="deploySuccess() ? 'bg-tertiary-fixed text-tertiary' : 'bg-error-container text-error'">
               <span class="material-symbols-outlined text-5xl">{{ deploySuccess() ? 'check_circle' : 'error' }}</span>
             </div>
-            <h1 class="text-3xl font-semibold mb-4">{{ deploySuccess() ? 'Pipeline' + (deployResults().length > 1 ? 's' : '') + ' Deployed' : 'Deployment Failed' }}</h1>
+            <h1 class="text-3xl font-semibold mb-4">{{ deploySuccess() ? editMode() ? 'Pipeline Updated' : 'Pipeline' + (deployResults().length > 1 ? 's' : '') + ' Deployed' : editMode() ? 'Update Failed' : 'Deployment Failed' }}</h1>
             <p class="text-on-surface-variant mb-8">{{ deployMessage() }}</p>
 
             <!-- Per-pipeline results (multi-pipeline) -->
@@ -553,7 +563,14 @@ import {
 export class PipelineWizardComponent {
   private api = inject(ApiService);
   private router = inject(Router);
+  private route = inject(ActivatedRoute);
   config = inject(ConfigService);
+
+  // Edit mode
+  editMode = signal(false);
+  editPipelineName = signal('');
+  existingPipeline = signal<Pipeline | null>(null);
+  existingClassName = signal('');
 
   steps = [
     { num: 1, label: 'Select' },
@@ -703,6 +720,66 @@ export class PipelineWizardComponent {
 
   constructor() {
     this.loadTree();
+
+    // Detect edit mode from route params
+    const name = this.route.snapshot.paramMap.get('name');
+    if (name) {
+      this.editMode.set(true);
+      this.editPipelineName.set(name);
+      this.loadExistingPipeline(name);
+    }
+  }
+
+  private loadExistingPipeline(name: string): void {
+    this.api.listPipelines().subscribe({
+      next: (pipelines) => {
+        const pipeline = pipelines.find((p) => p.name === name);
+        if (!pipeline) return;
+
+        this.existingPipeline.set(pipeline);
+        this.existingClassName.set((pipeline as any).dataSourceClass || '');
+
+        // Pre-fill configure fields
+        const fullClass = (pipeline as any).dataSourceClass || '';
+        const lastDot = fullClass.lastIndexOf('.');
+        if (lastDot > 0) {
+          this.packagePath = fullClass.substring(0, lastDot);
+          this.className = fullClass.substring(lastDot + 1);
+        } else {
+          this.className = fullClass;
+        }
+        this.dataSourceName = pipeline.name;
+        this.pipelineMode = (pipeline.mode as 'polling' | 'subscription') || 'polling';
+
+        // Pre-populate v2Selections from pipeline's rowSources + childNodes
+        if (pipeline.rowSources) {
+          const selections = new Map<string, V2Selection>();
+          for (const rs of pipeline.rowSources) {
+            const parentInfo = {
+              displayName: rs.path.split('/').pop() || rs.path,
+              nodeNs: rs.nodeNs,
+              nodeId: rs.nodeId,
+              nodeIdType: rs.nodeIdType,
+              path: rs.path,
+            };
+            for (const child of rs.childNodes || []) {
+              const key = `${child.nodeNs}:${child.nodeId}`;
+              selections.set(key, {
+                node: {
+                  displayName: child.displayName,
+                  nodeNs: child.nodeNs,
+                  nodeId: child.nodeId,
+                  nodeIdType: child.nodeIdType,
+                  path: `${rs.path}/${child.displayName}`,
+                },
+                parentNode: parentInfo,
+              });
+            }
+          }
+          this.v2Selections.set(selections);
+        }
+      },
+    });
   }
 
   // --- Tree Loading ---
@@ -1021,7 +1098,7 @@ export class PipelineWizardComponent {
     this.router.navigate(['/pipelines']);
   }
 
-  // --- Deploy (v2: one request per PipelineGroup) ---
+  // --- Deploy / Update (v2: one request per PipelineGroup) ---
 
   deploy(): void {
     this.deploying.set(true);
@@ -1031,6 +1108,40 @@ export class PipelineWizardComponent {
     const groups = this.pipelineGroups();
     if (groups.length === 0) return;
 
+    // Edit mode: update existing pipeline
+    if (this.editMode()) {
+      const group = groups[0];
+      const fullClassName = this.existingClassName();
+      const payload = {
+        ...this.buildV2Payload(group, fullClassName, this.dataSourceName),
+        existingClassName: fullClassName,
+      };
+
+      this.api.editPipeline(payload).subscribe({
+        next: (result: any) => {
+          this.deploying.set(false);
+          if (result.updated) {
+            this.deploySuccess.set(true);
+            this.deployMessage.set(
+              `Pipeline "${this.dataSourceName}" updated successfully with ${group.rowSources.length} row source${group.rowSources.length !== 1 ? 's' : ''} and ${group.columns.length} column${group.columns.length !== 1 ? 's' : ''}.`
+            );
+            this.deployResults.set([{ name: this.dataSourceName, success: true, message: 'Updated successfully' }]);
+          } else {
+            this.deploySuccess.set(false);
+            this.deployMessage.set(result.error || 'Update failed.');
+            this.deployResults.set([{ name: this.dataSourceName, success: false, message: result.error || 'Failed' }]);
+          }
+          this.nextStep();
+        },
+        error: (err) => {
+          this.deploying.set(false);
+          this.deployError.set(err.message || 'Update failed');
+        },
+      });
+      return;
+    }
+
+    // Create mode
     if (groups.length === 1) {
       // Single pipeline group -> single v2 deploy
       const group = groups[0];
