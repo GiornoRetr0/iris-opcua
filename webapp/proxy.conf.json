@@ -1,0 +1,7 @@
+{
+  "/iris/csp/opcua/api": {
+    "target": "http://localhost:52783",
+    "secure": false,
+    "changeOrigin": true
+  }
+}
