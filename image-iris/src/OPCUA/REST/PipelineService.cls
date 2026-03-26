@@ -76,7 +76,10 @@ ClassMethod ParseItems(pContent As %String, pProdRunning As %Boolean, pResult As
 			set tItem.enabled = (..ExtractAttr(tBlock, "Enabled") = "true")
 
 			// Determine mode and pipeline version from service class
-			if tItem.className = "OPCUA.Service.TCPSubscriptionService" {
+			if tItem.className = "OPCUA.Service.TCPSubscriptionRowSourceService" {
+				set tItem.mode = "subscription"
+				set tItem.pipelineVersion = 2
+			} elseif tItem.className = "OPCUA.Service.TCPSubscriptionService" {
 				set tItem.mode = "subscription"
 				set tItem.pipelineVersion = 1
 			} elseif tItem.className = "OPCUA.Service.TCPPollingRowSourceService" {

@@ -202,7 +202,9 @@ ClassMethod BuildItemXML(pBody As %DynamicObject, pDSClassName As %String, pDSNa
 	if tSecMode '= 3 set tSecMode = 1
 
 	set tVersion = +pBody.%Get("pipelineVersion")
-	if pMode = "subscription" {
+	if (pMode = "subscription") && (tVersion = 2) {
+		set tServiceClass = "OPCUA.Service.TCPSubscriptionRowSourceService"
+	} elseif pMode = "subscription" {
 		set tServiceClass = "OPCUA.Service.TCPSubscriptionService"
 	} elseif tVersion = 2 {
 		set tServiceClass = "OPCUA.Service.TCPPollingRowSourceService"
@@ -418,7 +420,7 @@ ClassMethod DeployV2(pBody As %DynamicObject, Output pResult As %DynamicObject) 
 		if tDataSourceName = "" set tDataSourceName = $Piece(tClassName, ".", *)
 
 		set tMode = pBody.%Get("mode")
-		if tMode '= "polling" set tMode = "polling"
+		if (tMode '= "polling") && (tMode '= "subscription") set tMode = "polling"
 
 		// Check if class already exists
 		if ##class(%Dictionary.ClassDefinition).%ExistsId(tClassName) {
