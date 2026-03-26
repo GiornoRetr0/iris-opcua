@@ -12,6 +12,8 @@ Parameter OPCUADATASOURCE;
 
 Parameter OPCUDEFAULTANAMESPACE;
 
+Parameter OPCUAPIPELINEVERSION;
+
 ClassMethod SaveSourcedData(ByRef pSourceData As %List, Output pAssignedID As %String) [ CodeMode = objectgenerator ]
 {
     Quit:%class.Name="OPCUA.DataSource.Definition" $$$OK

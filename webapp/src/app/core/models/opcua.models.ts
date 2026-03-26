@@ -16,6 +16,7 @@ export interface TreeNode extends OpcuaNode {
   loading?: boolean;
   selected?: boolean;
   level: number;
+  parentRef?: TreeNode;
 }
 
 export interface NodeReadResult {
@@ -45,6 +46,8 @@ export interface Pipeline {
   interval?: number;
   callInterval?: number;
   serverUrl?: string;
+  pipelineVersion?: number;
+  rowSources?: { path: string; nodeNs: number; nodeId: string | number; nodeIdType: number }[];
   [key: string]: any; // allow extra fields from API
 }
 
@@ -54,6 +57,28 @@ export interface DeployRequest {
   dataSourceName: string;
   packagePath: string;
   mode: 'polling' | 'subscription';
+}
+
+/** v2 deploy payload: one pipeline with multiple row sources sharing the same schema */
+export interface DeployV2Request {
+  className: string;
+  dataSourceName: string;
+  mode: 'polling' | 'subscription';
+  pipelineVersion: 2;
+  columns: { displayName: string; inferredType?: string }[];
+  rowSources: {
+    displayName: string;
+    nodeNs: number;
+    nodeId: string | number;
+    nodeIdType: number;
+    path: string;
+    childNodes: {
+      displayName: string;
+      nodeNs: number;
+      nodeId: string | number;
+      nodeIdType: number;
+    }[];
+  }[];
 }
 
 export interface DeployResult {
@@ -79,6 +104,41 @@ export interface ConnectionTestResult {
   connected: boolean;
   responseTimeMs: number;
   error?: string;
+}
+
+/** A column in a pipeline schema (attribute to read) */
+export interface ColumnDef {
+  displayName: string;
+  nodeCategory: string;
+}
+
+/** A parent node that produces one row per poll cycle */
+export interface RowSource {
+  displayName: string;
+  nodeNs: number;
+  nodeId: string | number;
+  nodeIdType: number;
+  path: string;
+  childNodes: SelectedNode[];
+}
+
+/** A computed grouping: one or more row sources sharing the same column schema */
+export interface PipelineGroup {
+  schemaKey: string;
+  columns: ColumnDef[];
+  rowSources: RowSource[];
+}
+
+/** Internal selection entry tracking both the leaf node and its parent */
+export interface V2Selection {
+  node: SelectedNode;
+  parentNode: {
+    displayName: string;
+    nodeNs: number;
+    nodeId: string | number;
+    nodeIdType: number;
+    path: string;
+  };
 }
 
 export interface AppConfig {

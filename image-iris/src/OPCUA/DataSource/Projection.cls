@@ -54,6 +54,9 @@ ClassMethod ProcessObj(oObj As %CompiledClass, pOPCUADefaultNamespace As %String
     {
         Set tPropName = oStorageDataEntries.GetAt(i).Value
         Continue:$Extract(tPropName,1)="%"
+        Continue:tPropName="NodePath"
+        Continue:tPropName="ServerTimeStamp"
+        Continue:tPropName="SourceTimeStamp"
 
         // But we still need the property definition for each storage entry...
         Set bPropFound=0
@@ -224,9 +227,10 @@ ClassMethod GetParameterValue(pClassDef As %Dictionary.CompiledClass, pParameter
 ClassMethod RemoveProjection(cls As %String, ByRef params, recompile As %Boolean) As %Status
 {
     Set tSC = $$$OK
-    Try 
+    Try
     {
         Kill ^OPCUA.DataSource(cls)
+        Kill ^OPCUA.RowSource(cls)
     } 
     Catch (oException)
     {

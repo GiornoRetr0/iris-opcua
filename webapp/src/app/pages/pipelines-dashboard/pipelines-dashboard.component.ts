@@ -190,6 +190,17 @@ import { Pipeline } from '../../core/models/opcua.models';
               </div>
             </div>
 
+            <!-- v2 Row Sources -->
+            @if (pipeline.pipelineVersion === 2 && pipeline.rowSources?.length) {
+              <div class="flex items-center gap-2 mb-4 px-2">
+                <span class="material-symbols-outlined text-sm text-amber-600">device_hub</span>
+                <span class="text-xs font-bold text-on-surface-variant">{{ pipeline.rowSources!.length }} row source{{ pipeline.rowSources!.length !== 1 ? 's' : '' }}</span>
+                <span class="text-[10px] text-on-surface-variant font-mono truncate">
+                  {{ getRowSourcePaths(pipeline) }}
+                </span>
+              </div>
+            }
+
             <!-- Footer: server URL + metrics -->
             <div class="flex items-center justify-between pt-4 border-t border-outline-variant/10">
               <div class="flex items-center gap-2 text-on-surface-variant">
@@ -377,6 +388,10 @@ export class PipelinesDashboardComponent implements OnInit {
   /** API returns: url = "opc.tcp://plc:4840" */
   getServerUrl(p: Pipeline): string {
     return (p as any).url || p.serverUrl || this.config.get().serverUrl || '—';
+  }
+
+  getRowSourcePaths(p: Pipeline): string {
+    return (p.rowSources || []).map((rs) => rs.path).join(', ');
   }
 
   /** API returns: callInterval="5" (polling), publishingInterval="1000" (subscription) */

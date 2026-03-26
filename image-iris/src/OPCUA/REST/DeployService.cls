@@ -11,8 +11,15 @@ Class OPCUA.REST.DeployService
 Parameter ProductionClass = "OPCUA.Pipeline.Production";
 
 /// Deploy a complete pipeline from selected nodes.
+/// Supports both v1 (flat nodes array) and v2 (columns + rowSources) payloads.
 ClassMethod Deploy(pBody As %DynamicObject, Output pResult As %DynamicObject) As %Status
 {
+	// Detect v2 deploy request (has rowSources array)
+	set tRS = pBody.%Get("rowSources")
+	if $IsObject($Get(tRS)) && (tRS.%Size() > 0) {
+		Quit ..DeployV2(pBody, .pResult)
+	}
+
 	#dim tSC As %Status = $$$OK
 	set pResult = {}
 	set pResult.deployed = 0
@@ -194,8 +201,11 @@ ClassMethod BuildItemXML(pBody As %DynamicObject, pDSClassName As %String, pDSNa
 	set tSecMode = +pBody.%Get("securityMode")
 	if tSecMode '= 3 set tSecMode = 1
 
+	set tVersion = +pBody.%Get("pipelineVersion")
 	if pMode = "subscription" {
 		set tServiceClass = "OPCUA.Service.TCPSubscriptionService"
+	} elseif tVersion = 2 {
+		set tServiceClass = "OPCUA.Service.TCPPollingRowSourceService"
 	} else {
 		set tServiceClass = "OPCUA.Service.TCPPollingService"
 	}
@@ -369,6 +379,260 @@ ClassMethod WriteAndCompile(pClassName As %String, pText As %String) As %Status 
 		set tSC = e.AsStatus()
 	}
 	Quit tSC
+}
+
+// ==================== v2 Row-Source Pipeline Deploy ====================
+
+/// Deploy a v2 pipeline with multiple row sources sharing the same column schema.
+/// Produces one DataSource class, one service item, one table — multiple rows per poll.
+ClassMethod DeployV2(pBody As %DynamicObject, Output pResult As %DynamicObject) As %Status
+{
+	#dim tSC As %Status = $$$OK
+	set pResult = {}
+	set pResult.deployed = 0
+	set pResult.compiled = 0
+	set pResult.started = 0
+	set pResult.productionClass = ..#ProductionClass
+	Try {
+		// --- Validate inputs ---
+		set tRowSources = pBody.%Get("rowSources")
+		set tColumns = pBody.%Get("columns")
+
+		if '$IsObject($Get(tColumns)) || (tColumns.%Size() = 0) {
+			set tSC = $$$ERROR($$$GeneralError, "No columns defined")
+			Quit
+		}
+
+		if '$IsObject($Get(tRowSources)) || (tRowSources.%Size() = 0) {
+			set tSC = $$$ERROR($$$GeneralError, "No row sources defined")
+			Quit
+		}
+
+		set tClassName = pBody.%Get("className")
+		if tClassName = "" {
+			set tSC = $$$ERROR($$$GeneralError, "Missing className")
+			Quit
+		}
+
+		set tDataSourceName = pBody.%Get("dataSourceName")
+		if tDataSourceName = "" set tDataSourceName = $Piece(tClassName, ".", *)
+
+		set tMode = pBody.%Get("mode")
+		if tMode '= "polling" set tMode = "polling"
+
+		// Check if class already exists
+		if ##class(%Dictionary.ClassDefinition).%ExistsId(tClassName) {
+			set tSC = $$$ERROR($$$GeneralError, "Class '"_tClassName_"' already exists. Choose a different name.")
+			Quit
+		}
+
+		// Validate row sources have correct child count
+		set tColCount = tColumns.%Size()
+		for iRS=0:1:tRowSources.%Size()-1 {
+			set tRS = tRowSources.%Get(iRS)
+			set tChildren = tRS.%Get("childNodes")
+			if '$IsObject($Get(tChildren)) || (tChildren.%Size() '= tColCount) {
+				set tSC = $$$ERROR($$$GeneralError, "Row source '"_tRS.%Get("displayName")_"' has "_$Select($IsObject($Get(tChildren)):tChildren.%Size(), 1:0)_" child nodes, expected "_tColCount)
+				Quit
+			}
+		}
+		Quit:$$$ISERR(tSC)
+
+		// --- Generate and compile v2 DataSource class ---
+		set tSC = ..GenerateDataSourceTextV2(pBody, tColumns, tRowSources, tClassName, tDataSourceName, .tDSText)
+		Quit:$$$ISERR(tSC)
+
+		set tSC = ..WriteAndCompile(tClassName, tDSText)
+		if $$$ISERR(tSC) {
+			set pResult.error = "DataSource compilation failed: "_$System.Status.GetErrorText(tSC)
+			set tSC = $$$OK
+			Quit
+		}
+
+		set pResult.deployed = 1
+		set pResult.dataSourceClass = tClassName
+
+		// Derive SQL table name
+		set tPackage = $Piece(tClassName, ".", 1, *-1)
+		set tShort = $Piece(tClassName, ".", *)
+		set pResult.tableName = $Select(tPackage="":tShort, 1:$Replace(tPackage, ".", "_")_"."_tShort)
+		set pResult.serviceItemName = tDataSourceName
+
+		// --- Store row source metadata ---
+		set tSC = ..StoreRowSourceMetadata(tClassName, tRowSources, tColumns)
+		if $$$ISERR(tSC) {
+			set pResult.error = "Failed to store row source metadata: "_$System.Status.GetErrorText(tSC)
+			set tSC = $$$OK
+			Quit
+		}
+
+		// --- Add service item to shared production ---
+		set tSC = ..EnsureProductionExists()
+		if $$$ISERR(tSC) {
+			set pResult.error = "Failed to create production: "_$System.Status.GetErrorText(tSC)
+			set tSC = $$$OK
+			Quit
+		}
+
+		set tSC = ..AddServiceItem(pBody, tClassName, tDataSourceName, tMode)
+		if $$$ISERR(tSC) {
+			set pResult.error = "Failed to add service item: "_$System.Status.GetErrorText(tSC)
+			set tSC = $$$OK
+			Quit
+		}
+
+		set pResult.compiled = 1
+
+		// --- Start or update the production ---
+		set tEnableOnDeploy = pBody.%Get("enableOnDeploy")
+		if tEnableOnDeploy '= 0 {
+			set tSC = ..StartOrUpdateProduction()
+			if $$$ISERR(tSC) {
+				set pResult.error = "Failed to start production: "_$System.Status.GetErrorText(tSC)
+				set tSC = $$$OK
+				Quit
+			}
+			set pResult.started = 1
+		}
+
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit tSC
+}
+
+/// Generate v2 DataSource class text with NodePath + relative column names.
+ClassMethod GenerateDataSourceTextV2(pBody As %DynamicObject, pColumns As %DynamicArray, pRowSources As %DynamicArray, pClassName As %String, pDataSourceName As %String, Output pText As %String) As %Status [ Private ]
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		// Determine default namespace from the first row source's child nodes
+		set tFirstRS = pRowSources.%Get(0)
+		set tChildren = tFirstRS.%Get("childNodes")
+		for i=0:1:tChildren.%Size()-1 {
+			set tChild = tChildren.%Get(i)
+			set tNS = +tChild.%Get("nodeNs")
+			set tNSCount(tNS) = $Get(tNSCount(tNS), 0) + 1
+		}
+		set tDefaultNS = 0
+		set tMaxCount = 0
+		set tNS = ""
+		for {
+			set tNS = $Order(tNSCount(tNS))
+			if tNS = "" Quit
+			if tNSCount(tNS) > tMaxCount {
+				set tMaxCount = tNSCount(tNS)
+				set tDefaultNS = tNS
+			}
+		}
+
+		// Build class text
+		set tNL = $Char(10)
+		set pText = "/// Auto-generated OPC UA DataSource class (v2 row-source model)."_tNL
+		set pText = pText_"Class "_pClassName_" Extends (%Persistent, OPCUA.DataSource.Definition)"_tNL
+		set pText = pText_"{"_tNL
+		set pText = pText_tNL
+		set pText = pText_"Parameter OPCUADATASOURCE = """_pDataSourceName_""";"_tNL
+		set pText = pText_tNL
+		set pText = pText_"Parameter OPCUDEFAULTANAMESPACE = "_tDefaultNS_";"_tNL
+		set pText = pText_tNL
+		set pText = pText_"Parameter OPCUAPIPELINEVERSION = 2;"_tNL
+
+		// Row metadata: NodePath, shared timestamps
+		set pText = pText_tNL
+		set pText = pText_"Property NodePath As %String(MAXLEN = 500);"_tNL
+		set pText = pText_tNL
+		set pText = pText_"Property ServerTimeStamp As %TimeStamp;"_tNL
+		set pText = pText_tNL
+		set pText = pText_"Property SourceTimeStamp As %TimeStamp;"_tNL
+
+		// Generate column properties with plain types and relative OPCUANODENAME
+		for i=0:1:pColumns.%Size()-1 {
+			set tCol = pColumns.%Get(i)
+			set tDisplayName = tCol.%Get("displayName")
+			set tInferredType = tCol.%Get("inferredType")
+
+			// Map OPCUA.Types.*DataValue to plain IRIS types
+			set tType = ..MapToPlainType(tInferredType)
+
+			// Use the first row source's corresponding child node namespace
+			set tChildNS = tDefaultNS
+			if i < tChildren.%Size() {
+				set tChildNS = +tChildren.%Get(i).%Get("nodeNs")
+			}
+
+			// Sanitize property name
+			set tPropName = ##class(OPCUA.DataSource.Generator).SanitizePropertyName(tDisplayName, .tUsedNames)
+
+			// Use the display name as the relative OPCUANODENAME (browse name)
+			set pText = pText_tNL
+			set pText = pText_"Property "_tPropName_" As "_tType_"(OPCUANODENAME = """_tDisplayName_""""
+			if tChildNS '= tDefaultNS {
+				set pText = pText_", OPCUANAMESPACE = """_tChildNS_""""
+			}
+			set pText = pText_");"_tNL
+		}
+
+		set pText = pText_tNL_"}"_tNL
+
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit tSC
+}
+
+/// Store row source metadata in ^OPCUA.RowSource global for runtime use by TCPPollingRowSourceService.
+ClassMethod StoreRowSourceMetadata(pClassName As %String, pRowSources As %DynamicArray, pColumns As %DynamicArray) As %Status [ Private ]
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tRSCount = pRowSources.%Size()
+		set tColCount = pColumns.%Size()
+
+		// Build the row source list: $LB($LB(path, ns, id, idType, $LB($LB(ns,id,idType), ...)), ...)
+		set tRSList = ""
+		for i=0:1:tRSCount-1 {
+			set tRS = pRowSources.%Get(i)
+			set tPath = tRS.%Get("path")
+			set tNodeNs = +tRS.%Get("nodeNs")
+			set tNodeId = tRS.%Get("nodeId")
+			set tNodeIdType = +tRS.%Get("nodeIdType")
+
+			// Collect absolute node IDs for each column from this row source's childNodes
+			set tChildren = tRS.%Get("childNodes")
+			set tAbsNodeRefs = ""
+			for j=0:1:tChildren.%Size()-1 {
+				set tChild = tChildren.%Get(j)
+				set tAbsNodeRefs = tAbsNodeRefs _ $LB($LB(+tChild.%Get("nodeNs"), tChild.%Get("nodeId"), +tChild.%Get("nodeIdType")))
+			}
+
+			set tRSList = tRSList _ $LB($LB(tPath, tNodeNs, tNodeId, tNodeIdType, tAbsNodeRefs))
+		}
+
+		// Store: $LB(rowSourceCount, columnCount, rowSourceList)
+		set ^OPCUA.RowSource(pClassName) = $LB(tRSCount, tColCount, tRSList)
+
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit tSC
+}
+
+/// Map OPCUA.Types.*DataValue to plain IRIS types for v2 flat columns.
+ClassMethod MapToPlainType(pInferredType As %String) As %String [ Private ]
+{
+	if pInferredType = "" Quit "%String"
+	if pInferredType = "OPCUA.Types.DoubleDataValue" Quit "%Double"
+	if pInferredType = "OPCUA.Types.IntegerDataValue" Quit "%Integer"
+	if pInferredType = "OPCUA.Types.BooleanDataValue" Quit "%Boolean"
+	if pInferredType = "OPCUA.Types.TimeStampDataValue" Quit "%TimeStamp"
+	if pInferredType = "OPCUA.Types.StringDataValue" Quit "%String"
+	// Array types → store as string (JSON)
+	if pInferredType [ "ArrayDataValue" Quit "%String(MAXLEN=32000)"
+	// Already a plain type (e.g., %Double passed directly)
+	if $Extract(pInferredType, 1) = "%" Quit pInferredType
+	// Default fallback
+	Quit "%String"
 }
 
 }

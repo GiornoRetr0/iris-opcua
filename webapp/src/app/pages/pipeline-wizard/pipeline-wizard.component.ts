@@ -1,10 +1,19 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { ApiService } from '../../core/services/api.service';
 import { ConfigService } from '../../core/services/config.service';
-import { TreeNode, OpcuaNode, SelectedNode } from '../../core/models/opcua.models';
+import {
+  TreeNode,
+  OpcuaNode,
+  SelectedNode,
+  DeployV2Request,
+  V2Selection,
+  PipelineGroup,
+  ColumnDef,
+  RowSource,
+} from '../../core/models/opcua.models';
 
 @Component({
   selector: 'app-pipeline-wizard',
@@ -98,7 +107,8 @@ import { TreeNode, OpcuaNode, SelectedNode } from '../../core/models/opcua.model
 
               <h1 class="text-2xl font-semibold text-on-surface mb-3 tracking-tight mt-8">Select Data Nodes</h1>
               <p class="text-on-surface-variant text-center max-w-md mb-10 text-sm leading-relaxed">
-                Browse the OPC UA address space on the left to identify specific sensors, tags, or industrial components you wish to monitor in this pipeline.
+                Browse the OPC UA address space and select devices or individual sensors.
+                Checking a device auto-selects all its child attributes as columns.
               </p>
               <div class="flex items-center gap-4">
                 <button (click)="nextStep()"
@@ -113,19 +123,41 @@ import { TreeNode, OpcuaNode, SelectedNode } from '../../core/models/opcua.model
                 </button>
               </div>
 
-              <!-- Selected node preview cards -->
-              @for (sel of selectedNodes(); track sel.nodeId) {
-                <div class="mt-4 w-full max-w-lg p-4 bg-surface-container-low rounded-xl flex items-center gap-4 border border-outline-variant/10">
-                  <div class="w-12 h-12 rounded-lg bg-white flex items-center justify-center text-primary shadow-sm">
-                    <span class="material-symbols-outlined">bar_chart</span>
+              <!-- Grouped selection preview -->
+              @for (group of pipelineGroups(); track group.schemaKey) {
+                <div class="mt-4 w-full max-w-lg bg-surface-container-low rounded-xl border border-outline-variant/10 overflow-hidden">
+                  <!-- Group header -->
+                  <div class="p-4 flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-lg flex items-center justify-center shadow-sm"
+                         [class]="group.rowSources.length > 1 ? 'bg-primary text-on-primary' : 'bg-white text-primary'">
+                      <span class="material-symbols-outlined">{{ group.rowSources.length > 1 ? 'device_hub' : 'inventory_2' }}</span>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
+                        {{ group.rowSources.length > 1 ? group.rowSources.length + ' Devices' : group.rowSources[0].displayName }}
+                      </p>
+                      <p class="text-xs text-on-surface-variant">
+                        {{ group.columns.length }} column{{ group.columns.length !== 1 ? 's' : '' }}:
+                        {{ columnNames(group) }}
+                      </p>
+                    </div>
+                    <button (click)="removeGroup(group)"
+                            class="material-symbols-outlined text-error cursor-pointer hover:bg-error-container/20 p-2 rounded-full transition-colors text-lg">
+                      close
+                    </button>
                   </div>
-                  <div class="flex-1 min-w-0">
-                    <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Selected Component</p>
-                    <h4 class="text-sm font-semibold text-on-surface truncate">{{ sel.displayName }}</h4>
-                    <p class="text-[10px] text-on-surface-variant font-mono">ns={{ sel.nodeNs }};{{ sel.nodeIdType === 0 ? 'i' : 's' }}={{ sel.nodeId }}</p>
-                  </div>
-                  <span class="material-symbols-outlined text-error cursor-pointer hover:bg-error-container/20 p-2 rounded-full transition-colors"
-                        (click)="removeSelectedNode(sel)">close</span>
+                  <!-- Row sources list -->
+                  @if (group.rowSources.length > 1) {
+                    <div class="px-4 pb-3 flex flex-wrap gap-1.5">
+                      @for (rs of group.rowSources; track rs.nodeId) {
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-surface-container-lowest rounded text-[11px] text-on-surface-variant">
+                          {{ rs.displayName }}
+                          <span class="material-symbols-outlined text-[12px] cursor-pointer hover:text-error transition-colors"
+                                (click)="removeRowSource(group, rs)">close</span>
+                        </span>
+                      }
+                    </div>
+                  }
                 </div>
               }
             </div>
@@ -147,30 +179,103 @@ import { TreeNode, OpcuaNode, SelectedNode } from '../../core/models/opcua.model
           </div>
         }
 
-        <!-- STEP 2: REVIEW -->
+        <!-- STEP 2: REVIEW PIPELINE GROUPS -->
         @if (currentStep() === 1) {
-          <div class="max-w-3xl mx-auto">
-            <h1 class="text-2xl font-semibold text-on-surface mb-6 tracking-tight">Review Selected Nodes</h1>
-            <div class="space-y-3 mb-8">
-              @for (sel of selectedNodes(); track sel.nodeId) {
-                <div class="p-4 bg-surface-container-lowest rounded-xl flex items-center gap-4 border border-outline-variant/10 shadow-sm">
-                  <div class="w-10 h-10 rounded-lg bg-secondary-container/50 flex items-center justify-center text-primary">
-                    <span class="material-symbols-outlined">settings_input_component</span>
+          <div class="max-w-4xl mx-auto">
+            <h1 class="text-2xl font-semibold text-on-surface mb-2 tracking-tight">Review Pipeline Structure</h1>
+            <p class="text-on-surface-variant text-sm mb-8">
+              @if (pipelineGroups().length > 1) {
+                Your selection will create {{ pipelineGroups().length }} separate pipelines because the selected nodes have different schemas.
+              } @else if (pipelineGroups().length === 1 && pipelineGroups()[0].rowSources.length > 1) {
+                {{ pipelineGroups()[0].rowSources.length }} devices share the same schema and will be deployed as separate pipelines with identical structure.
+              } @else {
+                Review the pipeline structure below before configuring deployment settings.
+              }
+            </p>
+
+            <div class="space-y-6 mb-8">
+              @for (group of pipelineGroups(); track group.schemaKey; let gi = $index) {
+                <div class="bg-surface-container-lowest rounded-xl border border-outline-variant/10 shadow-sm overflow-hidden">
+                  <!-- Pipeline group header -->
+                  <div class="p-6 border-b border-outline-variant/10">
+                    <div class="flex items-center gap-3 mb-4">
+                      <div class="w-10 h-10 rounded-lg bg-primary text-on-primary flex items-center justify-center">
+                        <span class="material-symbols-outlined">{{ group.rowSources.length > 1 ? 'device_hub' : 'table_chart' }}</span>
+                      </div>
+                      <div>
+                        @if (pipelineGroups().length > 1) {
+                          <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Pipeline {{ gi + 1 }}</p>
+                        }
+                        <h3 class="text-base font-semibold text-on-surface">
+                          {{ group.columns.length }} Column{{ group.columns.length !== 1 ? 's' : '' }}
+                          @if (group.rowSources.length > 1) {
+                            &times; {{ group.rowSources.length }} Row Source{{ group.rowSources.length !== 1 ? 's' : '' }}
+                          }
+                        </h3>
+                      </div>
+                    </div>
+
+                    <!-- Column chips -->
+                    <div class="flex flex-wrap gap-2">
+                      <span class="px-3 py-1.5 bg-primary/10 text-primary rounded-lg text-xs font-bold">NodePath</span>
+                      @for (col of group.columns; track col.displayName) {
+                        <span class="px-3 py-1.5 bg-surface-container rounded-lg text-xs font-medium text-on-surface">{{ col.displayName }}</span>
+                      }
+                    </div>
                   </div>
-                  <div class="flex-1">
-                    <p class="text-sm font-semibold text-on-surface">{{ sel.displayName }}</p>
-                    <p class="text-xs text-on-surface-variant font-mono">ns={{ sel.nodeNs }};{{ sel.nodeIdType === 0 ? 'i' : 's' }}={{ sel.nodeId }}</p>
+
+                  <!-- Table preview -->
+                  <div class="p-6">
+                    <div class="overflow-x-auto">
+                      <table class="w-full text-xs">
+                        <thead>
+                          <tr class="border-b border-outline-variant/20">
+                            <th class="text-left py-2 px-3 font-bold text-primary text-[10px] uppercase tracking-widest">NodePath</th>
+                            @for (col of group.columns; track col.displayName) {
+                              <th class="text-left py-2 px-3 font-bold text-on-surface-variant text-[10px] uppercase tracking-widest">{{ col.displayName }}</th>
+                            }
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @for (rs of group.rowSources; track rs.nodeId) {
+                            <tr class="border-b border-outline-variant/10 last:border-0">
+                              <td class="py-2 px-3 font-mono text-on-surface-variant">{{ rs.path }}</td>
+                              @for (col of group.columns; track col.displayName) {
+                                <td class="py-2 px-3 text-on-surface-variant italic">--</td>
+                              }
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <!-- Row sources detail -->
+                    @if (group.rowSources.length > 1) {
+                      <div class="mt-4 pt-4 border-t border-outline-variant/10">
+                        <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Row Sources (Devices)</p>
+                        <div class="flex flex-wrap gap-2">
+                          @for (rs of group.rowSources; track rs.nodeId) {
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-surface-container rounded-lg text-xs">
+                              <span class="material-symbols-outlined text-amber-600 text-sm">inventory_2</span>
+                              {{ rs.displayName }}
+                              <span class="text-on-surface-variant font-mono text-[10px]">{{ rs.path }}</span>
+                            </span>
+                          }
+                        </div>
+                      </div>
+                    }
                   </div>
                 </div>
               }
             </div>
+
             <div class="flex items-center gap-4">
               <button (click)="prevStep()"
                       class="px-6 py-3 text-primary font-bold hover:bg-white/50 rounded-lg transition-colors border border-outline-variant/20 flex items-center gap-2">
                 <span class="material-symbols-outlined text-sm">arrow_back</span>
                 Back
               </button>
-              <button (click)="nextStep()"
+              <button (click)="onReviewContinue()"
                       class="px-8 py-3 bg-primary text-on-primary font-bold rounded-lg shadow-xl shadow-primary/30 flex items-center gap-2 hover:brightness-110 active:scale-95 transition-all">
                 Continue to Configure
                 <span class="material-symbols-outlined">arrow_forward</span>
@@ -206,35 +311,85 @@ import { TreeNode, OpcuaNode, SelectedNode } from '../../core/models/opcua.model
                 </div>
               </section>
 
-              <!-- DataSource Class -->
-              <section class="bg-surface-container-lowest rounded-xl p-8 shadow-sm">
-                <div class="flex items-center gap-3 mb-6">
-                  <span class="material-symbols-outlined text-primary">account_tree</span>
-                  <h2 class="text-xl font-semibold tracking-tight">DataSource Class</h2>
-                </div>
-                <div class="space-y-6">
-                  <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div class="space-y-1">
-                      <label class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Package Path</label>
-                      <input type="text" [(ngModel)]="packagePath"
-                             class="w-full bg-surface-container-lowest border-outline-variant/20 rounded-lg text-sm focus:ring-2 focus:ring-primary focus:border-transparent transition-all px-4 py-3"
-                             placeholder="OPCUA.DS">
+              <!-- Pipeline configs -->
+              @if (totalDeployUnits() === 1) {
+                <!-- Single pipeline config -->
+                <section class="bg-surface-container-lowest rounded-xl p-8 shadow-sm">
+                  <div class="flex items-center gap-3 mb-6">
+                    <span class="material-symbols-outlined text-primary">account_tree</span>
+                    <h2 class="text-xl font-semibold tracking-tight">DataSource Class</h2>
+                  </div>
+                  <div class="space-y-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div class="space-y-1">
+                        <label class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Package Path</label>
+                        <input type="text" [(ngModel)]="packagePath"
+                               class="w-full bg-surface-container-lowest border-outline-variant/20 rounded-lg text-sm focus:ring-2 focus:ring-primary focus:border-transparent transition-all px-4 py-3"
+                               placeholder="OPCUA.DS">
+                      </div>
+                      <div class="space-y-1">
+                        <label class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Class Name</label>
+                        <input type="text" [(ngModel)]="className"
+                               class="w-full bg-surface-container-lowest border-outline-variant/20 rounded-lg text-sm focus:ring-2 focus:ring-primary focus:border-transparent transition-all px-4 py-3"
+                               placeholder="MyDataSource">
+                      </div>
                     </div>
                     <div class="space-y-1">
-                      <label class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Class Name</label>
-                      <input type="text" [(ngModel)]="className"
+                      <label class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Data Source Name</label>
+                      <input type="text" [(ngModel)]="dataSourceName"
                              class="w-full bg-surface-container-lowest border-outline-variant/20 rounded-lg text-sm focus:ring-2 focus:ring-primary focus:border-transparent transition-all px-4 py-3"
-                             placeholder="MyDataSource">
+                             placeholder="Production_Line_1">
                     </div>
                   </div>
-                  <div class="space-y-1">
-                    <label class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Data Source Name</label>
-                    <input type="text" [(ngModel)]="dataSourceName"
-                           class="w-full bg-surface-container-lowest border-outline-variant/20 rounded-lg text-sm focus:ring-2 focus:ring-primary focus:border-transparent transition-all px-4 py-3"
-                           placeholder="Production_Line_1">
+                </section>
+              } @else {
+                <!-- Multi-pipeline config -->
+                <section class="bg-surface-container-lowest rounded-xl p-8 shadow-sm">
+                  <div class="flex items-center gap-3 mb-6">
+                    <span class="material-symbols-outlined text-primary">account_tree</span>
+                    <h2 class="text-xl font-semibold tracking-tight">Pipeline Configuration</h2>
                   </div>
-                </div>
-              </section>
+                  <p class="text-sm text-on-surface-variant mb-6">
+                    {{ totalDeployUnits() }} pipeline{{ totalDeployUnits() !== 1 ? 's' : '' }} will be created (different schemas). Configure the shared package path and base names below.
+                  </p>
+                  <div class="space-y-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div class="space-y-1">
+                        <label class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Package Path</label>
+                        <input type="text" [(ngModel)]="packagePath"
+                               class="w-full bg-surface-container-lowest border-outline-variant/20 rounded-lg text-sm focus:ring-2 focus:ring-primary focus:border-transparent transition-all px-4 py-3"
+                               placeholder="OPCUA.DS">
+                      </div>
+                      <div class="space-y-1">
+                        <label class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Base Class Name</label>
+                        <input type="text" [(ngModel)]="className"
+                               class="w-full bg-surface-container-lowest border-outline-variant/20 rounded-lg text-sm focus:ring-2 focus:ring-primary focus:border-transparent transition-all px-4 py-3"
+                               placeholder="MyDataSource">
+                      </div>
+                    </div>
+                    <div class="space-y-1">
+                      <label class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Base Data Source Name</label>
+                      <input type="text" [(ngModel)]="dataSourceName"
+                             class="w-full bg-surface-container-lowest border-outline-variant/20 rounded-lg text-sm focus:ring-2 focus:ring-primary focus:border-transparent transition-all px-4 py-3"
+                             placeholder="Production_Line">
+                    </div>
+                    <!-- Preview of generated names -->
+                    <div class="bg-surface-container-low rounded-lg p-4">
+                      <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-3">Generated Pipelines</p>
+                      <div class="space-y-2">
+                        @for (group of pipelineGroups(); track group.schemaKey; let gi = $index) {
+                          <div class="flex items-center gap-3 text-xs">
+                            <span class="material-symbols-outlined text-primary text-sm">subdirectory_arrow_right</span>
+                            <span class="font-mono text-on-surface">{{ packagePath }}.{{ className }}{{ pipelineGroups().length > 1 ? '_' + groupSuffix(group) : '' }}</span>
+                            <span class="text-on-surface-variant">&rarr;</span>
+                            <span class="font-mono text-on-surface-variant">{{ group.columns.length }} cols &times; {{ group.rowSources.length }} device{{ group.rowSources.length !== 1 ? 's' : '' }}</span>
+                          </div>
+                        }
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              }
 
               <!-- Pipeline Mode -->
               <section class="bg-surface-container-lowest rounded-xl p-8 shadow-sm">
@@ -271,7 +426,7 @@ import { TreeNode, OpcuaNode, SelectedNode } from '../../core/models/opcua.model
                   <input type="checkbox" [(ngModel)]="autoStart"
                          class="mt-1 w-5 h-5 text-primary border-outline-variant/40 rounded-md focus:ring-primary">
                   <label class="text-sm font-medium leading-relaxed cursor-pointer select-none">
-                    Start pipeline after deploy
+                    Start pipeline{{ totalDeployUnits() > 1 ? 's' : '' }} after deploy
                     <p class="text-xs text-on-surface-variant font-normal mt-1">Initialize telemetry stream immediately after successful configuration.</p>
                   </label>
                 </div>
@@ -279,7 +434,11 @@ import { TreeNode, OpcuaNode, SelectedNode } from '../../core/models/opcua.model
                   <button (click)="deploy()"
                           [disabled]="deploying() || !className || !dataSourceName"
                           class="w-full py-4 bg-gradient-to-br from-primary to-primary-container text-on-primary rounded-xl font-bold shadow-lg shadow-primary/20 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-40">
-                    {{ deploying() ? 'Deploying...' : 'Deploy Pipeline' }}
+                    @if (deploying()) {
+                      Deploying{{ totalDeployUnits() > 1 ? ' (' + deployProgress() + '/' + totalDeployUnits() + ')' : '' }}...
+                    } @else {
+                      Deploy {{ totalDeployUnits() > 1 ? totalDeployUnits() + ' Pipelines' : 'Pipeline' }}
+                    }
                     <span class="material-symbols-outlined text-sm filled">rocket_launch</span>
                   </button>
                   <button (click)="prevStep()"
@@ -305,8 +464,28 @@ import { TreeNode, OpcuaNode, SelectedNode } from '../../core/models/opcua.model
                  [class]="deploySuccess() ? 'bg-tertiary-fixed text-tertiary' : 'bg-error-container text-error'">
               <span class="material-symbols-outlined text-5xl">{{ deploySuccess() ? 'check_circle' : 'error' }}</span>
             </div>
-            <h1 class="text-3xl font-semibold mb-4">{{ deploySuccess() ? 'Pipeline Deployed' : 'Deployment Failed' }}</h1>
+            <h1 class="text-3xl font-semibold mb-4">{{ deploySuccess() ? 'Pipeline' + (deployResults().length > 1 ? 's' : '') + ' Deployed' : 'Deployment Failed' }}</h1>
             <p class="text-on-surface-variant mb-8">{{ deployMessage() }}</p>
+
+            <!-- Per-pipeline results (multi-pipeline) -->
+            @if (deployResults().length > 1) {
+              <div class="space-y-3 mb-8 text-left max-w-lg mx-auto">
+                @for (r of deployResults(); track r.name) {
+                  <div class="p-4 rounded-xl flex items-center gap-3 border"
+                       [class]="r.success ? 'bg-tertiary-fixed/10 border-tertiary/20' : 'bg-error-container/10 border-error/20'">
+                    <span class="material-symbols-outlined"
+                          [class]="r.success ? 'text-tertiary' : 'text-error'">
+                      {{ r.success ? 'check_circle' : 'error' }}
+                    </span>
+                    <div class="flex-1">
+                      <p class="text-sm font-semibold text-on-surface">{{ r.name }}</p>
+                      <p class="text-xs text-on-surface-variant">{{ r.message }}</p>
+                    </div>
+                  </div>
+                }
+              </div>
+            }
+
             <button (click)="finish()"
                     class="px-8 py-3 bg-primary text-on-primary font-bold rounded-lg shadow-xl shadow-primary/30 hover:brightness-110 active:scale-95 transition-all">
               Go to Pipelines
@@ -320,20 +499,24 @@ import { TreeNode, OpcuaNode, SelectedNode } from '../../core/models/opcua.model
     <ng-template #wizardTreeTpl let-node let-level="level">
       <div [style.padding-left.rem]="level * 1.25">
         <div class="flex items-center gap-1.5 p-1 rounded cursor-pointer transition-colors"
-             [class]="isNodeSelected(node) ? 'bg-primary/5 border-y border-primary/10' : 'hover:bg-white/50'"
+             [class]="isNodeSelected(node) ? 'bg-primary/5 border-y border-primary/10' : isNodePartiallySelected(node) ? 'bg-primary/3' : 'hover:bg-white/50'"
              (click)="onWizardNodeClick(node)">
-          <!-- Checkbox for selectable nodes (variables) -->
+          <!-- Checkbox for selectable nodes (variables & objects) -->
           @if (node.nodeCategory === 'variable' || node.nodeCategory === 'object') {
             <input type="checkbox" [checked]="isNodeSelected(node)"
+                   [indeterminate]="isNodePartiallySelected(node)"
                    (click)="$event.stopPropagation()"
                    (change)="toggleNodeSelection(node)"
                    class="w-3.5 h-3.5 rounded border-slate-300 text-primary focus:ring-primary mr-1">
+            @if (isAutoExpanding(node)) {
+              <span class="material-symbols-outlined text-xs text-primary animate-spin -ml-1 mr-0.5">progress_activity</span>
+            }
           }
 
           <!-- Expand arrow -->
           @if (node.hasChildren) {
             <span class="material-symbols-outlined text-lg"
-                  [class]="isNodeSelected(node) ? 'text-primary' : 'text-slate-400'">
+                  [class]="isNodeSelected(node) || isNodePartiallySelected(node) ? 'text-primary' : 'text-slate-400'">
               {{ node.expanded ? 'arrow_drop_down' : 'arrow_right' }}
             </span>
           }
@@ -346,7 +529,7 @@ import { TreeNode, OpcuaNode, SelectedNode } from '../../core/models/opcua.model
           </span>
 
           <!-- Label -->
-          <span class="text-sm" [class]="isNodeSelected(node) ? 'font-bold text-primary' : ''">
+          <span class="text-sm" [class]="isNodeSelected(node) || isNodePartiallySelected(node) ? 'font-bold text-primary' : ''">
             {{ node.displayName }}
           </span>
         </div>
@@ -382,11 +565,66 @@ export class PipelineWizardComponent {
   currentStep = signal(0);
   stepProgress = signal(0);
 
-  // Step 1: Tree & selection
+  // Step 1: Tree
   treeRoots = signal<TreeNode[]>([]);
   treeLoading = signal(false);
-  selectedNodes = signal<SelectedNode[]>([]);
   searchQuery = '';
+
+  // Primary selection state: Map<leafNodeKey, V2Selection>
+  v2Selections = signal<Map<string, V2Selection>>(new Map());
+  autoExpandingNodes = signal<Set<string>>(new Set());
+
+  // Derived: flat list of selected leaf nodes (backward compat for template counts etc.)
+  selectedNodes = computed(() =>
+    Array.from(this.v2Selections().values()).map((s) => s.node)
+  );
+
+  // Derived: group selections by parent node
+  parentGroups = computed(() => {
+    const selections = this.v2Selections();
+    const groups = new Map<string, { parent: V2Selection['parentNode']; children: V2Selection[] }>();
+    for (const [, sel] of selections) {
+      const parentKey = `${sel.parentNode.nodeNs}:${sel.parentNode.nodeId}`;
+      if (!groups.has(parentKey)) {
+        groups.set(parentKey, { parent: sel.parentNode, children: [] });
+      }
+      groups.get(parentKey)!.children.push(sel);
+    }
+    return groups;
+  });
+
+  // Derived: merge parents with matching schemas into pipeline groups
+  pipelineGroups = computed<PipelineGroup[]>(() => {
+    const groups = this.parentGroups();
+    const schemaMap = new Map<string, PipelineGroup>();
+
+    for (const [, group] of groups) {
+      const columnNames = group.children.map((c) => c.node.displayName).sort();
+      const schemaKey = columnNames.join('|');
+
+      if (!schemaMap.has(schemaKey)) {
+        schemaMap.set(schemaKey, {
+          schemaKey,
+          columns: columnNames.map((name) => ({ displayName: name, nodeCategory: 'variable' })),
+          rowSources: [],
+        });
+      }
+
+      schemaMap.get(schemaKey)!.rowSources.push({
+        displayName: group.parent.displayName,
+        nodeNs: group.parent.nodeNs,
+        nodeId: group.parent.nodeId,
+        nodeIdType: group.parent.nodeIdType,
+        path: group.parent.path,
+        childNodes: group.children.map((c) => c.node),
+      });
+    }
+
+    return Array.from(schemaMap.values());
+  });
+
+  // v2: one deploy per pipeline group (not per row source)
+  totalDeployUnits = computed(() => this.pipelineGroups().length);
 
   // Step 3: Configure
   packagePath = 'OPCUA.DS';
@@ -397,13 +635,17 @@ export class PipelineWizardComponent {
 
   // Step 4: Deploy
   deploying = signal(false);
+  deployProgress = signal(0);
   deployError = signal('');
   deploySuccess = signal(false);
   deployMessage = signal('');
+  deployResults = signal<{ name: string; success: boolean; message: string }[]>([]);
 
   constructor() {
     this.loadTree();
   }
+
+  // --- Tree Loading ---
 
   loadTree(): void {
     const cfg = this.config.get();
@@ -422,6 +664,12 @@ export class PipelineWizardComponent {
     return `${node.nodeNs}:${node.nodeId}:${node.nodeIdType}`;
   }
 
+  private nodeKey(node: { nodeNs: number; nodeId: string | number }): string {
+    return `${node.nodeNs}:${node.nodeId}`;
+  }
+
+  // --- Tree Interaction ---
+
   onWizardNodeClick(node: TreeNode): void {
     if (node.hasChildren) {
       if (node.expanded) {
@@ -438,7 +686,11 @@ export class PipelineWizardComponent {
       this.treeRoots.update((r) => [...r]);
       this.api.browse(node.nodeNs, node.nodeId, node.nodeIdType).subscribe({
         next: (children) => {
-          node.children = children.map((c) => ({ ...c, level: (node.level ?? 0) + 1 }));
+          node.children = children.map((c) => ({
+            ...c,
+            level: (node.level ?? 0) + 1,
+            parentRef: node,
+          }));
           node.loading = false;
           this.treeRoots.update((r) => [...r]);
         },
@@ -451,35 +703,201 @@ export class PipelineWizardComponent {
     }
   }
 
+  // --- Selection Logic ---
+
   isNodeSelected(node: TreeNode): boolean {
-    return this.selectedNodes().some(
-      (s) => s.nodeNs === node.nodeNs && String(s.nodeId) === String(node.nodeId)
-    );
+    if (node.nodeCategory === 'object') {
+      // Object is "selected" if all its variable children are selected
+      if (!node.children || node.children.length === 0) return false;
+      const variableChildren = node.children.filter((c) => c.nodeCategory === 'variable');
+      if (variableChildren.length === 0) return false;
+      const selections = this.v2Selections();
+      return variableChildren.every((c) => selections.has(this.nodeKey(c)));
+    }
+    return this.v2Selections().has(this.nodeKey(node));
+  }
+
+  isNodePartiallySelected(node: TreeNode): boolean {
+    if (node.nodeCategory !== 'object') return false;
+    if (!node.children || node.children.length === 0) return false;
+    const variableChildren = node.children.filter((c) => c.nodeCategory === 'variable');
+    if (variableChildren.length === 0) return false;
+    const selections = this.v2Selections();
+    const selectedCount = variableChildren.filter((c) => selections.has(this.nodeKey(c))).length;
+    return selectedCount > 0 && selectedCount < variableChildren.length;
+  }
+
+  isAutoExpanding(node: TreeNode): boolean {
+    return this.autoExpandingNodes().has(this.nodeKey(node));
   }
 
   toggleNodeSelection(node: TreeNode): void {
-    if (this.isNodeSelected(node)) {
-      this.selectedNodes.update((sel) =>
-        sel.filter((s) => !(s.nodeNs === node.nodeNs && String(s.nodeId) === String(node.nodeId)))
-      );
-    } else {
-      this.selectedNodes.update((sel) => [
-        ...sel,
-        {
-          displayName: node.displayName,
-          nodeNs: node.nodeNs,
-          nodeId: node.nodeId,
-          nodeIdType: node.nodeIdType,
-        },
-      ]);
+    if (node.nodeCategory === 'object') {
+      // Object node: auto-expand and select/unselect all variable children
+      if (this.isNodeSelected(node)) {
+        this.unselectAllChildren(node);
+      } else {
+        if (node.children && node.children.length > 0) {
+          this.selectAllVariableChildren(node);
+          if (!node.expanded) {
+            node.expanded = true;
+            this.treeRoots.update((r) => [...r]);
+          }
+        } else {
+          // Need to fetch children first
+          const nk = this.nodeKey(node);
+          this.autoExpandingNodes.update((s) => { const ns = new Set(s); ns.add(nk); return ns; });
+          this.api.browse(node.nodeNs, node.nodeId, node.nodeIdType).subscribe({
+            next: (children) => {
+              node.children = children.map((c) => ({
+                ...c,
+                level: (node.level ?? 0) + 1,
+                parentRef: node,
+              }));
+              node.expanded = true;
+              node.loading = false;
+              // Guard: only auto-select if still in auto-expanding state
+              if (this.autoExpandingNodes().has(nk)) {
+                this.selectAllVariableChildren(node);
+              }
+              this.autoExpandingNodes.update((s) => { const ns = new Set(s); ns.delete(nk); return ns; });
+              this.treeRoots.update((r) => [...r]);
+            },
+            error: () => {
+              node.children = [];
+              node.loading = false;
+              this.autoExpandingNodes.update((s) => { const ns = new Set(s); ns.delete(nk); return ns; });
+              this.treeRoots.update((r) => [...r]);
+            },
+          });
+        }
+      }
+    } else if (node.nodeCategory === 'variable') {
+      const key = this.nodeKey(node);
+      if (this.v2Selections().has(key)) {
+        this.v2Selections.update((m) => { const nm = new Map(m); nm.delete(key); return nm; });
+      } else {
+        const parentInfo = this.resolveParentInfo(node);
+        this.v2Selections.update((m) => {
+          const nm = new Map(m);
+          nm.set(key, {
+            node: {
+              displayName: node.displayName,
+              nodeNs: node.nodeNs,
+              nodeId: node.nodeId,
+              nodeIdType: node.nodeIdType,
+              path: this.buildNodePath(node),
+            },
+            parentNode: parentInfo,
+          });
+          return nm;
+        });
+      }
     }
   }
 
   removeSelectedNode(sel: SelectedNode): void {
-    this.selectedNodes.update((arr) =>
-      arr.filter((s) => !(s.nodeNs === sel.nodeNs && String(s.nodeId) === String(sel.nodeId)))
-    );
+    const key = `${sel.nodeNs}:${sel.nodeId}`;
+    this.v2Selections.update((m) => { const nm = new Map(m); nm.delete(key); return nm; });
   }
+
+  removeGroup(group: PipelineGroup): void {
+    this.v2Selections.update((m) => {
+      const nm = new Map(m);
+      for (const rs of group.rowSources) {
+        for (const child of rs.childNodes) {
+          nm.delete(`${child.nodeNs}:${child.nodeId}`);
+        }
+      }
+      return nm;
+    });
+  }
+
+  removeRowSource(group: PipelineGroup, rs: RowSource): void {
+    this.v2Selections.update((m) => {
+      const nm = new Map(m);
+      for (const child of rs.childNodes) {
+        nm.delete(`${child.nodeNs}:${child.nodeId}`);
+      }
+      return nm;
+    });
+  }
+
+  // --- Selection Helpers ---
+
+  private selectAllVariableChildren(parentNode: TreeNode): void {
+    if (!parentNode.children) return;
+    const parentInfo = {
+      displayName: parentNode.displayName,
+      nodeNs: parentNode.nodeNs,
+      nodeId: parentNode.nodeId,
+      nodeIdType: parentNode.nodeIdType,
+      path: this.buildNodePath(parentNode),
+    };
+
+    this.v2Selections.update((m) => {
+      const nm = new Map(m);
+      for (const child of parentNode.children!) {
+        if (child.nodeCategory === 'variable') {
+          nm.set(this.nodeKey(child), {
+            node: {
+              displayName: child.displayName,
+              nodeNs: child.nodeNs,
+              nodeId: child.nodeId,
+              nodeIdType: child.nodeIdType,
+              path: this.buildNodePath(child),
+            },
+            parentNode: parentInfo,
+          });
+        }
+      }
+      return nm;
+    });
+  }
+
+  private unselectAllChildren(parentNode: TreeNode): void {
+    if (!parentNode.children) return;
+    this.v2Selections.update((m) => {
+      const nm = new Map(m);
+      for (const child of parentNode.children!) {
+        nm.delete(this.nodeKey(child));
+      }
+      return nm;
+    });
+  }
+
+  private resolveParentInfo(node: TreeNode): V2Selection['parentNode'] {
+    const parent = node.parentRef;
+    if (parent) {
+      return {
+        displayName: parent.displayName,
+        nodeNs: parent.nodeNs,
+        nodeId: parent.nodeId,
+        nodeIdType: parent.nodeIdType,
+        path: this.buildNodePath(parent),
+      };
+    }
+    // Fallback: the node sits directly under the root, use a synthetic root parent
+    return {
+      displayName: 'Objects',
+      nodeNs: 0,
+      nodeId: 85,
+      nodeIdType: 0,
+      path: 'Objects',
+    };
+  }
+
+  buildNodePath(node: TreeNode): string {
+    const parts: string[] = [];
+    let current: TreeNode | undefined = node;
+    while (current) {
+      parts.unshift(current.displayName);
+      current = current.parentRef;
+    }
+    return parts.join('/');
+  }
+
+  // --- Tree Icons ---
 
   getWizardNodeIcon(node: TreeNode): string {
     switch (node.nodeCategory) {
@@ -500,6 +918,8 @@ export class PipelineWizardComponent {
     }
   }
 
+  // --- Step Navigation ---
+
   nextStep(): void {
     if (this.currentStep() < 3) {
       this.currentStep.update((s) => s + 1);
@@ -514,47 +934,170 @@ export class PipelineWizardComponent {
     }
   }
 
+  onReviewContinue(): void {
+    // Auto-suggest names from the first row source if not already set
+    if (!this.className && this.pipelineGroups().length > 0) {
+      const firstGroup = this.pipelineGroups()[0];
+      if (firstGroup.rowSources.length === 1 && this.totalDeployUnits() === 1) {
+        this.className = this.sanitizeSuffix(firstGroup.rowSources[0].displayName);
+        this.dataSourceName = this.className;
+      }
+    }
+    this.nextStep();
+  }
+
   cancel(): void {
     this.router.navigate(['/pipelines']);
   }
 
+  // --- Deploy (v2: one request per PipelineGroup) ---
+
   deploy(): void {
     this.deploying.set(true);
     this.deployError.set('');
+    this.deployResults.set([]);
 
+    const groups = this.pipelineGroups();
+    if (groups.length === 0) return;
+
+    if (groups.length === 1) {
+      // Single pipeline group -> single v2 deploy
+      const group = groups[0];
+      const fullClassName = this.packagePath
+        ? `${this.packagePath}.${this.className}`
+        : this.className;
+
+      this.api
+        .deploy(this.buildV2Payload(group, fullClassName, this.dataSourceName) as any)
+        .subscribe({
+          next: (result) => {
+            this.deploying.set(false);
+            if (result.deployed) {
+              this.deploySuccess.set(true);
+              this.deployMessage.set(
+                `Pipeline "${this.dataSourceName}" deployed successfully as ${result.dataSourceClass} with ${group.rowSources.length} row source${group.rowSources.length !== 1 ? 's' : ''}.`
+              );
+              this.deployResults.set([{ name: this.dataSourceName, success: true, message: `Deployed as ${result.dataSourceClass}` }]);
+            } else {
+              this.deploySuccess.set(false);
+              this.deployMessage.set(result.error || 'Deployment failed.');
+              this.deployResults.set([{ name: this.dataSourceName, success: false, message: result.error || 'Failed' }]);
+            }
+            this.nextStep();
+          },
+          error: (err) => {
+            this.deploying.set(false);
+            this.deployError.set(err.message || 'Deployment failed');
+          },
+        });
+    } else {
+      // Multiple groups: deploy sequentially (one v2 request per group)
+      this.deployProgress.set(0);
+      this.deployGroupsSequential(groups, 0);
+    }
+  }
+
+  private buildV2Payload(
+    group: PipelineGroup,
+    fullClassName: string,
+    dataSourceName: string,
+  ): DeployV2Request {
+    return {
+      className: fullClassName,
+      dataSourceName,
+      mode: this.pipelineMode,
+      pipelineVersion: 2,
+      columns: group.columns.map((c) => ({
+        displayName: c.displayName,
+        inferredType: undefined, // backend will infer
+      })),
+      rowSources: group.rowSources.map((rs) => ({
+        displayName: rs.displayName,
+        nodeNs: rs.nodeNs,
+        nodeId: rs.nodeId,
+        nodeIdType: rs.nodeIdType,
+        path: rs.path,
+        childNodes: rs.childNodes.map((cn) => ({
+          displayName: cn.displayName,
+          nodeNs: cn.nodeNs,
+          nodeId: cn.nodeId,
+          nodeIdType: cn.nodeIdType,
+        })),
+      })),
+    };
+  }
+
+  private deployGroupsSequential(
+    groups: PipelineGroup[],
+    index: number,
+  ): void {
+    if (index >= groups.length) {
+      this.deploying.set(false);
+      const results = this.deployResults();
+      const allSuccess = results.every((r) => r.success);
+      const successCount = results.filter((r) => r.success).length;
+      this.deploySuccess.set(allSuccess);
+      this.deployMessage.set(
+        allSuccess
+          ? `All ${groups.length} pipelines deployed successfully.`
+          : `${successCount} of ${groups.length} pipelines deployed successfully.`
+      );
+      this.nextStep();
+      return;
+    }
+
+    const group = groups[index];
+    const suffix = this.groupSuffix(group);
     const fullClassName = this.packagePath
-      ? `${this.packagePath}.${this.className}`
-      : this.className;
+      ? `${this.packagePath}.${this.className}_${suffix}`
+      : `${this.className}_${suffix}`;
+    const dsName = `${this.dataSourceName}_${suffix}`;
+
+    this.deployProgress.set(index + 1);
 
     this.api
-      .deploy({
-        nodes: this.selectedNodes(),
-        className: fullClassName,
-        dataSourceName: this.dataSourceName,
-        mode: this.pipelineMode,
-      })
+      .deploy(this.buildV2Payload(group, fullClassName, dsName) as any)
       .subscribe({
         next: (result) => {
-          this.deploying.set(false);
-          if (result.deployed) {
-            this.deploySuccess.set(true);
-            this.deployMessage.set(
-              `Pipeline "${this.dataSourceName}" deployed successfully as ${result.dataSourceClass}.`
-            );
-          } else {
-            this.deploySuccess.set(false);
-            this.deployMessage.set(result.error || 'Deployment failed.');
-          }
-          this.nextStep();
+          this.deployResults.update((r) => [
+            ...r,
+            {
+              name: dsName,
+              success: result.deployed,
+              message: result.deployed
+                ? `Deployed as ${result.dataSourceClass}`
+                : result.error || 'Failed',
+            },
+          ]);
+          this.deployGroupsSequential(groups, index + 1);
         },
         error: (err) => {
-          this.deploying.set(false);
-          this.deployError.set(err.message || 'Deployment failed');
+          this.deployResults.update((r) => [
+            ...r,
+            { name: dsName, success: false, message: err.message || 'Failed' },
+          ]);
+          this.deployGroupsSequential(groups, index + 1);
         },
       });
   }
 
+  private sanitizeSuffix(name: string): string {
+    return name.replace(/[^a-zA-Z0-9]/g, '');
+  }
+
+  groupSuffix(group: PipelineGroup): string {
+    if (group.rowSources.length === 1) {
+      return this.sanitizeSuffix(group.rowSources[0].displayName);
+    }
+    // Use the first column name as a distinguisher for multi-source groups
+    return this.sanitizeSuffix(group.columns[0]?.displayName || 'Group');
+  }
+
   finish(): void {
     this.router.navigate(['/pipelines']);
+  }
+
+  columnNames(group: PipelineGroup): string {
+    return group.columns.map((c) => c.displayName).join(', ');
   }
 }

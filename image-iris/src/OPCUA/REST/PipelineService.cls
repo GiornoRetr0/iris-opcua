@@ -75,11 +75,16 @@ ClassMethod ParseItems(pContent As %String, pProdRunning As %Boolean, pResult As
 			set tItem.className = ..ExtractAttr(tBlock, "ClassName")
 			set tItem.enabled = (..ExtractAttr(tBlock, "Enabled") = "true")
 
-			// Determine mode from service class
+			// Determine mode and pipeline version from service class
 			if tItem.className = "OPCUA.Service.TCPSubscriptionService" {
 				set tItem.mode = "subscription"
+				set tItem.pipelineVersion = 1
+			} elseif tItem.className = "OPCUA.Service.TCPPollingRowSourceService" {
+				set tItem.mode = "polling"
+				set tItem.pipelineVersion = 2
 			} else {
 				set tItem.mode = "polling"
+				set tItem.pipelineVersion = 1
 			}
 
 			// Extract settings
@@ -106,6 +111,11 @@ ClassMethod ParseItems(pContent As %String, pProdRunning As %Boolean, pResult As
 
 			set tItem.productionRunning = pProdRunning
 			set tItem.nodes = ..GetNodeNames(tItem.dataSourceClass)
+
+			// Add row source info for v2 pipelines
+			if tItem.pipelineVersion = 2 {
+				set tItem.rowSources = ..GetRowSourceInfo(tItem.dataSourceClass)
+			}
 
 			do pResult.%Push(tItem)
 		}
@@ -326,6 +336,11 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 			do $System.OBJ.Delete(tDSClass, "-d")
 		}
 
+		// Clean up v2 row source metadata (no-op for v1 pipelines)
+		if tDSClass '= "" {
+			Kill ^OPCUA.RowSource(tDSClass)
+		}
+
 		set pResult.deleted = 1
 		set pResult.name = tName
 
@@ -422,6 +437,30 @@ ClassMethod RemoveItemFromXData(pItemName As %String, Output pDSClass As %String
 		set tSC = e.AsStatus()
 	}
 	Quit tSC
+}
+
+/// Get row source information for a v2 pipeline from ^OPCUA.RowSource global.
+ClassMethod GetRowSourceInfo(pClassName As %String) As %DynamicArray [ Private ]
+{
+	set tResult = []
+	Try {
+		set tRSData = $Get(^OPCUA.RowSource(pClassName))
+		if tRSData = "" Quit
+
+		set tRSCount = $LI(tRSData, 1)
+		set tRSList = $LI(tRSData, 3)
+
+		for i=1:1:tRSCount {
+			set tRS = $LI(tRSList, i)
+			set tInfo = {}
+			set tInfo.path = $LI(tRS, 1)
+			set tInfo.nodeNs = $LI(tRS, 2)
+			set tInfo.nodeId = $LI(tRS, 3)
+			set tInfo.nodeIdType = $LI(tRS, 4)
+			do tResult.%Push(tInfo)
+		}
+	} Catch (e) {}
+	Quit tResult
 }
 
 }
