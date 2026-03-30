@@ -1,4 +1,4 @@
-import { Component, signal, inject, computed } from '@angular/core';
+import { Component, signal, inject, computed, NgZone } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { NodeTreeComponent } from './node-tree/node-tree.component';
 import { NodeDetailComponent } from './node-detail/node-detail.component';
@@ -48,11 +48,17 @@ import { TreeNode } from '../../core/models/opcua.models';
     } @else {
       <!-- Normal explorer -->
       <div class="flex min-h-screen">
-        <div class="w-0 md:w-0"></div>
-        <aside class="fixed left-64 top-16 bottom-0 w-64 bg-slate-50 border-r border-slate-200/20 overflow-y-auto custom-scrollbar p-4 z-30">
+        <aside class="fixed left-64 top-16 bottom-0 bg-slate-50 border-r border-slate-200/20 overflow-y-auto custom-scrollbar p-4 z-30"
+               [style.width.px]="sidebarWidth()">
           <app-node-tree (nodeSelected)="onNodeSelected($event)" />
         </aside>
-        <main class="ml-64 flex-grow p-8">
+        <!-- Drag handle -->
+        <div class="fixed top-16 bottom-0 w-1.5 z-40 cursor-col-resize group hover:bg-primary/20 active:bg-primary/30 transition-colors"
+             [style.left.px]="sidebarWidth() + 256"
+             (mousedown)="onResizeStart($event)">
+          <div class="absolute inset-y-0 -left-1 -right-1"></div>
+        </div>
+        <main class="flex-grow p-8" [style.margin-left.px]="sidebarWidth()">
           <app-node-detail [node]="selectedNode()" />
         </main>
       </div>
@@ -61,7 +67,10 @@ import { TreeNode } from '../../core/models/opcua.models';
 })
 export class NodeExplorerComponent {
   private config = inject(ConfigService);
+  private zone = inject(NgZone);
   selectedNode = signal<TreeNode | null>(null);
+  sidebarWidth = signal(256);
+  private resizing = false;
 
   isConfigured = computed(() => {
     const cfg = this.config.get();
@@ -74,5 +83,31 @@ export class NodeExplorerComponent {
 
   openSettings(): void {
     document.dispatchEvent(new CustomEvent('open-settings'));
+  }
+
+  onResizeStart(event: MouseEvent): void {
+    event.preventDefault();
+    this.resizing = true;
+    const startX = event.clientX;
+    const startWidth = this.sidebarWidth();
+
+    const onMove = (e: MouseEvent) => {
+      if (!this.resizing) return;
+      const newWidth = Math.max(200, Math.min(600, startWidth + e.clientX - startX));
+      this.zone.run(() => this.sidebarWidth.set(newWidth));
+    };
+
+    const onUp = () => {
+      this.resizing = false;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
   }
 }

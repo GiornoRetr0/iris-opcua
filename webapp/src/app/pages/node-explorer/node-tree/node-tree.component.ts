@@ -141,6 +141,10 @@ export class NodeTreeComponent implements OnInit {
     this.api.browse(node.nodeNs, node.nodeId, node.nodeIdType).subscribe({
       next: (children) => {
         node.children = children.map((c) => ({ ...c, level: (node.level ?? 0) + 1 }));
+        if (children.length === 0) {
+          node.hasChildren = false;
+          node.expanded = false;
+        }
         node.loading = false;
         this.roots.update((r) => [...r]);
       },
