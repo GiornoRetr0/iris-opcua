@@ -21,7 +21,45 @@ import {
   standalone: true,
   imports: [CommonModule, FormsModule],
   template: `
+    @if (!isConfigured()) {
+      <div class="flex items-center justify-center min-h-[calc(100vh-64px)]">
+        <div class="text-center max-w-md px-8">
+          <div class="w-24 h-24 mx-auto mb-8 rounded-2xl bg-surface-container-low flex items-center justify-center">
+            <span class="material-symbols-outlined text-5xl text-on-surface-variant/30">hub</span>
+          </div>
+          <h2 class="text-2xl font-semibold text-on-surface mb-3 tracking-tight">Server Not Configured</h2>
+          <p class="text-sm text-on-surface-variant leading-relaxed mb-8">
+            You need to configure your OPC UA server connection before creating a pipeline. Set the server URL and test the connection in Settings.
+          </p>
+          <div class="flex items-center gap-3 justify-center">
+            <button (click)="openSettings()"
+                    class="px-6 py-3 bg-primary text-on-primary font-bold rounded-lg shadow-xl shadow-primary/30 flex items-center gap-2 hover:brightness-110 active:scale-95 transition-all">
+              <span class="material-symbols-outlined text-sm">settings</span>
+              Open Settings
+            </button>
+            <button (click)="cancel()"
+                    class="px-6 py-3 bg-surface-container-high text-on-surface-variant font-semibold rounded-lg hover:bg-surface-variant transition-colors">
+              Back
+            </button>
+          </div>
+        </div>
+      </div>
+    } @else {
     <div class="p-8 max-w-7xl mx-auto w-full">
+      <!-- Edit Mode Banner -->
+      @if (editMode()) {
+        <div class="mb-8 bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center gap-4 max-w-4xl mx-auto">
+          <div class="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center">
+            <span class="material-symbols-outlined text-amber-700">edit_note</span>
+          </div>
+          <div class="flex-1">
+            <p class="text-sm font-bold text-amber-900">Editing Pipeline: {{ editPipelineName() }}</p>
+            <p class="text-xs text-amber-700">Modify the node selection below. The pipeline will be updated in place.</p>
+          </div>
+          <span class="px-3 py-1 bg-amber-200 text-amber-800 text-[10px] font-bold uppercase tracking-widest rounded-full">Edit Mode</span>
+        </div>
+      }
+
       <!-- Stepper -->
       <div class="flex items-center justify-between mb-12 max-w-4xl mx-auto relative">
         <div class="absolute top-1/2 left-0 w-full h-0.5 bg-outline-variant/20 -translate-y-1/2 z-0">
@@ -106,13 +144,6 @@ import {
                 </div>
               </div>
 
-              @if (editMode()) {
-                <div class="mb-6 px-4 py-3 bg-primary/10 border border-primary/20 rounded-lg flex items-center gap-2">
-                  <span class="material-symbols-outlined text-primary">edit_note</span>
-                  <span class="text-sm font-semibold text-primary">Editing: {{ editPipelineName() }}</span>
-                </div>
-              }
-
               <h1 class="text-2xl font-semibold text-on-surface mb-3 tracking-tight mt-8">
                 {{ editMode() ? 'Modify Pipeline Nodes' : 'Select Data Nodes' }}
               </h1>
@@ -120,9 +151,40 @@ import {
                 Browse the OPC UA address space and select devices or individual sensors.
                 Checking a device auto-selects all its child attributes as columns.
               </p>
+              <!-- Edit mode warnings -->
+              @if (editMode() && selectedNodes().length === 0) {
+                <div class="mb-4 px-4 py-3 bg-error-container/20 border border-error/20 rounded-lg flex items-center gap-2 max-w-md">
+                  <span class="material-symbols-outlined text-error text-sm">warning</span>
+                  <span class="text-xs text-error font-medium">Pipeline must have at least one node selected.</span>
+                </div>
+              }
+              @if (editHasNoOverlap()) {
+                <div class="mb-4 px-4 py-3 bg-error-container/20 border border-error/20 rounded-lg max-w-md">
+                  <div class="flex items-center gap-2 mb-2">
+                    <span class="material-symbols-outlined text-error text-sm">block</span>
+                    <span class="text-xs text-error font-bold">Nodes don't match this pipeline's schema</span>
+                  </div>
+                  <p class="text-[11px] text-error/80 mb-2">
+                    <span class="font-semibold">{{ editNonMatchingColumns().join(', ') }}</span>
+                    — these nodes share no columns with the existing pipeline. Remove them or create a separate pipeline.
+                  </p>
+                  <button (click)="createNewPipelineFromNonMatching()"
+                          class="text-[11px] font-bold text-primary hover:underline flex items-center gap-1">
+                    <span class="material-symbols-outlined text-xs">add_circle</span>
+                    Create New Pipeline for these nodes
+                  </button>
+                </div>
+              }
+              @if (editHasNoChanges()) {
+                <div class="mb-4 px-4 py-3 bg-surface-container border border-outline-variant/20 rounded-lg flex items-center gap-2 max-w-md">
+                  <span class="material-symbols-outlined text-on-surface-variant text-sm">info</span>
+                  <span class="text-xs text-on-surface-variant font-medium">No changes detected. Modify your selection to update the pipeline.</span>
+                </div>
+              }
+
               <div class="flex items-center gap-4">
                 <button (click)="nextStep()"
-                        [disabled]="selectedNodes().length === 0"
+                        [disabled]="selectedNodes().length === 0 || editHasNoOverlap() || editHasNoChanges()"
                         class="px-8 py-3 bg-primary text-on-primary font-bold rounded-lg shadow-xl shadow-primary/30 flex items-center gap-2 hover:brightness-110 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
                   {{ editMode() ? 'Review Changes' : 'Review Selection' }}
                   <span class="material-symbols-outlined">arrow_forward</span>
@@ -558,6 +620,7 @@ import {
         }
       </div>
     </ng-template>
+    }
   `,
 })
 export class PipelineWizardComponent {
@@ -565,6 +628,11 @@ export class PipelineWizardComponent {
   private router = inject(Router);
   private route = inject(ActivatedRoute);
   config = inject(ConfigService);
+
+  isConfigured = computed(() => {
+    const cfg = this.config.get();
+    return !!(cfg.apiBaseUrl && cfg.serverUrl);
+  });
 
   // Edit mode
   editMode = signal(false);
@@ -611,8 +679,8 @@ export class PipelineWizardComponent {
   });
 
   // Derived: merge parents with overlapping columns into pipeline groups (union merge).
-  // Groups that share ANY column name get merged; columns become the union.
-  // Groups with zero column overlap stay separate.
+  // In CREATE mode: groups with overlapping columns merge; zero-overlap stays separate.
+  // In EDIT mode: everything goes into ONE group (editing one pipeline).
   pipelineGroups = computed<PipelineGroup[]>(() => {
     const groups = this.parentGroups();
 
@@ -632,36 +700,52 @@ export class PipelineWizardComponent {
       });
     }
 
-    // Connected-components merge: groups sharing any column name get merged
-    const used = new Set<number>();
-    const clusters: { columnNames: Set<string>; rowSources: RowSource[] }[] = [];
+    let clusters: { columnNames: Set<string>; rowSources: RowSource[] }[];
 
-    for (let i = 0; i < entries.length; i++) {
-      if (used.has(i)) continue;
-      used.add(i);
+    if (this.editMode()) {
+      // Edit mode: force ALL entries into one group
+      if (entries.length === 0) {
+        clusters = [];
+      } else {
+        const allColumns = new Set<string>();
+        const allRowSources: RowSource[] = [];
+        for (const entry of entries) {
+          entry.columnNames.forEach((c) => allColumns.add(c));
+          allRowSources.push(entry.rowSource);
+        }
+        clusters = [{ columnNames: allColumns, rowSources: allRowSources }];
+      }
+    } else {
+      // Create mode: connected-components merge (groups sharing any column name get merged)
+      const used = new Set<number>();
+      clusters = [];
 
-      const cluster = {
-        columnNames: new Set(entries[i].columnNames),
-        rowSources: [entries[i].rowSource],
-      };
+      for (let i = 0; i < entries.length; i++) {
+        if (used.has(i)) continue;
+        used.add(i);
 
-      // Keep merging until no more overlapping groups found
-      let changed = true;
-      while (changed) {
-        changed = false;
-        for (let j = 0; j < entries.length; j++) {
-          if (used.has(j)) continue;
-          const hasOverlap = [...entries[j].columnNames].some((c) => cluster.columnNames.has(c));
-          if (hasOverlap) {
-            used.add(j);
-            entries[j].columnNames.forEach((c) => cluster.columnNames.add(c));
-            cluster.rowSources.push(entries[j].rowSource);
-            changed = true;
+        const cluster = {
+          columnNames: new Set(entries[i].columnNames),
+          rowSources: [entries[i].rowSource],
+        };
+
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (let j = 0; j < entries.length; j++) {
+            if (used.has(j)) continue;
+            const hasOverlap = [...entries[j].columnNames].some((c) => cluster.columnNames.has(c));
+            if (hasOverlap) {
+              used.add(j);
+              entries[j].columnNames.forEach((c) => cluster.columnNames.add(c));
+              cluster.rowSources.push(entries[j].rowSource);
+              changed = true;
+            }
           }
         }
-      }
 
-      clusters.push(cluster);
+        clusters.push(cluster);
+      }
     }
 
     // Auto-discover: for each row source, check its parent tree node's loaded children
@@ -702,6 +786,45 @@ export class PipelineWizardComponent {
 
   // v2: one deploy per pipeline group (not per row source)
   totalDeployUnits = computed(() => this.pipelineGroups().length);
+
+  // Edit mode validation
+
+  // Columns from newly added nodes that have ZERO overlap with existing pipeline columns
+  editNonMatchingColumns = computed<string[]>(() => {
+    if (!this.editMode() || !this.existingPipeline()) return [];
+    const existing = this.existingPipeline()!;
+    const existingColNames = new Set(
+      ((existing as any).nodes || []).map((n: any) => n.property || n.displayName)
+    );
+    if (existingColNames.size === 0) return [];
+
+    // Check each parent group: if ALL its columns are outside the existing schema, it's non-matching
+    const nonMatching: string[] = [];
+    for (const [, group] of this.parentGroups()) {
+      const childNames = group.children.map((c) => c.node.displayName);
+      const hasOverlap = childNames.some((n) => existingColNames.has(n));
+      if (!hasOverlap) {
+        nonMatching.push(...childNames);
+      }
+    }
+    return nonMatching;
+  });
+
+  editHasNoOverlap = computed(() => this.editNonMatchingColumns().length > 0);
+
+  editHasNoChanges = computed(() => {
+    if (!this.editMode() || !this.existingPipeline()) return false;
+    const existing = this.existingPipeline()!;
+    const existingColNames = ((existing as any).nodes || [])
+      .map((n: any) => n.property || n.displayName).sort().join('|');
+    const existingRSPaths = (existing.rowSources || [])
+      .map((rs) => rs.path).sort().join('|');
+    const groups = this.pipelineGroups();
+    if (groups.length === 0) return true;
+    const newColNames = groups[0].columns.map((c) => c.displayName).sort().join('|');
+    const newRSPaths = groups[0].rowSources.map((rs) => rs.path).sort().join('|');
+    return existingColNames === newColNames && existingRSPaths === newRSPaths;
+  });
 
   // Step 3: Configure
   packagePath = 'OPCUA.DS';
@@ -1096,6 +1219,16 @@ export class PipelineWizardComponent {
 
   cancel(): void {
     this.router.navigate(['/pipelines']);
+  }
+
+  openSettings(): void {
+    document.dispatchEvent(new CustomEvent('open-settings'));
+  }
+
+  createNewPipelineFromNonMatching(): void {
+    // Remove non-matching nodes from edit, then navigate to create with them
+    // For now, just navigate to create — user can re-select there
+    this.router.navigate(['/pipelines/new']);
   }
 
   // --- Deploy / Update (v2: one request per PipelineGroup) ---

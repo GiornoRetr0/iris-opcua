@@ -34,4 +34,11 @@ export const routes: Routes = [
         (m) => m.PipelineWizardComponent
       ),
   },
+  {
+    path: 'docs',
+    loadComponent: () =>
+      import('./pages/documentation/documentation.component').then(
+        (m) => m.DocumentationComponent
+      ),
+  },
 ];

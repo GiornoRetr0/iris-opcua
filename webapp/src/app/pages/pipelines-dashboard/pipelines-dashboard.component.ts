@@ -35,32 +35,48 @@ import { Pipeline } from '../../core/models/opcua.models';
 
       <!-- Dashboard Stats Grid -->
       <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
-        <div class="bg-surface-container-lowest p-6 rounded-xl shadow-sm border border-outline-variant/10">
-          <div class="text-[0.65rem] font-bold text-on-surface-variant uppercase tracking-[0.15em] mb-2">Total Pipelines</div>
-          <div class="flex items-baseline gap-2">
-            <span class="text-3xl font-bold text-primary">{{ pipelines().length }}</span>
-            <span class="text-sm font-medium text-on-surface-variant">Total</span>
+        <!-- Total Pipelines -->
+        <div class="bg-white p-6 rounded-2xl shadow-[0_2px_12px_-2px_rgba(19,28,121,0.08),0_4px_6px_-2px_rgba(19,28,121,0.04)] border border-slate-200/60 relative overflow-hidden group">
+          <span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 opacity-40 text-slate-300/40 group-hover:text-slate-300/60 transition-colors" style="font-size:80px">account_tree</span>
+          <div class="relative z-10">
+            <div class="text-[0.65rem] font-bold text-slate-400 uppercase tracking-widest mb-3">Total Pipelines</div>
+            <div class="flex items-baseline gap-2">
+              <span class="text-4xl font-black text-primary">{{ pipelines().length }}</span>
+              <span class="text-sm font-bold text-slate-400">Deployed</span>
+            </div>
           </div>
         </div>
-        <div class="bg-surface-container-lowest p-6 rounded-xl shadow-sm border border-outline-variant/10">
-          <div class="text-[0.65rem] font-bold text-on-surface-variant uppercase tracking-[0.15em] mb-2">Running Streams</div>
-          <div class="flex items-baseline gap-2">
-            <span class="text-3xl font-bold text-tertiary">{{ runningCount() }}</span>
-            <span class="text-sm font-medium text-on-surface-variant">Active</span>
+        <!-- Running Streams -->
+        <div class="bg-white p-6 rounded-2xl shadow-[0_2px_12px_-2px_rgba(19,28,121,0.08),0_4px_6px_-2px_rgba(19,28,121,0.04)] border border-slate-200/60 relative overflow-hidden group">
+          <span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 opacity-40 text-emerald-400/30 group-hover:text-emerald-400/50 transition-colors" style="font-size:80px">bolt</span>
+          <div class="relative z-10">
+            <div class="text-[0.65rem] font-bold text-slate-400 uppercase tracking-widest mb-3">Running Streams</div>
+            <div class="flex items-baseline gap-2">
+              <span class="text-4xl font-black text-emerald-600">{{ runningCount() }}</span>
+              <span class="text-sm font-bold text-emerald-500/60">Active</span>
+            </div>
           </div>
         </div>
-        <div class="bg-surface-container-lowest p-6 rounded-xl shadow-sm border border-outline-variant/10">
-          <div class="text-[0.65rem] font-bold text-on-surface-variant uppercase tracking-[0.15em] mb-2">Error Warnings</div>
-          <div class="flex items-baseline gap-2">
-            <span class="text-3xl font-bold text-error">{{ errorCount() }}</span>
-            <span class="text-sm font-medium text-on-surface-variant">Pending</span>
+        <!-- Error Warnings -->
+        <div class="bg-white p-6 rounded-2xl shadow-[0_2px_12px_-2px_rgba(19,28,121,0.08),0_4px_6px_-2px_rgba(19,28,121,0.04)] border border-slate-200/60 relative overflow-hidden group">
+          <span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 opacity-40 text-amber-400/30 group-hover:text-amber-400/50 transition-colors" style="font-size:80px">warning</span>
+          <div class="relative z-10">
+            <div class="text-[0.65rem] font-bold text-slate-400 uppercase tracking-widest mb-3">Error Warnings</div>
+            <div class="flex items-baseline gap-2">
+              <span class="text-4xl font-black text-amber-500">{{ errorCount() }}</span>
+              <span class="text-sm font-bold text-amber-500/60">Critical</span>
+            </div>
           </div>
         </div>
-        <div class="bg-surface-container-lowest p-6 rounded-xl shadow-sm border border-outline-variant/10">
-          <div class="text-[0.65rem] font-bold text-on-surface-variant uppercase tracking-[0.15em] mb-2">Stopped</div>
-          <div class="flex items-baseline gap-2">
-            <span class="text-3xl font-bold text-primary">{{ stoppedCount() }}</span>
-            <span class="text-sm font-medium text-on-surface-variant">Inactive</span>
+        <!-- Stopped -->
+        <div class="bg-white p-6 rounded-2xl shadow-[0_2px_12px_-2px_rgba(19,28,121,0.08),0_4px_6px_-2px_rgba(19,28,121,0.04)] border border-slate-200/60 relative overflow-hidden group">
+          <span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 opacity-40 text-primary/20 group-hover:text-primary/35 transition-colors" style="font-size:80px">pause_circle</span>
+          <div class="relative z-10">
+            <div class="text-[0.65rem] font-bold text-slate-400 uppercase tracking-widest mb-3">Stopped</div>
+            <div class="flex items-baseline gap-2">
+              <span class="text-4xl font-black text-primary">{{ stoppedCount() }}</span>
+              <span class="text-sm font-bold text-slate-400">Inactive</span>
+            </div>
           </div>
         </div>
       </div>
@@ -236,14 +252,6 @@ import { Pipeline } from '../../core/models/opcua.models';
       </div>
     </div>
 
-    <!-- FAB -->
-    <div class="fixed bottom-10 right-10 z-50">
-      <button (click)="createPipeline()"
-              class="flex items-center gap-2.5 bg-primary text-on-primary pl-3.5 pr-5 py-3 rounded-full shadow-[0_20px_40px_rgba(19,28,121,0.25)] hover:shadow-[0_25px_50px_rgba(19,28,121,0.35)] transition-all transform active:scale-95">
-        <span class="material-symbols-outlined bg-on-primary text-primary h-7 w-7 flex items-center justify-center rounded-full text-lg leading-none">add</span>
-        <span class="font-bold text-sm tracking-wide">Create New Pipeline</span>
-      </button>
-    </div>
   `,
 })
 export class PipelinesDashboardComponent implements OnInit {

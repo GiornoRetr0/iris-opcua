@@ -25,7 +25,7 @@ import { CommonModule } from '@angular/common';
              ? 'bg-blue-100/50 text-[#131c79]'
              : 'text-slate-600 hover:bg-slate-200/50'">
           <span class="material-symbols-outlined text-xl"
-                [class.filled]="explorerLink.isActive">account_tree</span>
+                [class.filled]="explorerLink.isActive">search</span>
           <span class="text-sm font-medium">Node Explorer</span>
         </a>
 
@@ -38,18 +38,18 @@ import { CommonModule } from '@angular/common';
              ? 'bg-blue-100/50 text-[#131c79]'
              : 'text-slate-600 hover:bg-slate-200/50'">
           <span class="material-symbols-outlined text-xl"
-                [class.filled]="pipelinesLink.isActive">account_tree</span>
+                [class.filled]="pipelinesLink.isActive">sync_alt</span>
           <span class="text-sm font-medium">Pipelines</span>
         </a>
       </nav>
 
       <!-- Footer -->
       <div class="p-4">
-        <div class="text-slate-600 hover:bg-slate-200/50 rounded-lg flex items-center gap-3 px-3 py-2 cursor-pointer transition-all"
-             (click)="openSettings()">
-          <span class="material-symbols-outlined text-lg">settings</span>
-          <span class="text-sm">Settings</span>
-        </div>
+        <a routerLink="/pipelines/new"
+           class="flex items-center gap-3 bg-primary text-on-primary px-4 py-2.5 rounded-full shadow-[0_20px_40px_rgba(19,28,121,0.25)] hover:shadow-[0_25px_50px_rgba(19,28,121,0.35)] transition-all transform active:scale-95 relative z-10">
+          <span class="material-symbols-outlined bg-on-primary text-primary h-7 w-7 rounded-full text-center text-lg" style="line-height: 28px; vertical-align: unset">add</span>
+          <span class="font-bold text-sm tracking-wide">Create New Pipeline</span>
+        </a>
       </div>
     </aside>
   `,

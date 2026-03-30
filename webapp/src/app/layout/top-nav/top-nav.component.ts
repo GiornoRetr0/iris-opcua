@@ -14,15 +14,10 @@ import { ConfigService } from '../../core/services/config.service';
         <div class="flex items-center gap-8">
           <img src="intersystems-logo.png" alt="InterSystems" class="h-14" />
           <nav class="hidden md:flex gap-6">
-            <a routerLink="/explorer" routerLinkActive="text-[#131c79] font-semibold border-b-2 border-[#131c79]"
+            <a routerLink="/docs" routerLinkActive="text-[#131c79] font-semibold border-b-2 border-[#131c79]"
                [routerLinkActiveOptions]="{exact: false}"
                class="text-slate-500 font-medium hover:text-[#131c79] transition-colors active:scale-95 duration-150">
-              Node Explorer
-            </a>
-            <a routerLink="/pipelines" routerLinkActive="text-[#131c79] font-semibold border-b-2 border-[#131c79]"
-               [routerLinkActiveOptions]="{exact: false}"
-               class="text-slate-500 font-medium hover:text-[#131c79] transition-colors active:scale-95 duration-150">
-              Pipelines
+              Documentation
             </a>
           </nav>
         </div>
