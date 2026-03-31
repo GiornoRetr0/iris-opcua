@@ -614,7 +614,7 @@ import {
               <span class="text-[11px]">Loading...</span>
             </div>
           }
-          @for (child of node.children; track wizardNodeKey(child)) {
+          @for (child of node.children; track wizardNodeKey(child) + ':' + $index) {
             <ng-container *ngTemplateOutlet="wizardTreeTpl; context: { $implicit: child, level: level + 1 }" />
           }
         }
@@ -1142,18 +1142,21 @@ export class PipelineWizardComponent {
    * For nested children (e.g. AC1/SubFolder/TargetNode), rootDevice=AC1, relativePath=["SubFolder","TargetNode"].
    */
   private resolveRootDevice(node: TreeNode): { rootDevice: V2Selection['parentNode']; relativePath: string[] } {
-    // Walk up from the node, collecting path segments
+    // Walk up from the node to the tree root (top-level browse result).
+    // The root device is always the top of the parentRef chain — this ensures
+    // all nodes under the same device (e.g. AirConditioner_1) group together,
+    // regardless of whether intermediate ancestors are 'folder' or 'object'.
     const pathFromLeaf: string[] = [node.displayName];
     let current = node.parentRef;
     let rootDevice: TreeNode | undefined;
 
     while (current) {
-      if (!current.parentRef || current.parentRef.nodeCategory === 'folder') {
-        // current is the root device: deepest object whose parent is a folder (or tree root)
+      if (!current.parentRef) {
+        // Reached the tree root — this is the root device
         rootDevice = current;
         break;
       }
-      // current is an intermediate object (subfolder) — add to relative path
+      // Intermediate ancestor — add to relative path and keep walking up
       pathFromLeaf.unshift(current.displayName);
       current = current.parentRef;
     }
