@@ -334,8 +334,9 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 			do ##class(Ens.Director).UpdateProduction()
 		}
 
-		// Delete DataSource class if it exists
+		// Delete serial object subclasses first (they depend on the main class)
 		if (tDSClass '= "") && ##class(%Dictionary.ClassDefinition).%ExistsId(tDSClass) {
+			do ..DeleteSerialSubclasses(tDSClass)
 			do $System.OBJ.Delete(tDSClass, "-d")
 		}
 
@@ -414,82 +415,33 @@ ClassMethod Edit(pBody As %DynamicObject, Output pResult As %DynamicObject) As %
 			}
 		}
 
-		// --- Step 3: Delete old class and metadata ---
+		// --- Step 3: Delete old class, serial subclasses, and metadata ---
+		do ..DeleteSerialSubclasses(tClassName)
 		do $System.OBJ.Delete(tClassName, "-d")
 		Kill ^OPCUA.RowSource(tClassName)
 		Kill ^OPCUA.DataSource(tClassName)
 
-		// --- Step 4: Generate new DataSource class with type preservation ---
-		set tNL = $Char(10)
-
-		// Determine default namespace
-		set tFirstRS = tRowSources.%Get(0)
-		set tChildren = tFirstRS.%Get("childNodes")
-		for iC=0:1:tChildren.%Size()-1 {
-			set tNS = +tChildren.%Get(iC).%Get("nodeNs")
-			set tNSCount(tNS) = $Get(tNSCount(tNS), 0) + 1
-		}
-		set tDefaultNS = 0
-		set tMaxCount = 0
-		set tNS = ""
-		for {
-			set tNS = $Order(tNSCount(tNS))
-			if tNS = "" Quit
-			if tNSCount(tNS) > tMaxCount {
-				set tMaxCount = tNSCount(tNS)
-				set tDefaultNS = tNS
-			}
+		// --- Step 4: Generate new DataSource class (reuses DeployService logic, supports nesting) ---
+		set tSC = ##class(OPCUA.REST.DeployService).GenerateDataSourceTextV2(pBody, tColumns, tRowSources, tClassName, tDataSourceName, .tText, .tSerialClasses)
+		if $$$ISERR(tSC) {
+			set pResult.error = "Class generation failed: "_$System.Status.GetErrorText(tSC)
+			set tSC = $$$OK
+			Quit
 		}
 
-		// Build class text
-		set tText = "/// Auto-generated OPC UA DataSource class (v2 row-source model)."_tNL
-		set tText = tText_"Class "_tClassName_" Extends (%Persistent, OPCUA.DataSource.Definition)"_tNL
-		set tText = tText_"{"_tNL
-		set tText = tText_tNL
-		set tText = tText_"Parameter OPCUADATASOURCE = """_tDataSourceName_""";"_tNL
-		set tText = tText_tNL
-		set tText = tText_"Parameter OPCUDEFAULTANAMESPACE = "_tDefaultNS_";"_tNL
-		set tText = tText_tNL
-		set tText = tText_"Parameter OPCUAPIPELINEVERSION = 2;"_tNL
-		set tText = tText_tNL
-		set tText = tText_"Property NodePath As %String(MAXLEN = 500);"_tNL
-		set tText = tText_tNL
-		set tText = tText_"Property ServerTimeStamp As %TimeStamp;"_tNL
-		set tText = tText_tNL
-		set tText = tText_"Property SourceTimeStamp As %TimeStamp;"_tNL
-
-		// Generate column properties with type preservation
-		for iC=0:1:tColumns.%Size()-1 {
-			set tCol = tColumns.%Get(iC)
-			set tDisplayName = tCol.%Get("displayName")
-
-			// Sanitize property name
-			set tPropName = ##class(OPCUA.DataSource.Generator).SanitizePropertyName(tDisplayName, .tUsedNames)
-
-			// Preserve existing type if available, otherwise infer
-			if $Data(tExistingTypes(tPropName)) {
-				set tType = tExistingTypes(tPropName)
-			} else {
-				set tType = ##class(OPCUA.REST.DeployService).MapToPlainType(tCol.%Get("inferredType"))
+		// --- Step 5: Compile serial classes first, then main class ---
+		for iSC=1:1:$Get(tSerialClasses, 0) {
+			set tSerialClassName = $LI(tSerialClasses(iSC), 1)
+			set tSerialText = $LI(tSerialClasses(iSC), 2)
+			set tSC = ##class(OPCUA.REST.DeployService).WriteAndCompile(tSerialClassName, tSerialText)
+			if $$$ISERR(tSC) {
+				set pResult.error = "Serial class compilation failed: "_$System.Status.GetErrorText(tSC)
+				set tSC = $$$OK
+				Quit
 			}
-
-			// Use first row source's child node namespace
-			set tChildNS = tDefaultNS
-			if iC < tChildren.%Size() {
-				set tChildNS = +tChildren.%Get(iC).%Get("nodeNs")
-			}
-
-			set tText = tText_tNL
-			set tText = tText_"Property "_tPropName_" As "_tType_"(OPCUANODENAME = """_tDisplayName_""""
-			if tChildNS '= tDefaultNS {
-				set tText = tText_", OPCUANAMESPACE = """_tChildNS_""""
-			}
-			set tText = tText_");"_tNL
 		}
+		Quit:$Get(pResult.error)'=""
 
-		set tText = tText_tNL_"}"_tNL
-
-		// --- Step 5: Write and compile ---
 		set tSC = ##class(OPCUA.REST.DeployService).WriteAndCompile(tClassName, tText)
 		if $$$ISERR(tSC) {
 			set pResult.error = "Compilation failed: "_$System.Status.GetErrorText(tSC)
@@ -626,27 +578,29 @@ ClassMethod GetRowSourceInfo(pClassName As %String) As %DynamicArray [ Private ]
 		set tColCount = $LI(tRSData, 2)
 		set tRSList = $LI(tRSData, 3)
 
+		// Get stored column paths if available (position 4)
+		set tHasColumnPaths = ($LL(tRSData) >= 4) && ($LI(tRSData, 4) '= "")
+		if tHasColumnPaths {
+			set tColumnPaths = $LI(tRSData, 4)
+		}
+
 		// Get column names from compiled class (OPCUANODENAME params, in storage order)
 		// These correspond to the column mask positions
 		kill tColNames
 		set tColIdx = 0
 		set tClassDef = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
 		if $IsObject(tClassDef) {
-			// Read storage entries in order (same order Projection uses)
 			set tStorage = tClassDef.Storages.GetAt(1)
 			if $IsObject(tStorage) {
 				set tDataDef = tStorage.Data.GetAt(1)
 				if $IsObject(tDataDef) {
 					for iS=1:1:tDataDef.Values.Count() {
 						set tPropName = tDataDef.Values.GetAt(iS).Value
-						// Skip system/metadata properties
 						if $Extract(tPropName,1)="%" continue
 						if tPropName="NodePath" continue
 						if tPropName="ServerTimeStamp" continue
 						if tPropName="SourceTimeStamp" continue
-						// This is a column property
 						set tColIdx = tColIdx + 1
-						// Get its OPCUANODENAME
 						for iP=1:1:tClassDef.Properties.Count() {
 							set tProp = tClassDef.Properties.GetAt(iP)
 							if tProp.Name = tPropName {
@@ -668,7 +622,6 @@ ClassMethod GetRowSourceInfo(pClassName As %String) As %DynamicArray [ Private ]
 			set tInfo.nodeId = $LI(tRS, 3)
 			set tInfo.nodeIdType = $LI(tRS, 4)
 
-			// Build childNodes from column mask + absolute node refs
 			set tChildren = []
 			if $LL(tRS) >= 6 {
 				set tMask = $LI(tRS, 5)
@@ -683,6 +636,15 @@ ClassMethod GetRowSourceInfo(pClassName As %String) As %DynamicArray [ Private ]
 						set tChild.nodeNs = $LI(tRef, 1)
 						set tChild.nodeId = $LI(tRef, 2)
 						set tChild.nodeIdType = $LI(tRef, 3)
+						// Include relativePath from stored column paths
+						if tHasColumnPaths && ($LL(tColumnPaths) >= c) {
+							set tPathStr = $LI(tColumnPaths, c)
+							set tRelPath = ##class(%DynamicArray).%New()
+							for seg=1:1:$Length(tPathStr, "/") {
+								do tRelPath.%Push($Piece(tPathStr, "/", seg))
+							}
+							set tChild.relativePath = tRelPath
+						}
 						do tChildren.%Push(tChild)
 					}
 				}
@@ -693,6 +655,36 @@ ClassMethod GetRowSourceInfo(pClassName As %String) As %DynamicArray [ Private ]
 		}
 	} Catch (e) {}
 	Quit tResult
+}
+
+/// Delete serial object subclasses for a DataSource class.
+/// Scans the class's properties for types extending %SerialObject (excluding OPCUA.Types.*).
+ClassMethod DeleteSerialSubclasses(pClassName As %String) [ Private ]
+{
+	Try {
+		set tClassDef = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
+		if '$IsObject(tClassDef) Quit
+
+		for i=1:1:tClassDef.Properties.Count() {
+			set tProp = tClassDef.Properties.GetAt(i)
+			set tType = tProp.Type
+			// Skip OPCUA.Types.* (these are framework serial objects, not ours)
+			if $Extract(tType, 1, 12) = "OPCUA.Types." continue
+			// Skip standard types
+			if $Extract(tType, 1) = "%" continue
+			// Check if it extends %SerialObject
+			Try {
+				if $classmethod(tType, "%Extends", "%SerialObject") {
+					// This is a pipeline-generated serial class — delete it
+					if ##class(%Dictionary.ClassDefinition).%ExistsId(tType) {
+						do $System.OBJ.Delete(tType, "-d")
+					}
+				}
+			} Catch (eInner) {
+				// Type class may not exist — skip
+			}
+		}
+	} Catch (e) {}
 }
 
 }

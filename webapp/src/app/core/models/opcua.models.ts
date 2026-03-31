@@ -52,7 +52,7 @@ export interface Pipeline {
     nodeNs: number;
     nodeId: string | number;
     nodeIdType: number;
-    childNodes?: { displayName: string; nodeNs: number; nodeId: string | number; nodeIdType: number }[];
+    childNodes?: { displayName: string; nodeNs: number; nodeId: string | number; nodeIdType: number; relativePath?: string[] }[];
   }[];
   [key: string]: any; // allow extra fields from API
 }
@@ -71,7 +71,7 @@ export interface DeployV2Request {
   dataSourceName: string;
   mode: 'polling' | 'subscription';
   pipelineVersion: 2;
-  columns: { displayName: string; inferredType?: string }[];
+  columns: { displayName: string; inferredType?: string; relativePath?: string[] }[];
   rowSources: {
     displayName: string;
     nodeNs: number;
@@ -83,6 +83,7 @@ export interface DeployV2Request {
       nodeNs: number;
       nodeId: string | number;
       nodeIdType: number;
+      relativePath?: string[];
     }[];
   }[];
 }
@@ -103,6 +104,8 @@ export interface SelectedNode {
   nodeId: string | number;
   nodeIdType: number;
   path?: string;
+  /** Path segments relative to root device, e.g. ["SubFolder", "TargetNode"] or ["Temperature"] */
+  relativePath?: string[];
 }
 
 export interface ConnectionTestResult {
@@ -116,6 +119,8 @@ export interface ConnectionTestResult {
 export interface ColumnDef {
   displayName: string;
   nodeCategory: string;
+  /** Path segments relative to root device, e.g. ["SubFolder", "TargetNode"] or ["Temperature"] */
+  relativePath?: string[];
 }
 
 /** A parent node that produces one row per poll cycle */
@@ -135,9 +140,11 @@ export interface PipelineGroup {
   rowSources: RowSource[];
 }
 
-/** Internal selection entry tracking both the leaf node and its parent */
+/** Internal selection entry tracking both the leaf node and its root device ancestor */
 export interface V2Selection {
   node: SelectedNode;
+  /** The root device (row source). For direct children this is the immediate parent;
+   *  for nested nodes this is the deepest object ancestor whose parent is a folder. */
   parentNode: {
     displayName: string;
     nodeNs: number;

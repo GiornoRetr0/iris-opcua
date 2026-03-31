@@ -446,8 +446,21 @@ ClassMethod DeployV2(pBody As %DynamicObject, Output pResult As %DynamicObject) 
 		Quit:$$$ISERR(tSC)
 
 		// --- Generate and compile v2 DataSource class ---
-		set tSC = ..GenerateDataSourceTextV2(pBody, tColumns, tRowSources, tClassName, tDataSourceName, .tDSText)
+		set tSC = ..GenerateDataSourceTextV2(pBody, tColumns, tRowSources, tClassName, tDataSourceName, .tDSText, .tSerialClasses)
 		Quit:$$$ISERR(tSC)
+
+		// Compile serial object classes first (they must exist before the main class references them)
+		for iSC=1:1:$Get(tSerialClasses, 0) {
+			set tSerialClassName = $LI(tSerialClasses(iSC), 1)
+			set tSerialText = $LI(tSerialClasses(iSC), 2)
+			set tSC = ..WriteAndCompile(tSerialClassName, tSerialText)
+			if $$$ISERR(tSC) {
+				set pResult.error = "Serial class '"_tSerialClassName_"' compilation failed: "_$System.Status.GetErrorText(tSC)
+				set tSC = $$$OK
+				Quit
+			}
+		}
+		Quit:$Get(pResult.error)'=""
 
 		set tSC = ..WriteAndCompile(tClassName, tDSText)
 		if $$$ISERR(tSC) {
@@ -509,7 +522,8 @@ ClassMethod DeployV2(pBody As %DynamicObject, Output pResult As %DynamicObject) 
 }
 
 /// Generate v2 DataSource class text with NodePath + relative column names.
-ClassMethod GenerateDataSourceTextV2(pBody As %DynamicObject, pColumns As %DynamicArray, pRowSources As %DynamicArray, pClassName As %String, pDataSourceName As %String, Output pText As %String) As %Status [ Private ]
+/// Supports nested columns via %SerialObject classes for sub-folders.
+ClassMethod GenerateDataSourceTextV2(pBody As %DynamicObject, pColumns As %DynamicArray, pRowSources As %DynamicArray, pClassName As %String, pDataSourceName As %String, Output pText As %String, Output pSerialClasses) As %Status [ Private ]
 {
 	#dim tSC As %Status = $$$OK
 	Try {
@@ -533,7 +547,48 @@ ClassMethod GenerateDataSourceTextV2(pBody As %DynamicObject, pColumns As %Dynam
 			}
 		}
 
-		// Build class text
+		// Separate flat columns from nested columns and build folder tree
+		// folderTree(folderName, subPath...) tracks nested hierarchy
+		// flatColumns(i) = column object for flat (depth-1) columns
+		kill tFolderTree, tFolderColumns
+		set tHasNesting = 0
+		for i=0:1:pColumns.%Size()-1 {
+			set tCol = pColumns.%Get(i)
+			set tRelPath = tCol.%Get("relativePath")
+			if '$IsObject($Get(tRelPath)) || (tRelPath.%Size() <= 1) {
+				// Flat column (no nesting)
+				continue
+			}
+			// Nested: first segment is folder name, rest is sub-path
+			set tFolderName = tRelPath.%Get(0)
+			set tHasNesting = 1
+			// Track all leaf columns under this folder
+			if '$Data(tFolderColumns(tFolderName)) {
+				set tFolderColumns(tFolderName) = ##class(%DynamicArray).%New()
+			}
+			// Build a sub-column object with relativePath = remaining segments
+			set tSubCol = ##class(%DynamicObject).%New()
+			set tSubCol.displayName = tCol.%Get("displayName")
+			set tSubCol.inferredType = tCol.%Get("inferredType")
+			set tSubRelPath = ##class(%DynamicArray).%New()
+			for j=1:1:tRelPath.%Size()-1 {
+				do tSubRelPath.%Push(tRelPath.%Get(j))
+			}
+			set tSubCol.relativePath = tSubRelPath
+			// Use the leaf display name as the sub-column's displayName
+			set tSubCol.leafName = tRelPath.%Get(tRelPath.%Size()-1)
+			do tFolderColumns(tFolderName).%Push(tSubCol)
+		}
+
+		// Generate serial object classes for each folder (if any nesting exists)
+		kill pSerialClasses
+		set pSerialClasses = 0
+		if tHasNesting {
+			set tSC = ..GenerateSerialClasses(pClassName, tDefaultNS, .tFolderColumns, .pSerialClasses)
+			Quit:$$$ISERR(tSC)
+		}
+
+		// Build main class text
 		set tNL = $Char(10)
 		set pText = "/// Auto-generated OPC UA DataSource class (v2 row-source model)."_tNL
 		set pText = pText_"Class "_pClassName_" Extends (%Persistent, OPCUA.DataSource.Definition)"_tNL
@@ -553,31 +608,51 @@ ClassMethod GenerateDataSourceTextV2(pBody As %DynamicObject, pColumns As %Dynam
 		set pText = pText_tNL
 		set pText = pText_"Property SourceTimeStamp As %TimeStamp;"_tNL
 
-		// Generate column properties with plain types and relative OPCUANODENAME
+		// Track which folders we've already emitted as serial object properties
+		kill tEmittedFolders
+
+		// Generate properties: flat columns + serial object properties for folders
 		for i=0:1:pColumns.%Size()-1 {
 			set tCol = pColumns.%Get(i)
 			set tDisplayName = tCol.%Get("displayName")
 			set tInferredType = tCol.%Get("inferredType")
+			set tRelPath = tCol.%Get("relativePath")
 
-			// Map OPCUA.Types.*DataValue to plain IRIS types
-			set tType = ..MapToPlainType(tInferredType)
+			// Check if nested
+			set tIsNested = $IsObject($Get(tRelPath)) && (tRelPath.%Size() > 1)
+			if tIsNested {
+				// Emit the serial object property for this folder (once per folder)
+				set tFolderName = tRelPath.%Get(0)
+				if $Data(tEmittedFolders(tFolderName)) continue
+				set tEmittedFolders(tFolderName) = 1
 
-			// Use the first row source's corresponding child node namespace
-			set tChildNS = tDefaultNS
-			if i < tChildren.%Size() {
-				set tChildNS = +tChildren.%Get(i).%Get("nodeNs")
+				set tSerialClassName = pClassName_"."_tFolderName_"Type"
+				set tPropName = ##class(OPCUA.DataSource.Generator).SanitizePropertyName(tFolderName, .tUsedNames)
+				set pText = pText_tNL
+				set pText = pText_"Property "_tPropName_" As "_tSerialClassName_"(OPCUANODENAME = """_tFolderName_""");"_tNL
+			} else {
+				// Flat column
+				set tType = ..MapToPlainType(tInferredType)
+
+				// Use the first row source's corresponding child node namespace
+				set tChildNS = tDefaultNS
+				if i < tChildren.%Size() {
+					set tChildNS = +tChildren.%Get(i).%Get("nodeNs")
+				}
+
+				set tLeafName = tDisplayName
+				if $IsObject($Get(tRelPath)) && (tRelPath.%Size() = 1) {
+					set tLeafName = tRelPath.%Get(0)
+				}
+
+				set tPropName = ##class(OPCUA.DataSource.Generator).SanitizePropertyName(tLeafName, .tUsedNames)
+				set pText = pText_tNL
+				set pText = pText_"Property "_tPropName_" As "_tType_"(OPCUANODENAME = """_tLeafName_""""
+				if tChildNS '= tDefaultNS {
+					set pText = pText_", OPCUANAMESPACE = """_tChildNS_""""
+				}
+				set pText = pText_");"_tNL
 			}
-
-			// Sanitize property name
-			set tPropName = ##class(OPCUA.DataSource.Generator).SanitizePropertyName(tDisplayName, .tUsedNames)
-
-			// Use the display name as the relative OPCUANODENAME (browse name)
-			set pText = pText_tNL
-			set pText = pText_"Property "_tPropName_" As "_tType_"(OPCUANODENAME = """_tDisplayName_""""
-			if tChildNS '= tDefaultNS {
-				set pText = pText_", OPCUANAMESPACE = """_tChildNS_""""
-			}
-			set pText = pText_");"_tNL
 		}
 
 		set pText = pText_tNL_"}"_tNL
@@ -588,9 +663,58 @@ ClassMethod GenerateDataSourceTextV2(pBody As %DynamicObject, pColumns As %Dynam
 	Quit tSC
 }
 
+/// Generate %SerialObject classes for nested folder columns.
+/// Each folder becomes a separate serial class named {MainClass}.{FolderName}Type.
+/// Returns serial classes as an array: pSerialClasses(n) = $LB(className, classText)
+ClassMethod GenerateSerialClasses(pMainClassName As %String, pDefaultNS As %Integer, ByRef pFolderColumns, Output pSerialClasses) As %Status [ Private ]
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set pSerialClasses = 0
+		set tNL = $Char(10)
+
+		set tFolderName = ""
+		for {
+			set tFolderName = $Order(pFolderColumns(tFolderName))
+			if tFolderName = "" Quit
+
+			set tSerialClassName = pMainClassName_"."_tFolderName_"Type"
+			set tColumns = pFolderColumns(tFolderName)
+
+			set tText = "/// Auto-generated serial object for nested OPC UA folder: "_tFolderName_tNL
+			set tText = tText_"Class "_tSerialClassName_" Extends %SerialObject [ PropertyClass = OPCUA.DataSource.PropertyClass ]"_tNL
+			set tText = tText_"{"_tNL
+
+			kill tUsedNames
+			for i=0:1:tColumns.%Size()-1 {
+				set tSubCol = tColumns.%Get(i)
+				set tLeafName = tSubCol.%Get("leafName")
+				set tInferredType = tSubCol.%Get("inferredType")
+				set tType = ..MapToPlainType(tInferredType)
+				set tPropName = ##class(OPCUA.DataSource.Generator).SanitizePropertyName(tLeafName, .tUsedNames)
+
+				set tText = tText_tNL
+				set tText = tText_"Property "_tPropName_" As "_tType_"(OPCUANODENAME = """_tLeafName_""");"_tNL
+			}
+
+			set tText = tText_tNL_"}"_tNL
+
+			set pSerialClasses = pSerialClasses + 1
+			set pSerialClasses(pSerialClasses) = $LB(tSerialClassName, tText)
+		}
+
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit tSC
+}
+
 /// Store row source metadata in ^OPCUA.RowSource global for runtime use by row-source services.
-/// Computes a column mask per row source: which union columns each RS has (by matching childNode displayNames).
+/// Computes a column mask per row source: which union columns each RS has (by matching childNode relativePath keys).
 /// Missing columns will be NULL at runtime.
+/// Stores: $LB(rsCount, colCount, rsList, columnPaths, nestingSpec)
+///   columnPaths = $LB("Temperature", "Humidity", "SubFolder/TargetNode") — leaf column path keys
+///   nestingSpec = $LB($LB("leaf",1), $LB("leaf",2), $LB("serial",3,$LB($LB("leaf",1)))) — storage layout
 ClassMethod StoreRowSourceMetadata(pClassName As %String, pRowSources As %DynamicArray, pColumns As %DynamicArray) As %Status
 {
 	#dim tSC As %Status = $$$OK
@@ -598,15 +722,26 @@ ClassMethod StoreRowSourceMetadata(pClassName As %String, pRowSources As %Dynami
 		set tRSCount = pRowSources.%Size()
 		set tColCount = pColumns.%Size()
 
-		// Build ordered column name list for matching
+		// Build ordered column path key list for matching (uses relativePath if available)
+		set tColumnPaths = ""
 		for c=0:1:tColCount-1 {
-			set tColNames(c) = pColumns.%Get(c).%Get("displayName")
+			set tCol = pColumns.%Get(c)
+			set tRelPath = tCol.%Get("relativePath")
+			if $IsObject($Get(tRelPath)) && (tRelPath.%Size() > 0) {
+				// Build path key from relativePath array: "SubFolder/TargetNode"
+				set tPathKey = ""
+				for rp=0:1:tRelPath.%Size()-1 {
+					set:tPathKey'="" tPathKey = tPathKey_"/"
+					set tPathKey = tPathKey_tRelPath.%Get(rp)
+				}
+			} else {
+				set tPathKey = tCol.%Get("displayName")
+			}
+			set tColNames(c) = tPathKey
+			set tColumnPaths = tColumnPaths _ $LB(tPathKey)
 		}
 
 		// Build row source list with column masks
-		// Each RS entry: $LB(path, ns, id, idType, columnMask, absNodeRefs)
-		//   columnMask = $LB(1,0,1,...) — M entries, 1=has column, 0=NULL
-		//   absNodeRefs = $LB($LB(ns,id,type),...) — only for mask=1 columns, in mask order
 		set tRSList = ""
 		for i=0:1:tRSCount-1 {
 			set tRS = pRowSources.%Get(i)
@@ -615,12 +750,22 @@ ClassMethod StoreRowSourceMetadata(pClassName As %String, pRowSources As %Dynami
 			set tNodeId = tRS.%Get("nodeId")
 			set tNodeIdType = +tRS.%Get("nodeIdType")
 
-			// Build a lookup: childNode displayName → child object
+			// Build a lookup: childNode relativePath key → child object
 			set tChildren = tRS.%Get("childNodes")
 			kill tChildMap
 			for j=0:1:tChildren.%Size()-1 {
 				set tChild = tChildren.%Get(j)
-				set tChildMap(tChild.%Get("displayName")) = tChild
+				set tChildRelPath = tChild.%Get("relativePath")
+				if $IsObject($Get(tChildRelPath)) && (tChildRelPath.%Size() > 0) {
+					set tChildKey = ""
+					for rp=0:1:tChildRelPath.%Size()-1 {
+						set:tChildKey'="" tChildKey = tChildKey_"/"
+						set tChildKey = tChildKey_tChildRelPath.%Get(rp)
+					}
+				} else {
+					set tChildKey = tChild.%Get("displayName")
+				}
+				set tChildMap(tChildKey) = tChild
 			}
 
 			// Build column mask and abs node refs by iterating union columns in order
@@ -628,12 +773,10 @@ ClassMethod StoreRowSourceMetadata(pClassName As %String, pRowSources As %Dynami
 			set tAbsNodeRefs = ""
 			for c=0:1:tColCount-1 {
 				if $Data(tChildMap(tColNames(c))) {
-					// This row source has this column
 					set tChild = tChildMap(tColNames(c))
 					set tMask = tMask _ $LB(1)
 					set tAbsNodeRefs = tAbsNodeRefs _ $LB($LB(+tChild.%Get("nodeNs"), tChild.%Get("nodeId"), +tChild.%Get("nodeIdType")))
 				} else {
-					// Missing column → NULL at runtime
 					set tMask = tMask _ $LB(0)
 				}
 			}
@@ -641,8 +784,48 @@ ClassMethod StoreRowSourceMetadata(pClassName As %String, pRowSources As %Dynami
 			set tRSList = tRSList _ $LB($LB(tPath, tNodeNs, tNodeId, tNodeIdType, tMask, tAbsNodeRefs))
 		}
 
-		// Store: $LB(rowSourceCount, columnCount, rowSourceList)
-		set ^OPCUA.RowSource(pClassName) = $LB(tRSCount, tColCount, tRSList)
+		// Build nesting spec: describes how flat leaf values map to the nested $LB storage layout
+		// Each entry is either $LB("leaf", leafIndex) for flat columns,
+		// or $LB("serial", storageSlot, innerSpec) for serial object groups
+		set tNestingSpec = ""
+		set tLeafIdx = 0
+		kill tProcessedFolders
+		set tHasNesting = 0
+		for c=0:1:tColCount-1 {
+			set tPath = tColNames(c)
+			if tPath [ "/" {
+				// Nested column
+				set tFolderName = $Piece(tPath, "/", 1)
+				set tHasNesting = 1
+				if '$Data(tProcessedFolders(tFolderName)) {
+					// Gather all leaf columns under this folder
+					set tProcessedFolders(tFolderName) = 1
+					set tInnerSpec = ""
+					set tInnerIdx = 0
+					for c2=0:1:tColCount-1 {
+						set tPath2 = tColNames(c2)
+						if $Piece(tPath2, "/", 1) = tFolderName {
+							set tLeafIdx = tLeafIdx + 1
+							set tInnerIdx = tInnerIdx + 1
+							set tInnerSpec = tInnerSpec _ $LB($LB("leaf", tLeafIdx))
+						}
+					}
+					set tNestingSpec = tNestingSpec _ $LB($LB("serial", tFolderName, tInnerSpec))
+				}
+			} else {
+				// Flat column
+				set tLeafIdx = tLeafIdx + 1
+				set tNestingSpec = tNestingSpec _ $LB($LB("leaf", tLeafIdx))
+			}
+		}
+
+		// Store: $LB(rowSourceCount, columnCount, rowSourceList, columnPaths, nestingSpec)
+		if tHasNesting {
+			set ^OPCUA.RowSource(pClassName) = $LB(tRSCount, tColCount, tRSList, tColumnPaths, tNestingSpec)
+		} else {
+			// Backward compatible: no extra elements for flat pipelines
+			set ^OPCUA.RowSource(pClassName) = $LB(tRSCount, tColCount, tRSList)
+		}
 
 	} Catch (e) {
 		set tSC = e.AsStatus()

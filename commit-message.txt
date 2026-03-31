@@ -1,0 +1,24 @@
+feat: support nested OPC UA nodes via %SerialObject classes in pipeline wizard
+
+When users select nodes at different depths within the same device
+(e.g. AC1/Temperature + AC1/SubFolder/TargetNode), the wizard now
+groups them into a single pipeline instead of splitting them apart.
+
+Sub-folders are modeled as %SerialObject classes embedded in the
+main DataSource class, projecting to SQL as ParentProp_ChildProp
+columns. Devices missing a sub-folder get NULLs via column masks.
+
+Frontend:
+- Root device resolution walks parentRef chain to find the deepest
+  object ancestor under a folder, replacing immediate-parent grouping
+- Schema comparison uses relativePath-based column identifiers
+- Deploy payload includes relativePath for nested column mapping
+
+Backend:
+- DeployService generates and compiles serial object classes before
+  the main persistent class
+- StoreRowSourceMetadata stores columnPaths and nestingSpec in
+  ^OPCUA.RowSource for runtime nested $LB assembly
+- Projection.ProcessObj recurses into %SerialObject properties
+- Both RowSource services build nested $LB when nestingSpec is present
+- PipelineService Edit/Delete handle serial subclass lifecycle

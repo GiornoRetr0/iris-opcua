@@ -684,11 +684,14 @@ export class PipelineWizardComponent {
   pipelineGroups = computed<PipelineGroup[]>(() => {
     const groups = this.parentGroups();
 
-    // Build entries: one per parent group
+    // Build entries: one per parent group. Use relativePath as column identifier to support nesting.
     const entries: { columnNames: Set<string>; rowSource: RowSource }[] = [];
     for (const [, group] of groups) {
       entries.push({
-        columnNames: new Set(group.children.map((c) => c.node.displayName)),
+        // Use relativePath joined by '/' as the column key (e.g. "Temperature" or "SubFolder/TargetNode")
+        columnNames: new Set(group.children.map((c) =>
+          c.node.relativePath ? c.node.relativePath.join('/') : c.node.displayName
+        )),
         rowSource: {
           displayName: group.parent.displayName,
           nodeNs: group.parent.nodeNs,
@@ -750,23 +753,27 @@ export class PipelineWizardComponent {
 
     // Auto-discover: for each row source, check its parent tree node's loaded children
     // for any union columns the user didn't explicitly select. If the node exists, include it.
+    // Note: auto-discovery only works for direct children (flat columns). Nested columns must be explicitly selected.
     const treeRoots = this.treeRoots();
     for (const cluster of clusters) {
       for (const rs of cluster.rowSources) {
         const parentTreeNode = this.findTreeNode(treeRoots, rs.nodeNs, rs.nodeId);
         if (!parentTreeNode?.children) continue;
 
-        const existingNames = new Set(rs.childNodes.map((c) => c.displayName));
+        const existingKeys = new Set(rs.childNodes.map((c) =>
+          c.relativePath ? c.relativePath.join('/') : c.displayName
+        ));
         for (const colName of cluster.columnNames) {
-          if (existingNames.has(colName)) continue;
-          // Check if this parent actually has a child variable with this name
+          if (existingKeys.has(colName)) continue;
+          // Only auto-discover flat (non-nested) columns
+          if (colName.includes('/')) continue;
           const child = parentTreeNode.children.find(
             (c) => c.displayName === colName && c.nodeCategory === 'variable'
           );
           if (child) {
             rs.childNodes = [
               ...rs.childNodes,
-              { displayName: child.displayName, nodeNs: child.nodeNs, nodeId: child.nodeId, nodeIdType: child.nodeIdType },
+              { displayName: child.displayName, nodeNs: child.nodeNs, nodeId: child.nodeId, nodeIdType: child.nodeIdType, relativePath: [child.displayName] },
             ];
           }
         }
@@ -778,7 +785,11 @@ export class PipelineWizardComponent {
       const sortedColumns = [...cluster.columnNames].sort();
       return {
         schemaKey: sortedColumns.join('|'),
-        columns: sortedColumns.map((name) => ({ displayName: name, nodeCategory: 'variable' })),
+        columns: sortedColumns.map((name) => ({
+          displayName: name,
+          nodeCategory: 'variable',
+          relativePath: name.split('/'),
+        })),
         rowSources: cluster.rowSources,
       };
     });
@@ -887,13 +898,15 @@ export class PipelineWizardComponent {
             };
             for (const child of rs.childNodes || []) {
               const key = `${child.nodeNs}:${child.nodeId}`;
+              const relativePath = child.relativePath || [child.displayName];
               selections.set(key, {
                 node: {
                   displayName: child.displayName,
                   nodeNs: child.nodeNs,
                   nodeId: child.nodeId,
                   nodeIdType: child.nodeIdType,
-                  path: `${rs.path}/${child.displayName}`,
+                  path: `${rs.path}/${relativePath.join('/')}`,
+                  relativePath,
                 },
                 parentNode: parentInfo,
               });
@@ -1037,7 +1050,7 @@ export class PipelineWizardComponent {
       if (this.v2Selections().has(key)) {
         this.v2Selections.update((m) => { const nm = new Map(m); nm.delete(key); return nm; });
       } else {
-        const parentInfo = this.resolveParentInfo(node);
+        const { rootDevice, relativePath } = this.resolveRootDevice(node);
         this.v2Selections.update((m) => {
           const nm = new Map(m);
           nm.set(key, {
@@ -1047,8 +1060,9 @@ export class PipelineWizardComponent {
               nodeId: node.nodeId,
               nodeIdType: node.nodeIdType,
               path: this.buildNodePath(node),
+              relativePath,
             },
-            parentNode: parentInfo,
+            parentNode: rootDevice,
           });
           return nm;
         });
@@ -1087,18 +1101,12 @@ export class PipelineWizardComponent {
 
   private selectAllVariableChildren(parentNode: TreeNode): void {
     if (!parentNode.children) return;
-    const parentInfo = {
-      displayName: parentNode.displayName,
-      nodeNs: parentNode.nodeNs,
-      nodeId: parentNode.nodeId,
-      nodeIdType: parentNode.nodeIdType,
-      path: this.buildNodePath(parentNode),
-    };
 
     this.v2Selections.update((m) => {
       const nm = new Map(m);
       for (const child of parentNode.children!) {
         if (child.nodeCategory === 'variable') {
+          const { rootDevice, relativePath } = this.resolveRootDevice(child);
           nm.set(this.nodeKey(child), {
             node: {
               displayName: child.displayName,
@@ -1106,8 +1114,9 @@ export class PipelineWizardComponent {
               nodeId: child.nodeId,
               nodeIdType: child.nodeIdType,
               path: this.buildNodePath(child),
+              relativePath,
             },
-            parentNode: parentInfo,
+            parentNode: rootDevice,
           });
         }
       }
@@ -1126,24 +1135,67 @@ export class PipelineWizardComponent {
     });
   }
 
-  private resolveParentInfo(node: TreeNode): V2Selection['parentNode'] {
+  /**
+   * Resolve the "root device" ancestor and the relative path from it to the given leaf node.
+   * The root device is the deepest object-category ancestor whose parent is either a folder or the tree root.
+   * For direct children of an object (e.g. AC1/Temperature), rootDevice=AC1, relativePath=["Temperature"].
+   * For nested children (e.g. AC1/SubFolder/TargetNode), rootDevice=AC1, relativePath=["SubFolder","TargetNode"].
+   */
+  private resolveRootDevice(node: TreeNode): { rootDevice: V2Selection['parentNode']; relativePath: string[] } {
+    // Walk up from the node, collecting path segments
+    const pathFromLeaf: string[] = [node.displayName];
+    let current = node.parentRef;
+    let rootDevice: TreeNode | undefined;
+
+    while (current) {
+      if (!current.parentRef || current.parentRef.nodeCategory === 'folder') {
+        // current is the root device: deepest object whose parent is a folder (or tree root)
+        rootDevice = current;
+        break;
+      }
+      // current is an intermediate object (subfolder) — add to relative path
+      pathFromLeaf.unshift(current.displayName);
+      current = current.parentRef;
+    }
+
+    if (rootDevice) {
+      return {
+        rootDevice: {
+          displayName: rootDevice.displayName,
+          nodeNs: rootDevice.nodeNs,
+          nodeId: rootDevice.nodeId,
+          nodeIdType: rootDevice.nodeIdType,
+          path: this.buildNodePath(rootDevice),
+        },
+        relativePath: pathFromLeaf,
+      };
+    }
+
+    // Fallback: no object ancestor found (all folders) — use immediate parent
     const parent = node.parentRef;
     if (parent) {
       return {
-        displayName: parent.displayName,
-        nodeNs: parent.nodeNs,
-        nodeId: parent.nodeId,
-        nodeIdType: parent.nodeIdType,
-        path: this.buildNodePath(parent),
+        rootDevice: {
+          displayName: parent.displayName,
+          nodeNs: parent.nodeNs,
+          nodeId: parent.nodeId,
+          nodeIdType: parent.nodeIdType,
+          path: this.buildNodePath(parent),
+        },
+        relativePath: [node.displayName],
       };
     }
-    // Fallback: the node sits directly under the root, use a synthetic root parent
+
+    // Ultimate fallback: synthetic root
     return {
-      displayName: 'Objects',
-      nodeNs: 0,
-      nodeId: 85,
-      nodeIdType: 0,
-      path: 'Objects',
+      rootDevice: {
+        displayName: 'Objects',
+        nodeNs: 0,
+        nodeId: 85,
+        nodeIdType: 0,
+        path: 'Objects',
+      },
+      relativePath: [node.displayName],
     };
   }
 
@@ -1324,6 +1376,7 @@ export class PipelineWizardComponent {
       pipelineVersion: 2,
       columns: group.columns.map((c) => ({
         displayName: c.displayName,
+        relativePath: c.relativePath || [c.displayName],
         inferredType: undefined, // backend will infer
       })),
       rowSources: group.rowSources.map((rs) => ({
@@ -1337,6 +1390,7 @@ export class PipelineWizardComponent {
           nodeNs: cn.nodeNs,
           nodeId: cn.nodeId,
           nodeIdType: cn.nodeIdType,
+          relativePath: cn.relativePath || [cn.displayName],
         })),
       })),
     };

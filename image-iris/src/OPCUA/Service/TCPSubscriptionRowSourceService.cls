@@ -33,6 +33,9 @@ Property ActiveCounts As %List [ Private ];
 /// Total number of spec entries (sum of active counts across all row sources)
 Property TotalSpecEntries As %Integer [ Private ];
 
+/// Nesting specification for building nested $LB storage (empty = flat layout)
+Property NestingSpec As %List [ Private ];
+
 Method OnInit() As %Status
 {
 	#dim tSC As %Status = $$$OK
@@ -54,6 +57,12 @@ Method OnInit() As %Status
 		set ..RowSourceCount = $LI(tRSData, 1)
 		set ..ColumnCount = $LI(tRSData, 2)
 		set tRSList = $LI(tRSData, 3)
+
+		// Load nesting spec if present (position 5)
+		set ..NestingSpec = ""
+		if $LL(tRSData) >= 5 {
+			set ..NestingSpec = $LI(tRSData, 5)
+		}
 
 		if ..RowSourceCount < 1 || (..ColumnCount < 1) {
 			set tSC = $$$ERROR($$$GeneralError, "Invalid row source metadata: "_..RowSourceCount_" row sources, "_..ColumnCount_" columns")
@@ -141,11 +150,14 @@ Method OnProcessInput(ByRef pInputAsList As %RegisteredObject, Output pOutput As
 			set tSourceTS = ""
 			set tGotTimestamp = 0
 
-			set tValues = ""
+			// Extract flat leaf values from adapter result
+			kill tLeafValues
+			set tLeafIdx = 0
 			for iCol=1:1:..ColumnCount {
 				if +$LI(tMask, iCol) {
 					set tResultIdx = tResultIdx + 1
 					set tDV = $LI(pInputAsList, tResultIdx)
+					set tLeafIdx = tLeafIdx + 1
 
 					if $ListValid(tDV) && ($LL(tDV) >= 4) {
 						if 'tGotTimestamp {
@@ -153,13 +165,24 @@ Method OnProcessInput(ByRef pInputAsList As %RegisteredObject, Output pOutput As
 							set tServerTS = $LI(tDV, 2)
 							set tGotTimestamp = 1
 						}
-						set tValues = tValues _ $LB($LI(tDV, 4))
+						set tLeafValues(tLeafIdx) = $LI(tDV, 4)
 					} else {
-						set tValues = tValues _ $LB(tDV)
+						set tLeafValues(tLeafIdx) = tDV
 					}
 				} else {
-					set tValues = tValues _ $LB("")
+					set tLeafIdx = tLeafIdx + 1
+					set tLeafValues(tLeafIdx) = ""
 				}
+			}
+
+			// Build the values portion
+			set tValues = ""
+			if ..NestingSpec = "" {
+				for v=1:1:tLeafIdx {
+					set tValues = tValues _ $LB($Get(tLeafValues(v)))
+				}
+			} else {
+				set tValues = ##class(OPCUA.Service.TCPPollingRowSourceService).BuildNestedValues(..NestingSpec, .tLeafValues)
 			}
 
 			set tRowData = $LB("", $LI(..RowSourcePaths, iRS), tServerTS, tSourceTS) _ tValues

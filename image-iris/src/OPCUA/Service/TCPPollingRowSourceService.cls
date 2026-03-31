@@ -33,6 +33,9 @@ Property ActiveCounts As %List [ Private ];
 /// Total number of spec entries (sum of active counts across all row sources)
 Property TotalSpecEntries As %Integer [ Private ];
 
+/// Nesting specification for building nested $LB storage (empty = flat layout)
+Property NestingSpec As %List [ Private ];
+
 Method OnInit() As %Status
 {
 	#dim tSC As %Status = $$$OK
@@ -54,6 +57,12 @@ Method OnInit() As %Status
 		set ..RowSourceCount = $LI(tRSData, 1)
 		set ..ColumnCount = $LI(tRSData, 2)
 		set tRSList = $LI(tRSData, 3)
+
+		// Load nesting spec if present (position 5)
+		set ..NestingSpec = ""
+		if $LL(tRSData) >= 5 {
+			set ..NestingSpec = $LI(tRSData, 5)
+		}
 
 		if ..RowSourceCount < 1 || (..ColumnCount < 1) {
 			set tSC = $$$ERROR($$$GeneralError, "Invalid row source metadata: "_..RowSourceCount_" row sources, "_..ColumnCount_" columns")
@@ -145,29 +154,42 @@ Method OnProcessInput(ByRef pInputAsList As %RegisteredObject, Output pOutput As
 			set tSourceTS = ""
 			set tGotTimestamp = 0
 
-			// Build values for M union columns: active → extract from result, inactive → NULL
-			set tValues = ""
+			// Extract flat leaf values from adapter result (ordered by mask)
+			// First pass: collect all leaf values and timestamps
+			kill tLeafValues
+			set tLeafIdx = 0
 			for iCol=1:1:..ColumnCount {
 				if +$LI(tMask, iCol) {
-					// Active column: extract from poll result
 					set tResultIdx = tResultIdx + 1
 					set tDV = $LI(pInputAsList, tResultIdx)
+					set tLeafIdx = tLeafIdx + 1
 
-					// DataValue: $LB(sourceTS, serverTS, status, value)
 					if $ListValid(tDV) && ($LL(tDV) >= 4) {
 						if 'tGotTimestamp {
 							set tSourceTS = $LI(tDV, 1)
 							set tServerTS = $LI(tDV, 2)
 							set tGotTimestamp = 1
 						}
-						set tValues = tValues _ $LB($LI(tDV, 4))
+						set tLeafValues(tLeafIdx) = $LI(tDV, 4)
 					} else {
-						set tValues = tValues _ $LB(tDV)
+						set tLeafValues(tLeafIdx) = tDV
 					}
 				} else {
-					// Missing column: NULL
-					set tValues = tValues _ $LB("")
+					set tLeafIdx = tLeafIdx + 1
+					set tLeafValues(tLeafIdx) = ""
 				}
+			}
+
+			// Build the values portion of the row data
+			set tValues = ""
+			if ..NestingSpec = "" {
+				// No nesting: flat $LB as before
+				for v=1:1:tLeafIdx {
+					set tValues = tValues _ $LB($Get(tLeafValues(v)))
+				}
+			} else {
+				// Nesting: assemble nested $LB from nesting spec
+				set tValues = ..BuildNestedValues(..NestingSpec, .tLeafValues)
 			}
 
 			// Assemble: $LB("", nodePath, serverTS, sourceTS, val1, val2, ..., valM)
@@ -185,6 +207,47 @@ Method OnProcessInput(ByRef pInputAsList As %RegisteredObject, Output pOutput As
 	}
 
 	return tSC
+}
+
+/// Build a nested $LB from the nesting spec and flat leaf values.
+/// For "leaf" entries, inserts the leaf value directly.
+/// For "serial" entries, builds an inner $LB for the serial object's properties.
+ClassMethod BuildNestedValues(pNestingSpec As %List, ByRef pLeafValues) As %List
+{
+	set tResult = ""
+	for i=1:1:$LL(pNestingSpec) {
+		set tEntry = $LI(pNestingSpec, i)
+		set tType = $LI(tEntry, 1)
+
+		if tType = "leaf" {
+			set tLeafIdx = $LI(tEntry, 2)
+			set tResult = tResult _ $LB($Get(pLeafValues(tLeafIdx)))
+		} elseif tType = "serial" {
+			// Build inner $LB for the serial object
+			set tInnerSpec = $LI(tEntry, 3)
+			set tAllNull = 1
+			for j=1:1:$LL(tInnerSpec) {
+				set tInner = $LI(tInnerSpec, j)
+				set tInnerLeafIdx = $LI(tInner, 2)
+				if $Get(pLeafValues(tInnerLeafIdx)) '= "" {
+					set tAllNull = 0
+					quit
+				}
+			}
+			if tAllNull {
+				set tResult = tResult _ $LB("")
+			} else {
+				set tInnerLB = ""
+				for j=1:1:$LL(tInnerSpec) {
+					set tInner = $LI(tInnerSpec, j)
+					set tInnerLeafIdx = $LI(tInner, 2)
+					set tInnerLB = tInnerLB _ $LB($Get(pLeafValues(tInnerLeafIdx)))
+				}
+				set tResult = tResult _ $LB(tInnerLB)
+			}
+		}
+	}
+	quit tResult
 }
 
 }

@@ -138,10 +138,18 @@ ClassMethod ProcessObj(oObj As %CompiledClass, pOPCUADefaultNamespace As %String
             Set tSC = ..CreateConfigSpecEntry(2, pPropertyPath_"."_oProp.Name, tOPCUANamespace, tNodeName, tNodeAttributeId, .lConfigSpecEntry)
             Quit:$$$ISERR(tSC)
         }
-        Else 
+        ElseIf $classmethod(oProp.Type, "%Extends", "%SerialObject")
+        {
+            // Pipeline-generated serial object for nested OPC UA sub-folders.
+            // Recurse into the serial class to process its properties.
+            Set oPropTypeClass = ##class(%Dictionary.CompiledClass).%OpenId(oProp.Type)
+            Set tSC = ..ProcessObj(oPropTypeClass, tOPCUANamespace, tNodeName, pPropertyPath_"."_oProp.Name, .lConfigSpecEntry)
+            Quit:$$$ISERR(tSC)
+        }
+        Else
         {
             Set tSC = $$$ERROR(5001, "Property "_oProp.Name_" has an invalid type for OPCUA: "_oProp.Type)
-            Quit    
+            Quit
         }
 
         Set lConfigSpec=lConfigSpec_$LB(lConfigSpecEntry)
