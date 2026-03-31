@@ -573,8 +573,8 @@ import {
         <div class="flex items-center gap-1.5 p-1 rounded cursor-pointer transition-colors"
              [class]="isNodeSelected(node) ? 'bg-primary/5 border-y border-primary/10' : isNodePartiallySelected(node) ? 'bg-primary/3' : 'hover:bg-white/50'"
              (click)="onWizardNodeClick(node)">
-          <!-- Checkbox for selectable nodes (variables & objects) -->
-          @if (node.nodeCategory === 'variable' || node.nodeCategory === 'object') {
+          <!-- Checkbox for selectable nodes (variables, objects, and folders) -->
+          @if (node.nodeCategory === 'variable' || node.nodeCategory === 'object' || node.nodeCategory === 'folder') {
             <input type="checkbox" [checked]="isNodeSelected(node)"
                    [indeterminate]="isNodePartiallySelected(node)"
                    (click)="$event.stopPropagation()"
@@ -1025,7 +1025,7 @@ export class PipelineWizardComponent {
   // --- Selection Logic ---
 
   isNodeSelected(node: TreeNode): boolean {
-    if (node.nodeCategory === 'object') {
+    if (node.nodeCategory === 'object' || node.nodeCategory === 'folder') {
       // Object is "selected" if all its variable children are selected
       if (!node.children || node.children.length === 0) return false;
       const variableChildren = node.children.filter((c) => c.nodeCategory === 'variable');
@@ -1037,7 +1037,7 @@ export class PipelineWizardComponent {
   }
 
   isNodePartiallySelected(node: TreeNode): boolean {
-    if (node.nodeCategory !== 'object') return false;
+    if (node.nodeCategory !== 'object' && node.nodeCategory !== 'folder') return false;
     if (!node.children || node.children.length === 0) return false;
     const variableChildren = node.children.filter((c) => c.nodeCategory === 'variable');
     if (variableChildren.length === 0) return false;
@@ -1051,7 +1051,7 @@ export class PipelineWizardComponent {
   }
 
   toggleNodeSelection(node: TreeNode): void {
-    if (node.nodeCategory === 'object') {
+    if (node.nodeCategory === 'object' || node.nodeCategory === 'folder') {
       // Object node: auto-expand and select/unselect all variable children
       if (this.isNodeSelected(node)) {
         this.unselectAllChildren(node);
