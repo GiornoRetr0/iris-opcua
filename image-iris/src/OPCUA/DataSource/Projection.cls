@@ -145,6 +145,10 @@ ClassMethod ProcessObj(oObj As %CompiledClass, pOPCUADefaultNamespace As %String
             Set oPropTypeClass = ##class(%Dictionary.CompiledClass).%OpenId(oProp.Type)
             Set tSC = ..ProcessObj(oPropTypeClass, tOPCUANamespace, tNodeName, pPropertyPath_"."_oProp.Name, .lConfigSpecEntry)
             Quit:$$$ISERR(tSC)
+            // Append the serial object's entries directly — the recursive call already
+            // returns a $LB of entries. Don't wrap again via the $LB() at end of loop.
+            Set lConfigSpec = lConfigSpec _ lConfigSpecEntry
+            Continue
         }
         Else
         {

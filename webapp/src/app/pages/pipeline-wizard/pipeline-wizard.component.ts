@@ -684,14 +684,11 @@ export class PipelineWizardComponent {
   pipelineGroups = computed<PipelineGroup[]>(() => {
     const groups = this.parentGroups();
 
-    // Build entries: one per parent group. Use relativePath as column identifier to support nesting.
+    // Build entries: one per parent group (using displayName as column key — original behavior)
     const entries: { columnNames: Set<string>; rowSource: RowSource }[] = [];
     for (const [, group] of groups) {
       entries.push({
-        // Use relativePath joined by '/' as the column key (e.g. "Temperature" or "SubFolder/TargetNode")
-        columnNames: new Set(group.children.map((c) =>
-          c.node.relativePath ? c.node.relativePath.join('/') : c.node.displayName
-        )),
+        columnNames: new Set(group.children.map((c) => c.node.displayName)),
         rowSource: {
           displayName: group.parent.displayName,
           nodeNs: group.parent.nodeNs,
@@ -751,29 +748,78 @@ export class PipelineWizardComponent {
       }
     }
 
+    // Post-processing: merge nested clusters into their parent clusters.
+    // If cluster B's row sources have paths that are children of cluster A's row sources,
+    // absorb B into A and prefix B's columns with the intermediate path.
+    // e.g., AC1/StateCondition/Quality merges into the AC1 cluster as "StateCondition/Quality"
+    let mergedClusters = [...clusters];
+    let mergeHappened = true;
+    while (mergeHappened) {
+      mergeHappened = false;
+      for (let b = mergedClusters.length - 1; b >= 0; b--) {
+        const childCluster = mergedClusters[b];
+        for (let a = 0; a < mergedClusters.length; a++) {
+          if (a === b) continue;
+          const parentCluster = mergedClusters[a];
+
+          // Check if ALL of childCluster's row sources are nested under some parentCluster row source
+          let allNested = true;
+          const matchMap: { childRS: RowSource; parentRS: RowSource; prefix: string }[] = [];
+          for (const childRS of childCluster.rowSources) {
+            let matched = false;
+            for (const parentRS of parentCluster.rowSources) {
+              if (childRS.path.startsWith(parentRS.path + '/')) {
+                const suffix = childRS.path.slice(parentRS.path.length + 1);
+                matchMap.push({ childRS, parentRS, prefix: suffix });
+                matched = true;
+                break;
+              }
+            }
+            if (!matched) { allNested = false; break; }
+          }
+
+          if (allNested && matchMap.length > 0) {
+            // Merge: transfer child's columns (prefixed) and childNodes to parent cluster
+            for (const { childRS, parentRS, prefix } of matchMap) {
+              for (const cn of childRS.childNodes) {
+                const nestedPath = prefix + '/' + cn.displayName;
+                parentCluster.columnNames.add(nestedPath);
+                parentRS.childNodes = [
+                  ...parentRS.childNodes,
+                  { ...cn, relativePath: nestedPath.split('/') },
+                ];
+              }
+            }
+            // Remove the absorbed child cluster
+            mergedClusters.splice(b, 1);
+            mergeHappened = true;
+            break;
+          }
+        }
+        if (mergeHappened) break;
+      }
+    }
+
     // Auto-discover: for each row source, check its parent tree node's loaded children
-    // for any union columns the user didn't explicitly select. If the node exists, include it.
-    // Note: auto-discovery only works for direct children (flat columns). Nested columns must be explicitly selected.
+    // for any union columns the user didn't explicitly select.
     const treeRoots = this.treeRoots();
-    for (const cluster of clusters) {
+    for (const cluster of mergedClusters) {
       for (const rs of cluster.rowSources) {
         const parentTreeNode = this.findTreeNode(treeRoots, rs.nodeNs, rs.nodeId);
         if (!parentTreeNode?.children) continue;
 
-        const existingKeys = new Set(rs.childNodes.map((c) =>
-          c.relativePath ? c.relativePath.join('/') : c.displayName
-        ));
+        const existingNames = new Set(rs.childNodes.map((c) => c.displayName));
         for (const colName of cluster.columnNames) {
-          if (existingKeys.has(colName)) continue;
-          // Only auto-discover flat (non-nested) columns
+          // Only auto-discover flat columns (not nested path-based ones)
           if (colName.includes('/')) continue;
+          if (existingNames.has(colName)) continue;
           const child = parentTreeNode.children.find(
             (c) => c.displayName === colName && c.nodeCategory === 'variable'
           );
           if (child) {
             rs.childNodes = [
               ...rs.childNodes,
-              { displayName: child.displayName, nodeNs: child.nodeNs, nodeId: child.nodeId, nodeIdType: child.nodeIdType, relativePath: [child.displayName] },
+              { displayName: child.displayName, nodeNs: child.nodeNs, nodeId: child.nodeId, nodeIdType: child.nodeIdType },
             ];
           }
         }
@@ -781,7 +827,7 @@ export class PipelineWizardComponent {
     }
 
     // Convert to PipelineGroup format
-    return clusters.map((cluster) => {
+    return mergedClusters.map((cluster) => {
       const sortedColumns = [...cluster.columnNames].sort();
       return {
         schemaKey: sortedColumns.join('|'),
@@ -1050,7 +1096,7 @@ export class PipelineWizardComponent {
       if (this.v2Selections().has(key)) {
         this.v2Selections.update((m) => { const nm = new Map(m); nm.delete(key); return nm; });
       } else {
-        const { rootDevice, relativePath } = this.resolveRootDevice(node);
+        const parentInfo = this.resolveParentInfo(node);
         this.v2Selections.update((m) => {
           const nm = new Map(m);
           nm.set(key, {
@@ -1060,9 +1106,8 @@ export class PipelineWizardComponent {
               nodeId: node.nodeId,
               nodeIdType: node.nodeIdType,
               path: this.buildNodePath(node),
-              relativePath,
             },
-            parentNode: rootDevice,
+            parentNode: parentInfo,
           });
           return nm;
         });
@@ -1101,12 +1146,18 @@ export class PipelineWizardComponent {
 
   private selectAllVariableChildren(parentNode: TreeNode): void {
     if (!parentNode.children) return;
+    const parentInfo = {
+      displayName: parentNode.displayName,
+      nodeNs: parentNode.nodeNs,
+      nodeId: parentNode.nodeId,
+      nodeIdType: parentNode.nodeIdType,
+      path: this.buildNodePath(parentNode),
+    };
 
     this.v2Selections.update((m) => {
       const nm = new Map(m);
       for (const child of parentNode.children!) {
         if (child.nodeCategory === 'variable') {
-          const { rootDevice, relativePath } = this.resolveRootDevice(child);
           nm.set(this.nodeKey(child), {
             node: {
               displayName: child.displayName,
@@ -1114,9 +1165,8 @@ export class PipelineWizardComponent {
               nodeId: child.nodeId,
               nodeIdType: child.nodeIdType,
               path: this.buildNodePath(child),
-              relativePath,
             },
-            parentNode: rootDevice,
+            parentNode: parentInfo,
           });
         }
       }
@@ -1135,70 +1185,24 @@ export class PipelineWizardComponent {
     });
   }
 
-  /**
-   * Resolve the "root device" ancestor and the relative path from it to the given leaf node.
-   * The root device is the deepest object-category ancestor whose parent is either a folder or the tree root.
-   * For direct children of an object (e.g. AC1/Temperature), rootDevice=AC1, relativePath=["Temperature"].
-   * For nested children (e.g. AC1/SubFolder/TargetNode), rootDevice=AC1, relativePath=["SubFolder","TargetNode"].
-   */
-  private resolveRootDevice(node: TreeNode): { rootDevice: V2Selection['parentNode']; relativePath: string[] } {
-    // Walk up from the node to the tree root (top-level browse result).
-    // The root device is always the top of the parentRef chain — this ensures
-    // all nodes under the same device (e.g. AirConditioner_1) group together,
-    // regardless of whether intermediate ancestors are 'folder' or 'object'.
-    const pathFromLeaf: string[] = [node.displayName];
-    let current = node.parentRef;
-    let rootDevice: TreeNode | undefined;
-
-    while (current) {
-      if (!current.parentRef) {
-        // Reached the tree root — this is the root device
-        rootDevice = current;
-        break;
-      }
-      // Intermediate ancestor — add to relative path and keep walking up
-      pathFromLeaf.unshift(current.displayName);
-      current = current.parentRef;
-    }
-
-    if (rootDevice) {
-      return {
-        rootDevice: {
-          displayName: rootDevice.displayName,
-          nodeNs: rootDevice.nodeNs,
-          nodeId: rootDevice.nodeId,
-          nodeIdType: rootDevice.nodeIdType,
-          path: this.buildNodePath(rootDevice),
-        },
-        relativePath: pathFromLeaf,
-      };
-    }
-
-    // Fallback: no object ancestor found (all folders) — use immediate parent
+  private resolveParentInfo(node: TreeNode): V2Selection['parentNode'] {
     const parent = node.parentRef;
     if (parent) {
       return {
-        rootDevice: {
-          displayName: parent.displayName,
-          nodeNs: parent.nodeNs,
-          nodeId: parent.nodeId,
-          nodeIdType: parent.nodeIdType,
-          path: this.buildNodePath(parent),
-        },
-        relativePath: [node.displayName],
+        displayName: parent.displayName,
+        nodeNs: parent.nodeNs,
+        nodeId: parent.nodeId,
+        nodeIdType: parent.nodeIdType,
+        path: this.buildNodePath(parent),
       };
     }
-
-    // Ultimate fallback: synthetic root
+    // Fallback: the node sits directly under the root, use a synthetic root parent
     return {
-      rootDevice: {
-        displayName: 'Objects',
-        nodeNs: 0,
-        nodeId: 85,
-        nodeIdType: 0,
-        path: 'Objects',
-      },
-      relativePath: [node.displayName],
+      displayName: 'Objects',
+      nodeNs: 0,
+      nodeId: 85,
+      nodeIdType: 0,
+      path: 'Objects',
     };
   }
 

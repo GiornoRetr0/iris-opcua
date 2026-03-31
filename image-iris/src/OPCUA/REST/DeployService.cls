@@ -460,7 +460,7 @@ ClassMethod DeployV2(pBody As %DynamicObject, Output pResult As %DynamicObject) 
 				Quit
 			}
 		}
-		Quit:$Get(pResult.error)'=""
+		if pResult.error '= "" Quit
 
 		set tSC = ..WriteAndCompile(tClassName, tDSText)
 		if $$$ISERR(tSC) {

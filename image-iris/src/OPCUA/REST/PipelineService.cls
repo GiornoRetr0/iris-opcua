@@ -440,7 +440,7 @@ ClassMethod Edit(pBody As %DynamicObject, Output pResult As %DynamicObject) As %
 				Quit
 			}
 		}
-		Quit:$Get(pResult.error)'=""
+		if pResult.error '= "" Quit
 
 		set tSC = ##class(OPCUA.REST.DeployService).WriteAndCompile(tClassName, tText)
 		if $$$ISERR(tSC) {
