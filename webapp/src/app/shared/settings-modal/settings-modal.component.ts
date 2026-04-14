@@ -116,6 +116,7 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
                   <div>
                     <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Security Mode</label>
                     <select [(ngModel)]="editingServer()!.securityMode"
+                            (ngModelChange)="onSecurityModeChange($event)"
                             class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all appearance-none cursor-pointer">
                       <option [ngValue]="1">None</option>
                       <option [ngValue]="3">Sign & Encrypt (Basic256Sha256)</option>
@@ -417,6 +418,16 @@ export class SettingsModalComponent {
 
     this.testStatus.set('Saved');
     setTimeout(() => this.closed.emit(), 500);
+  }
+
+  onSecurityModeChange(mode: number): void {
+    const server = this.editingServer();
+    if (!server || mode !== 3) return;
+    if (!server.clientURI) server.clientURI = 'urn:secuac';
+    if (!server.certPath) server.certPath = '/usr/irissys/uac/certs/secuac.crt.der';
+    if (!server.keyPath) server.keyPath = '/usr/irissys/uac/certs/secuac.key.der';
+    if (!server.trustDir) server.trustDir = '/usr/irissys/uac/certs/trustdir/';
+    if (!server.crlDir) server.crlDir = '/usr/irissys/uac/certs/crldir/';
   }
 
   onOverlayClick(event: MouseEvent): void {

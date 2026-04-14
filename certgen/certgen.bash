@@ -42,7 +42,7 @@ openssl rsa -in $dir/$uac.key -outform DER -out $dir/$uac.key.der
 
 echo "generating root certificate..."
 openssl req -x509 -new -nodes -key $dir/$ca.key -sha256 -days 36525 \
--out $dir/$ca.crt -config $cfgdir/$ca.config
+-out $dir/$ca.crt -config $cfgdir/$ca.config -extensions v3_ext
 
 #echo "displaying root certificate (using pem format source)..."
 #openssl x509 -noout -text -inform PEM -in $dir/$ca.crt
