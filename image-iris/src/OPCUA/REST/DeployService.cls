@@ -10,6 +10,9 @@ Class OPCUA.REST.DeployService
 /// The shared production class that holds all pipeline service items.
 Parameter ProductionClass = "OPCUA.Pipeline.Production";
 
+/// Source directory for generated class files.
+Parameter SourceDir = "/opt/irisapp/src/";
+
 /// Deploy a complete pipeline from selected nodes.
 /// Supports both v1 (flat nodes array) and v2 (columns + rowSources) payloads.
 ClassMethod Deploy(pBody As %DynamicObject, Output pResult As %DynamicObject) As %Status
@@ -56,9 +59,6 @@ ClassMethod Deploy(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		set tSC = ..GenerateDataSourceText(pBody, tNodes, tClassName, tDataSourceName, .tDSText)
 		Quit:$$$ISERR(tSC)
 
-		set tSC = ..WriteAndCompile(tClassName, tDSText)
-		Quit:$$$ISERR(tSC)
-
 		set pResult.deployed = 1
 		set pResult.dataSourceClass = tClassName
 
@@ -95,21 +95,28 @@ ClassMethod EnsureProductionExists() As %Status [ Private ]
 		Quit $$$OK
 	}
 
-	// Create a minimal production with no items
-	set tNL = $Char(10)
-	set tText = "/// Shared OPC UA pipeline production. Service items are added automatically."_tNL
-	set tText = tText_"Class "_..#ProductionClass_" Extends Ens.Production"_tNL
-	set tText = tText_"{"_tNL_tNL
-	set tText = tText_"XData ProductionDefinition"_tNL
-	set tText = tText_"{"_tNL
-	set tText = tText_"<Production Name="""_..#ProductionClass_""" LogGeneralTraceEvents=""false"">"_tNL
-	set tText = tText_"  <Description>OPC UA Data Pipelines</Description>"_tNL
-	set tText = tText_"  <ActorPoolSize>2</ActorPoolSize>"_tNL
-	set tText = tText_"</Production>"_tNL
-	set tText = tText_"}"_tNL_tNL
-	set tText = tText_"}"_tNL
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tClassDef = ##class(%Dictionary.ClassDefinition).%New(..#ProductionClass)
+		set tClassDef.Description = "Shared OPC UA pipeline production. Service items are added automatically."
+		set tClassDef.Super = "Ens.Production"
 
-	Quit ..WriteAndCompile(..#ProductionClass, tText)
+		set tXData = ##class(%Dictionary.XDataDefinition).%New()
+		set tXData.Name = "ProductionDefinition"
+		do tXData.Data.Write("<Production Name="""_..#ProductionClass_""" LogGeneralTraceEvents=""false"">")
+		do tXData.Data.Write("<Description>OPC UA Data Pipelines</Description>")
+		do tXData.Data.Write("<ActorPoolSize>2</ActorPoolSize>")
+		do tXData.Data.Write("</Production>")
+		do tClassDef.XDatas.Insert(tXData)
+
+		set tSC = tClassDef.%Save()
+		$$$ThrowOnError(tSC)
+		set tSC = $System.OBJ.Compile(..#ProductionClass, "ck-d")
+		$$$ThrowOnError(tSC)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit tSC
 }
 
 /// Add a new business service item to the shared production using the Ens.Config API.
@@ -233,7 +240,7 @@ ClassMethod StartOrUpdateProduction() As %Status
 	Quit ##class(Ens.Director).StartProduction(..#ProductionClass)
 }
 
-/// Generate the DataSource class definition text.
+/// Generate and compile a v1 DataSource class using %Dictionary API.
 ClassMethod GenerateDataSourceText(pBody As %DynamicObject, pNodes As %DynamicArray, pClassName As %String, pDataSourceName As %String, Output pText As %String) As %Status [ Private ]
 {
 	#dim tSC As %Status = $$$OK
@@ -241,32 +248,15 @@ ClassMethod GenerateDataSourceText(pBody As %DynamicObject, pNodes As %DynamicAr
 		set tNodeCount = pNodes.%Size()
 
 		// Determine default namespace (most common among selected nodes)
-		for i=0:1:tNodeCount-1 {
-			set tNode = pNodes.%Get(i)
-			set tNS = +tNode.%Get("nodeNs")
-			set tNSCount(tNS) = $Get(tNSCount(tNS), 0) + 1
-		}
-		set tDefaultNS = 0
-		set tMaxCount = 0
-		set tNS = ""
-		for {
-			set tNS = $Order(tNSCount(tNS))
-			if tNS = "" Quit
-			if tNSCount(tNS) > tMaxCount {
-				set tMaxCount = tNSCount(tNS)
-				set tDefaultNS = tNS
-			}
-		}
+		set tDefaultNS = ..FindDefaultNamespace(pNodes)
 
-		// Build class text
-		set tNL = $Char(10)
-		set pText = "/// Auto-generated OPC UA DataSource class."_tNL
-		set pText = pText_"Class "_pClassName_" Extends (%Persistent, OPCUA.DataSource.Definition)"_tNL
-		set pText = pText_"{"_tNL
-		set pText = pText_tNL
-		set pText = pText_"Parameter OPCUADATASOURCE = """_pDataSourceName_""";"_tNL
-		set pText = pText_tNL
-		set pText = pText_"Parameter OPCUDEFAULTANAMESPACE = "_tDefaultNS_";"_tNL
+		// Create class definition
+		set tClassDef = ##class(%Dictionary.ClassDefinition).%New(pClassName)
+		set tClassDef.Description = "Auto-generated OPC UA DataSource class."
+		set tClassDef.Super = "%Persistent,OPCUA.DataSource.Definition"
+
+		do ..AddParameter(tClassDef, "OPCUADATASOURCE", pDataSourceName)
+		do ..AddParameter(tClassDef, "OPCUDEFAULTANAMESPACE", tDefaultNS)
 
 		// Generate properties
 		for i=0:1:tNodeCount-1 {
@@ -277,23 +267,60 @@ ClassMethod GenerateDataSourceText(pBody As %DynamicObject, pNodes As %DynamicAr
 			set tType = tNode.%Get("inferredType")
 			if tType = "" set tType = "OPCUA.Types.StringDataValue"
 
-			// Sanitize property name
 			set tPropName = ##class(OPCUA.DataSource.Generator).SanitizePropertyName(tDisplayName, .tUsedNames)
 
-			set pText = pText_tNL
-			set pText = pText_"Property "_tPropName_" As "_tType_"(OPCUANODENAME = """_tNodeId_""""
+			set tProp = ##class(%Dictionary.PropertyDefinition).%New()
+			set tProp.Name = tPropName
+			set tProp.Type = tType
+			do tProp.Parameters.SetAt(tNodeId, "OPCUANODENAME")
 			if tNodeNS '= tDefaultNS {
-				set pText = pText_", OPCUANAMESPACE = """_tNodeNS_""""
+				do tProp.Parameters.SetAt(tNodeNS, "OPCUANAMESPACE")
 			}
-			set pText = pText_");"_tNL
+			do tClassDef.Properties.Insert(tProp)
 		}
 
-		set pText = pText_tNL_"}"_tNL
+		set tSC = tClassDef.%Save()
+		$$$ThrowOnError(tSC)
+		set tSC = $System.OBJ.Compile(pClassName, "ck-d")
+		$$$ThrowOnError(tSC)
+
+		// pText not used by caller for v1, but set for consistency
+		set pText = ""
 
 	} Catch (e) {
 		set tSC = e.AsStatus()
 	}
 	Quit tSC
+}
+
+/// Find the most common namespace among a set of nodes.
+ClassMethod FindDefaultNamespace(pNodes As %DynamicArray) As %Integer [ Private ]
+{
+	for i=0:1:pNodes.%Size()-1 {
+		set tNS = +pNodes.%Get(i).%Get("nodeNs")
+		set tNSCount(tNS) = $Get(tNSCount(tNS), 0) + 1
+	}
+	set tDefaultNS = 0
+	set tMaxCount = 0
+	set tNS = ""
+	for {
+		set tNS = $Order(tNSCount(tNS))
+		if tNS = "" Quit
+		if tNSCount(tNS) > tMaxCount {
+			set tMaxCount = tNSCount(tNS)
+			set tDefaultNS = tNS
+		}
+	}
+	Quit tDefaultNS
+}
+
+/// Add a parameter to a class definition.
+ClassMethod AddParameter(pClassDef As %Dictionary.ClassDefinition, pName As %String, pValue As %String) [ Private ]
+{
+	set tParam = ##class(%Dictionary.ParameterDefinition).%New()
+	set tParam.Name = pName
+	set tParam.Default = pValue
+	do pClassDef.Parameters.Insert(tParam)
 }
 
 /// Write class text to a temp file and compile it.
@@ -302,8 +329,7 @@ ClassMethod WriteAndCompile(pClassName As %String, pText As %String) As %Status
 	#dim tSC As %Status = $$$OK
 	Try {
 		set tRelPath = $Replace(pClassName, ".", "/")_".cls"
-		set tDir = "/opt/irisapp/src/"
-		set tFilePath = tDir_tRelPath
+		set tFilePath = ..#SourceDir_tRelPath
 
 		set tFileDir = ##class(%File).GetDirectory(tFilePath)
 		do ##class(%File).CreateDirectoryChain(tFileDir)
@@ -387,20 +413,8 @@ ClassMethod DeployV2(pBody As %DynamicObject, Output pResult As %DynamicObject) 
 		}
 		Quit:$$$ISERR(tSC)
 
-		// --- Generate and compile v2 DataSource class ---
+		// --- Generate and compile v2 DataSource class (serial classes compiled first internally) ---
 		set tSC = ..GenerateDataSourceTextV2(pBody, tColumns, tRowSources, tClassName, tDataSourceName, .tDSText, .tSerialClasses)
-		Quit:$$$ISERR(tSC)
-
-		// Compile serial object classes first (they must exist before the main class references them)
-		for iSC=1:1:$Get(tSerialClasses, 0) {
-			set tSerialClassName = $LI(tSerialClasses(iSC), 1)
-			set tSerialText = $LI(tSerialClasses(iSC), 2)
-			set tSC = ..WriteAndCompile(tSerialClassName, tSerialText)
-			Quit:$$$ISERR(tSC)
-		}
-		Quit:$$$ISERR(tSC)
-
-		set tSC = ..WriteAndCompile(tClassName, tDSText)
 		Quit:$$$ISERR(tSC)
 
 		set pResult.deployed = 1
@@ -436,141 +450,119 @@ ClassMethod DeployV2(pBody As %DynamicObject, Output pResult As %DynamicObject) 
 	Quit tSC
 }
 
-/// Generate v2 DataSource class text with NodePath + relative column names.
+/// Generate and compile a v2 DataSource class using %Dictionary API.
 /// Supports nested columns via %SerialObject classes for sub-folders.
-ClassMethod GenerateDataSourceTextV2(pBody As %DynamicObject, pColumns As %DynamicArray, pRowSources As %DynamicArray, pClassName As %String, pDataSourceName As %String, Output pText As %String, Output pSerialClasses) As %Status [ Private ]
+/// pText and pSerialClasses are kept as output params for compatibility with Edit flow.
+ClassMethod GenerateDataSourceTextV2(pBody As %DynamicObject, pColumns As %DynamicArray, pRowSources As %DynamicArray, pClassName As %String, pDataSourceName As %String, Output pText As %String, Output pSerialClasses) As %Status
 {
 	#dim tSC As %Status = $$$OK
+	set pText = ""
+	kill pSerialClasses
+	set pSerialClasses = 0
 	Try {
 		// Determine default namespace from the first row source's child nodes
 		set tFirstRS = pRowSources.%Get(0)
 		set tChildren = tFirstRS.%Get("childNodes")
-		for i=0:1:tChildren.%Size()-1 {
-			set tChild = tChildren.%Get(i)
-			set tNS = +tChild.%Get("nodeNs")
-			set tNSCount(tNS) = $Get(tNSCount(tNS), 0) + 1
-		}
-		set tDefaultNS = 0
-		set tMaxCount = 0
-		set tNS = ""
-		for {
-			set tNS = $Order(tNSCount(tNS))
-			if tNS = "" Quit
-			if tNSCount(tNS) > tMaxCount {
-				set tMaxCount = tNSCount(tNS)
-				set tDefaultNS = tNS
-			}
-		}
+		set tDefaultNS = ..FindDefaultNamespace(tChildren)
 
 		// Separate flat columns from nested columns and build folder tree
-		// folderTree(folderName, subPath...) tracks nested hierarchy
-		// flatColumns(i) = column object for flat (depth-1) columns
-		kill tFolderTree, tFolderColumns
+		kill tFolderColumns
 		set tHasNesting = 0
 		for i=0:1:pColumns.%Size()-1 {
 			set tCol = pColumns.%Get(i)
 			set tRelPath = tCol.%Get("relativePath")
-			if '$IsObject($Get(tRelPath)) || (tRelPath.%Size() <= 1) {
-				// Flat column (no nesting)
-				continue
-			}
-			// Nested: first segment is folder name, rest is sub-path
+			if '$IsObject($Get(tRelPath)) || (tRelPath.%Size() <= 1) continue
 			set tFolderName = tRelPath.%Get(0)
 			set tHasNesting = 1
-			// Track all leaf columns under this folder
 			if '$Data(tFolderColumns(tFolderName)) {
 				set tFolderColumns(tFolderName) = ##class(%DynamicArray).%New()
 			}
-			// Build a sub-column object with relativePath = remaining segments
 			set tSubCol = ##class(%DynamicObject).%New()
 			set tSubCol.displayName = tCol.%Get("displayName")
 			set tSubCol.inferredType = tCol.%Get("inferredType")
-			set tSubRelPath = ##class(%DynamicArray).%New()
-			for j=1:1:tRelPath.%Size()-1 {
-				do tSubRelPath.%Push(tRelPath.%Get(j))
-			}
-			set tSubCol.relativePath = tSubRelPath
-			// Use the leaf display name as the sub-column's displayName
 			set tSubCol.leafName = tRelPath.%Get(tRelPath.%Size()-1)
 			do tFolderColumns(tFolderName).%Push(tSubCol)
 		}
 
-		// Generate serial object classes for each folder (if any nesting exists)
-		kill pSerialClasses
-		set pSerialClasses = 0
+		// Generate and compile serial object classes first
 		if tHasNesting {
 			set tSC = ..GenerateSerialClasses(pClassName, tDefaultNS, .tFolderColumns, .pSerialClasses)
 			Quit:$$$ISERR(tSC)
 		}
 
-		// Build main class text
-		set tNL = $Char(10)
-		set pText = "/// Auto-generated OPC UA DataSource class (v2 row-source model)."_tNL
-		set pText = pText_"Class "_pClassName_" Extends (%Persistent, OPCUA.DataSource.Definition)"_tNL
-		set pText = pText_"{"_tNL
-		set pText = pText_tNL
-		set pText = pText_"Parameter OPCUADATASOURCE = """_pDataSourceName_""";"_tNL
-		set pText = pText_tNL
-		set pText = pText_"Parameter OPCUDEFAULTANAMESPACE = "_tDefaultNS_";"_tNL
-		set pText = pText_tNL
-		set pText = pText_"Parameter OPCUAPIPELINEVERSION = 2;"_tNL
+		// Create main class definition
+		set tClassDef = ##class(%Dictionary.ClassDefinition).%New(pClassName)
+		set tClassDef.Description = "Auto-generated OPC UA DataSource class (v2 row-source model)."
+		set tClassDef.Super = "%Persistent,OPCUA.DataSource.Definition"
 
-		// Row metadata: NodePath, shared timestamps
-		set pText = pText_tNL
-		set pText = pText_"Property NodePath As %String(MAXLEN = 500);"_tNL
-		set pText = pText_tNL
-		set pText = pText_"Property ServerTimeStamp As %TimeStamp;"_tNL
-		set pText = pText_tNL
-		set pText = pText_"Property SourceTimeStamp As %TimeStamp;"_tNL
+		do ..AddParameter(tClassDef, "OPCUADATASOURCE", pDataSourceName)
+		do ..AddParameter(tClassDef, "OPCUDEFAULTANAMESPACE", tDefaultNS)
+		do ..AddParameter(tClassDef, "OPCUAPIPELINEVERSION", 2)
 
-		// Track which folders we've already emitted as serial object properties
+		// Row metadata properties
+		set tProp = ##class(%Dictionary.PropertyDefinition).%New()
+		set tProp.Name = "NodePath"
+		set tProp.Type = "%String"
+		do tProp.Parameters.SetAt(500, "MAXLEN")
+		do tClassDef.Properties.Insert(tProp)
+
+		set tProp = ##class(%Dictionary.PropertyDefinition).%New()
+		set tProp.Name = "ServerTimeStamp"
+		set tProp.Type = "%TimeStamp"
+		do tClassDef.Properties.Insert(tProp)
+
+		set tProp = ##class(%Dictionary.PropertyDefinition).%New()
+		set tProp.Name = "SourceTimeStamp"
+		set tProp.Type = "%TimeStamp"
+		do tClassDef.Properties.Insert(tProp)
+
+		// Generate column properties
 		kill tEmittedFolders
-
-		// Generate properties: flat columns + serial object properties for folders
 		for i=0:1:pColumns.%Size()-1 {
 			set tCol = pColumns.%Get(i)
 			set tDisplayName = tCol.%Get("displayName")
 			set tInferredType = tCol.%Get("inferredType")
 			set tRelPath = tCol.%Get("relativePath")
 
-			// Check if nested
 			set tIsNested = $IsObject($Get(tRelPath)) && (tRelPath.%Size() > 1)
 			if tIsNested {
-				// Emit the serial object property for this folder (once per folder)
 				set tFolderName = tRelPath.%Get(0)
 				if $Data(tEmittedFolders(tFolderName)) continue
 				set tEmittedFolders(tFolderName) = 1
 
 				set tSerialClassName = pClassName_"."_tFolderName_"Type"
 				set tPropName = ##class(OPCUA.DataSource.Generator).SanitizePropertyName(tFolderName, .tUsedNames)
-				set pText = pText_tNL
-				set pText = pText_"Property "_tPropName_" As "_tSerialClassName_"(OPCUANODENAME = """_tFolderName_""");"_tNL
+				set tProp = ##class(%Dictionary.PropertyDefinition).%New()
+			set tProp.Name = tPropName
+				set tProp.Type = tSerialClassName
+				do tProp.Parameters.SetAt(tFolderName, "OPCUANODENAME")
+				do tClassDef.Properties.Insert(tProp)
 			} else {
-				// Flat column
 				set tType = ..MapToPlainType(tInferredType)
-
-				// Use the first row source's corresponding child node namespace
 				set tChildNS = tDefaultNS
 				if i < tChildren.%Size() {
 					set tChildNS = +tChildren.%Get(i).%Get("nodeNs")
 				}
-
 				set tLeafName = tDisplayName
 				if $IsObject($Get(tRelPath)) && (tRelPath.%Size() = 1) {
 					set tLeafName = tRelPath.%Get(0)
 				}
-
 				set tPropName = ##class(OPCUA.DataSource.Generator).SanitizePropertyName(tLeafName, .tUsedNames)
-				set pText = pText_tNL
-				set pText = pText_"Property "_tPropName_" As "_tType_"(OPCUANODENAME = """_tLeafName_""""
+				set tProp = ##class(%Dictionary.PropertyDefinition).%New()
+			set tProp.Name = tPropName
+				set tProp.Type = tType
+				do tProp.Parameters.SetAt(tLeafName, "OPCUANODENAME")
 				if tChildNS '= tDefaultNS {
-					set pText = pText_", OPCUANAMESPACE = """_tChildNS_""""
+					do tProp.Parameters.SetAt(tChildNS, "OPCUANAMESPACE")
 				}
-				set pText = pText_");"_tNL
+				do tClassDef.Properties.Insert(tProp)
 			}
 		}
 
-		set pText = pText_tNL_"}"_tNL
+		set tSC = tClassDef.%Save()
+		$$$ThrowOnError(tSC)
+		set tSC = $System.OBJ.Compile(pClassName, "ck-d")
+		$$$ThrowOnError(tSC)
 
 	} Catch (e) {
 		set tSC = e.AsStatus()
@@ -578,15 +570,12 @@ ClassMethod GenerateDataSourceTextV2(pBody As %DynamicObject, pColumns As %Dynam
 	Quit tSC
 }
 
-/// Generate %SerialObject classes for nested folder columns.
-/// Each folder becomes a separate serial class named {MainClass}.{FolderName}Type.
-/// Returns serial classes as an array: pSerialClasses(n) = $LB(className, classText)
+/// Generate and compile %SerialObject classes for nested folder columns using %Dictionary API.
 ClassMethod GenerateSerialClasses(pMainClassName As %String, pDefaultNS As %Integer, ByRef pFolderColumns, Output pSerialClasses) As %Status [ Private ]
 {
 	#dim tSC As %Status = $$$OK
 	Try {
 		set pSerialClasses = 0
-		set tNL = $Char(10)
 
 		set tFolderName = ""
 		for {
@@ -596,26 +585,33 @@ ClassMethod GenerateSerialClasses(pMainClassName As %String, pDefaultNS As %Inte
 			set tSerialClassName = pMainClassName_"."_tFolderName_"Type"
 			set tColumns = pFolderColumns(tFolderName)
 
-			set tText = "/// Auto-generated serial object for nested OPC UA folder: "_tFolderName_tNL
-			set tText = tText_"Class "_tSerialClassName_" Extends %SerialObject [ PropertyClass = OPCUA.DataSource.PropertyClass ]"_tNL
-			set tText = tText_"{"_tNL
+			set tClassDef = ##class(%Dictionary.ClassDefinition).%New(tSerialClassName)
+			set tClassDef.Description = "Auto-generated serial object for nested OPC UA folder: "_tFolderName
+			set tClassDef.Super = "%SerialObject"
+			set tClassDef.PropertyClass = "OPCUA.DataSource.PropertyClass"
 
 			kill tUsedNames
 			for i=0:1:tColumns.%Size()-1 {
 				set tSubCol = tColumns.%Get(i)
 				set tLeafName = tSubCol.%Get("leafName")
-				set tInferredType = tSubCol.%Get("inferredType")
-				set tType = ..MapToPlainType(tInferredType)
+				set tType = ..MapToPlainType(tSubCol.%Get("inferredType"))
 				set tPropName = ##class(OPCUA.DataSource.Generator).SanitizePropertyName(tLeafName, .tUsedNames)
 
-				set tText = tText_tNL
-				set tText = tText_"Property "_tPropName_" As "_tType_"(OPCUANODENAME = """_tLeafName_""");"_tNL
+				set tProp = ##class(%Dictionary.PropertyDefinition).%New()
+				set tProp.Name = tPropName
+				set tProp.Type = tType
+				do tProp.Parameters.SetAt(tLeafName, "OPCUANODENAME")
+				do tClassDef.Properties.Insert(tProp)
 			}
 
-			set tText = tText_tNL_"}"_tNL
+			set tSC = tClassDef.%Save()
+			$$$ThrowOnError(tSC)
+			set tSC = $System.OBJ.Compile(tSerialClassName, "ck-d")
+			$$$ThrowOnError(tSC)
 
+			// Track for caller (pSerialClasses kept for Edit flow compatibility)
 			set pSerialClasses = pSerialClasses + 1
-			set pSerialClasses(pSerialClasses) = $LB(tSerialClassName, tText)
+			set pSerialClasses(pSerialClasses) = $LB(tSerialClassName, "")
 		}
 
 	} Catch (e) {

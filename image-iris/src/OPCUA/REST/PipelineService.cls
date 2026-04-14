@@ -333,20 +333,8 @@ ClassMethod Edit(pBody As %DynamicObject, Output pResult As %DynamicObject) As %
 		Kill ^OPCUA.RowSource(tClassName)
 		Kill ^OPCUA.DataSource(tClassName)
 
-		// --- Step 4: Generate new DataSource class (reuses DeployService logic, supports nesting) ---
+		// --- Step 4+5: Generate and compile new DataSource class (serial classes compiled internally) ---
 		set tSC = ##class(OPCUA.REST.DeployService).GenerateDataSourceTextV2(pBody, tColumns, tRowSources, tClassName, tDataSourceName, .tText, .tSerialClasses)
-		Quit:$$$ISERR(tSC)
-
-		// --- Step 5: Compile serial classes first, then main class ---
-		for iSC=1:1:$Get(tSerialClasses, 0) {
-			set tSerialClassName = $LI(tSerialClasses(iSC), 1)
-			set tSerialText = $LI(tSerialClasses(iSC), 2)
-			set tSC = ##class(OPCUA.REST.DeployService).WriteAndCompile(tSerialClassName, tSerialText)
-			Quit:$$$ISERR(tSC)
-		}
-		Quit:$$$ISERR(tSC)
-
-		set tSC = ##class(OPCUA.REST.DeployService).WriteAndCompile(tClassName, tText)
 		Quit:$$$ISERR(tSC)
 
 		// --- Step 6: Update row source metadata ---
