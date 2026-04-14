@@ -21,6 +21,17 @@ services:
         source: ./mocksvr-data/
         target: /app/data
 
+  plc2:
+    hostname: plc2
+    init: true
+    image: intersystemsdc/opcua-mockserver:version-0.3.0
+    ports:
+      - "10002:4840"
+    volumes:
+      - type: bind
+        source: ./mocksvr-data/
+        target: /app/data
+
   certified-server:
     build: ./image-opcua-certified-server
     hostname: certified-server

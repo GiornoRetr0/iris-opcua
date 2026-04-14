@@ -74,7 +74,7 @@ export class NodeExplorerComponent {
 
   isConfigured = computed(() => {
     const cfg = this.config.get();
-    return !!(cfg.apiBaseUrl && cfg.serverUrl);
+    return !!(cfg.apiBaseUrl && (cfg.servers?.length > 0 || cfg.serverUrl));
   });
 
   onNodeSelected(node: TreeNode): void {

@@ -17,6 +17,8 @@ export interface TreeNode extends OpcuaNode {
   selected?: boolean;
   level: number;
   parentRef?: TreeNode;
+  /** Which server profile this node belongs to */
+  serverId?: string;
 }
 
 export interface NodeReadResult {
@@ -131,6 +133,8 @@ export interface RowSource {
   nodeIdType: number;
   path: string;
   childNodes: SelectedNode[];
+  /** Which server profile this row source belongs to */
+  serverId?: string;
 }
 
 /** A computed grouping: one or more row sources sharing the same column schema */
@@ -138,6 +142,8 @@ export interface PipelineGroup {
   schemaKey: string;
   columns: ColumnDef[];
   rowSources: RowSource[];
+  /** Which server profile this group belongs to (all row sources in a group share the same server) */
+  serverId?: string;
 }
 
 /** Internal selection entry tracking both the leaf node and its root device ancestor */
@@ -152,16 +158,18 @@ export interface V2Selection {
     nodeIdType: number;
     path: string;
   };
+  /** Which server profile this selection belongs to */
+  serverId: string;
 }
 
-export interface AppConfig {
-  serverUrl: string;
+/** A single OPC UA server connection profile */
+export interface ServerProfile {
+  id: string;
+  name: string;
+  url: string;
   securityMode: number;
   username: string;
   password: string;
-  apiBaseUrl: string;
-  apiUsername: string;
-  apiPassword: string;
   certPath: string;
   keyPath: string;
   trustDir: string;
@@ -169,5 +177,34 @@ export interface AppConfig {
   clientURI: string;
   rootNodeId: string;
   rootNodeNs: number;
+}
+
+export interface AppConfig {
+  /** @deprecated Use servers[] instead. Kept for migration only. */
+  serverUrl: string;
+  /** @deprecated */
+  securityMode: number;
+  /** @deprecated */
+  username: string;
+  /** @deprecated */
+  password: string;
+  apiBaseUrl: string;
+  apiUsername: string;
+  apiPassword: string;
+  /** @deprecated */
+  certPath: string;
+  /** @deprecated */
+  keyPath: string;
+  /** @deprecated */
+  trustDir: string;
+  /** @deprecated */
+  crlDir: string;
+  /** @deprecated */
+  clientURI: string;
+  /** @deprecated */
+  rootNodeId: string;
+  /** @deprecated */
+  rootNodeNs: number;
   autoRefreshInterval: number;
+  servers: ServerProfile[];
 }

@@ -14,6 +14,7 @@ import {
   PipelineGroup,
   ColumnDef,
   RowSource,
+  ServerProfile,
 } from '../../core/models/opcua.models';
 
 @Component({
@@ -65,7 +66,7 @@ import {
         <div class="absolute top-1/2 left-0 w-full h-0.5 bg-outline-variant/20 -translate-y-1/2 z-0">
           <div class="h-full bg-primary transition-all" [style.width.%]="stepProgress()"></div>
         </div>
-        @for (step of steps; track step.num; let i = $index) {
+        @for (step of visibleSteps(); track step.num; let i = $index) {
           <div class="relative z-10 flex flex-col items-center group">
             <div class="w-10 h-10 rounded-full flex items-center justify-center font-bold ring-4 ring-background transition-all"
                  [class]="i < currentStep()
@@ -89,15 +90,69 @@ import {
 
       <!-- Step Content -->
       <div class="mt-16">
-        <!-- STEP 1: SELECT NODES -->
-        @if (currentStep() === 0) {
+
+        <!-- SERVER SELECT STEP (only when multiple servers) -->
+        @if (currentStep() === 0 && needsServerStep()) {
+          <div class="max-w-2xl mx-auto">
+            <h1 class="text-2xl font-semibold text-on-surface mb-3 tracking-tight text-center">Choose Source Server</h1>
+            <p class="text-on-surface-variant text-center text-sm mb-10">
+              Select which OPC UA server this pipeline will read data from.
+            </p>
+            <div class="space-y-3">
+              @for (server of allServers(); track server.id) {
+                <div (click)="selectServer(server)"
+                     class="flex items-center gap-4 p-5 rounded-xl border-2 cursor-pointer transition-all"
+                     [class]="selectedServer()?.id === server.id
+                       ? 'border-primary bg-primary/5 shadow-lg shadow-primary/10'
+                       : 'border-outline-variant/20 bg-surface-container-lowest hover:border-primary/30 hover:bg-primary/[0.02]'">
+                  <div class="w-12 h-12 rounded-xl flex items-center justify-center"
+                       [class]="selectedServer()?.id === server.id ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant'">
+                    <span class="material-symbols-outlined text-2xl">dns</span>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm font-bold text-on-surface">{{ server.name }}</p>
+                    <p class="text-xs font-mono text-on-surface-variant truncate">{{ server.url }}</p>
+                  </div>
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                        [class]="server.securityMode === 3 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'">
+                    <span class="material-symbols-outlined text-[11px]">{{ server.securityMode === 3 ? 'lock' : 'lock_open' }}</span>
+                    {{ server.securityMode === 3 ? 'Sign & Encrypt' : 'None' }}
+                  </span>
+                  @if (selectedServer()?.id === server.id) {
+                    <span class="material-symbols-outlined text-primary text-xl">check_circle</span>
+                  }
+                </div>
+              }
+            </div>
+            <div class="flex items-center gap-4 mt-10 justify-center">
+              <button (click)="nextStep()"
+                      [disabled]="!selectedServer()"
+                      class="px-8 py-3 bg-primary text-on-primary font-bold rounded-lg shadow-xl shadow-primary/30 flex items-center gap-2 hover:brightness-110 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                Continue to Select Nodes
+                <span class="material-symbols-outlined">arrow_forward</span>
+              </button>
+              <button (click)="cancel()"
+                      class="px-6 py-3 bg-surface-container-high text-on-surface-variant font-semibold rounded-lg hover:bg-surface-variant transition-colors">
+                Cancel
+              </button>
+            </div>
+          </div>
+        }
+
+        <!-- SELECT NODES STEP -->
+        @if (currentStep() === selectStepIndex()) {
           <div class="grid grid-cols-12 gap-8">
             <!-- Left: Node Selection Tree -->
             <div class="col-span-4 bg-surface-container-low rounded-xl p-6 shadow-sm min-h-[500px] overflow-y-auto custom-scrollbar">
-              <div class="flex items-center justify-between mb-6">
+              <div class="flex items-center justify-between mb-1">
                 <h3 class="text-on-surface font-semibold text-sm">OPC UA Address Space</h3>
                 <span class="material-symbols-outlined text-on-surface-variant text-lg cursor-pointer">filter_list</span>
               </div>
+              @if (selectedServer()) {
+                <p class="text-[10px] text-on-surface-variant/60 font-mono truncate mb-5" [title]="selectedServer()!.url">
+                  {{ selectedServer()!.name }} &mdash; {{ selectedServer()!.url }}
+                </p>
+              }
               <div class="relative mb-6">
                 <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm">search</span>
                 <input type="text" [(ngModel)]="searchQuery"
@@ -234,25 +289,10 @@ import {
               }
             </div>
           </div>
-
-          <!-- Footer Meta -->
-          <div class="mt-12 flex justify-between items-center text-on-surface-variant">
-            <div class="flex items-center gap-6">
-              <div class="flex flex-col">
-                <span class="text-[10px] font-bold uppercase tracking-widest">Source Server</span>
-                <span class="text-xs font-medium">{{ config.get().serverUrl || 'Not configured' }}</span>
-              </div>
-              <div class="w-[1px] h-8 bg-outline-variant/30"></div>
-              <div class="flex flex-col">
-                <span class="text-[10px] font-bold uppercase tracking-widest">Security Policy</span>
-                <span class="text-xs font-medium">{{ config.get().securityMode === 3 ? 'Sign & Encrypt' : 'None' }}</span>
-              </div>
-            </div>
-          </div>
         }
 
-        <!-- STEP 2: REVIEW PIPELINE GROUPS -->
-        @if (currentStep() === 1) {
+        <!-- REVIEW STEP -->
+        @if (currentStep() === reviewStepIndex()) {
           <div class="max-w-4xl mx-auto">
             <h1 class="text-2xl font-semibold text-on-surface mb-2 tracking-tight">Review Pipeline Structure</h1>
             <p class="text-on-surface-variant text-sm mb-8">
@@ -268,7 +308,6 @@ import {
             <div class="space-y-6 mb-8">
               @for (group of pipelineGroups(); track group.schemaKey; let gi = $index) {
                 <div class="bg-surface-container-lowest rounded-xl border border-outline-variant/10 shadow-sm overflow-hidden">
-                  <!-- Pipeline group header -->
                   <div class="p-6 border-b border-outline-variant/10">
                     <div class="flex items-center gap-3 mb-4">
                       <div class="w-10 h-10 rounded-lg bg-primary text-on-primary flex items-center justify-center">
@@ -286,8 +325,6 @@ import {
                         </h3>
                       </div>
                     </div>
-
-                    <!-- Column chips -->
                     <div class="flex flex-wrap gap-2">
                       <span class="px-3 py-1.5 bg-primary/10 text-primary rounded-lg text-xs font-bold">NodePath</span>
                       @for (col of group.columns; track col.displayName) {
@@ -295,8 +332,6 @@ import {
                       }
                     </div>
                   </div>
-
-                  <!-- Table preview -->
                   <div class="p-6">
                     <div class="overflow-x-auto">
                       <table class="w-full text-xs">
@@ -320,8 +355,6 @@ import {
                         </tbody>
                       </table>
                     </div>
-
-                    <!-- Row sources detail -->
                     @if (group.rowSources.length > 1) {
                       <div class="mt-4 pt-4 border-t border-outline-variant/10">
                         <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">Row Sources (Devices)</p>
@@ -356,8 +389,8 @@ import {
           </div>
         }
 
-        <!-- STEP 3: CONFIGURE -->
-        @if (currentStep() === 2) {
+        <!-- CONFIGURE STEP -->
+        @if (currentStep() === configureStepIndex()) {
           <div class="grid grid-cols-1 md:grid-cols-12 gap-8">
             <div class="md:col-span-8 space-y-8">
               <!-- Connection Settings (read-only) -->
@@ -366,26 +399,25 @@ import {
                   <span class="material-symbols-outlined text-primary">hub</span>
                   <h2 class="text-xl font-semibold tracking-tight">Connection Settings</h2>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div class="space-y-1">
-                    <label class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">OPC UA Server</label>
-                    <div class="p-3 bg-surface-container-low rounded-lg text-sm font-medium flex items-center justify-between">
-                      {{ config.get().serverUrl || 'Not set' }}
-                      <span class="material-symbols-outlined text-xs text-outline">lock</span>
+                @if (selectedServer()) {
+                  <div class="flex items-center gap-4 p-3 bg-surface-container-low rounded-lg">
+                    <span class="material-symbols-outlined text-primary text-lg">dns</span>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-sm font-semibold text-on-surface">{{ selectedServer()!.name }}</p>
+                      <p class="text-xs font-mono text-on-surface-variant truncate">{{ selectedServer()!.url }}</p>
                     </div>
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0"
+                          [class]="selectedServer()!.securityMode === 3 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'">
+                      <span class="material-symbols-outlined text-[11px]">{{ selectedServer()!.securityMode === 3 ? 'lock' : 'lock_open' }}</span>
+                      {{ selectedServer()!.securityMode === 3 ? 'Sign & Encrypt' : 'None' }}
+                    </span>
+                    <span class="material-symbols-outlined text-xs text-outline">lock</span>
                   </div>
-                  <div class="space-y-1">
-                    <label class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Security Policy</label>
-                    <div class="p-3 bg-surface-container-low rounded-lg text-sm font-medium">
-                      {{ config.get().securityMode === 3 ? 'Basic256Sha256 / Sign & Encrypt' : 'None' }}
-                    </div>
-                  </div>
-                </div>
+                }
               </section>
 
               <!-- Pipeline configs -->
               @if (totalDeployUnits() === 1) {
-                <!-- Single pipeline config -->
                 <section class="bg-surface-container-lowest rounded-xl p-8 shadow-sm">
                   <div class="flex items-center gap-3 mb-6">
                     <span class="material-symbols-outlined text-primary">account_tree</span>
@@ -415,7 +447,6 @@ import {
                   </div>
                 </section>
               } @else {
-                <!-- Multi-pipeline config -->
                 <section class="bg-surface-container-lowest rounded-xl p-8 shadow-sm">
                   <div class="flex items-center gap-3 mb-6">
                     <span class="material-symbols-outlined text-primary">account_tree</span>
@@ -445,14 +476,13 @@ import {
                              class="w-full bg-surface-container-lowest border-outline-variant/20 rounded-lg text-sm focus:ring-2 focus:ring-primary focus:border-transparent transition-all px-4 py-3"
                              placeholder="Production_Line">
                     </div>
-                    <!-- Preview of generated names -->
                     <div class="bg-surface-container-low rounded-lg p-4">
                       <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-3">Generated Pipelines</p>
                       <div class="space-y-2">
                         @for (group of pipelineGroups(); track group.schemaKey; let gi = $index) {
                           <div class="flex items-center gap-3 text-xs">
                             <span class="material-symbols-outlined text-primary text-sm">subdirectory_arrow_right</span>
-                            <span class="font-mono text-on-surface">{{ packagePath }}.{{ className }}{{ pipelineGroups().length > 1 ? '_' + groupSuffix(group) : '' }}</span>
+                            <span class="font-mono text-on-surface">{{ packagePath }}.{{ className }}{{ pipelineGroups().length > 1 ? groupSuffix(group) : '' }}</span>
                             <span class="text-on-surface-variant">&rarr;</span>
                             <span class="font-mono text-on-surface-variant">{{ group.columns.length }} cols &times; {{ group.rowSources.length }} device{{ group.rowSources.length !== 1 ? 's' : '' }}</span>
                           </div>
@@ -529,8 +559,8 @@ import {
           </div>
         }
 
-        <!-- STEP 4: DEPLOY RESULT -->
-        @if (currentStep() === 3) {
+        <!-- DEPLOY RESULT STEP -->
+        @if (currentStep() === deployStepIndex()) {
           <div class="max-w-2xl mx-auto text-center">
             <div class="w-24 h-24 mx-auto mb-8 rounded-full flex items-center justify-center"
                  [class]="deploySuccess() ? 'bg-tertiary-fixed text-tertiary' : 'bg-error-container text-error'">
@@ -539,7 +569,6 @@ import {
             <h1 class="text-3xl font-semibold mb-4">{{ deploySuccess() ? editMode() ? 'Pipeline Updated' : 'Pipeline' + (deployResults().length > 1 ? 's' : '') + ' Deployed' : editMode() ? 'Update Failed' : 'Deployment Failed' }}</h1>
             <p class="text-on-surface-variant mb-8">{{ deployMessage() }}</p>
 
-            <!-- Per-pipeline results (multi-pipeline) -->
             @if (deployResults().length > 1) {
               <div class="space-y-3 mb-8 text-left max-w-lg mx-auto">
                 @for (r of deployResults(); track r.name) {
@@ -573,7 +602,6 @@ import {
         <div class="flex items-center gap-1.5 p-1 rounded cursor-pointer transition-colors"
              [class]="isNodeSelected(node) ? 'bg-primary/5 border-y border-primary/10' : isNodePartiallySelected(node) ? 'bg-primary/3' : 'hover:bg-white/50'"
              (click)="onWizardNodeClick(node)">
-          <!-- Checkbox for selectable nodes (variables, objects, and folders) -->
           @if (node.nodeCategory === 'variable' || node.nodeCategory === 'object' || node.nodeCategory === 'folder') {
             <input type="checkbox" [checked]="isNodeSelected(node)"
                    [indeterminate]="isNodePartiallySelected(node)"
@@ -584,29 +612,21 @@ import {
               <span class="material-symbols-outlined text-xs text-primary animate-spin -ml-1 mr-0.5">progress_activity</span>
             }
           }
-
-          <!-- Expand arrow -->
           @if (node.hasChildren) {
             <span class="material-symbols-outlined text-lg"
                   [class]="isNodeSelected(node) || isNodePartiallySelected(node) ? 'text-primary' : 'text-slate-400'">
               {{ node.expanded ? 'arrow_drop_down' : 'arrow_right' }}
             </span>
           }
-
-          <!-- Icon -->
           <span class="material-symbols-outlined text-lg"
                 [class.filled]="node.nodeCategory === 'folder'"
                 [class]="getWizardNodeIconClass(node)">
             {{ getWizardNodeIcon(node) }}
           </span>
-
-          <!-- Label -->
           <span class="text-sm" [class]="isNodeSelected(node) || isNodePartiallySelected(node) ? 'font-bold text-primary' : ''">
             {{ node.displayName }}
           </span>
         </div>
-
-        <!-- Children -->
         @if (node.expanded && node.children) {
           @if (node.loading) {
             <div [style.padding-left.rem]="(level + 1) * 1.25" class="flex items-center gap-2 p-1 text-on-surface-variant">
@@ -631,8 +651,34 @@ export class PipelineWizardComponent {
 
   isConfigured = computed(() => {
     const cfg = this.config.get();
-    return !!(cfg.apiBaseUrl && cfg.serverUrl);
+    return !!(cfg.apiBaseUrl && (cfg.servers?.length > 0 || cfg.serverUrl));
   });
+
+  // --- Server selection ---
+  allServers = computed(() => this.config.getServers());
+  needsServerStep = computed(() => this.allServers().length > 1);
+  selectedServer = signal<ServerProfile | null>(null);
+
+  // Dynamic step indices based on whether server step is needed
+  selectStepIndex = computed(() => this.needsServerStep() ? 1 : 0);
+  reviewStepIndex = computed(() => this.needsServerStep() ? 2 : 1);
+  configureStepIndex = computed(() => this.needsServerStep() ? 3 : 2);
+  deployStepIndex = computed(() => this.needsServerStep() ? 4 : 3);
+
+  visibleSteps = computed(() => {
+    const base = [
+      { num: 0, label: 'Select' },
+      { num: 0, label: 'Review' },
+      { num: 0, label: 'Configure' },
+      { num: 0, label: 'Deploy' },
+    ];
+    if (this.needsServerStep()) {
+      base.unshift({ num: 0, label: 'Server' });
+    }
+    return base.map((s, i) => ({ ...s, num: i + 1 }));
+  });
+
+  totalSteps = computed(() => this.visibleSteps().length);
 
   // Edit mode
   editMode = signal(false);
@@ -640,17 +686,10 @@ export class PipelineWizardComponent {
   existingPipeline = signal<Pipeline | null>(null);
   existingClassName = signal('');
 
-  steps = [
-    { num: 1, label: 'Select' },
-    { num: 2, label: 'Review' },
-    { num: 3, label: 'Configure' },
-    { num: 4, label: 'Deploy' },
-  ];
-
   currentStep = signal(0);
-  stepProgress = signal(0);
+  stepProgress = computed(() => (this.currentStep() / (this.totalSteps() - 1)) * 100);
 
-  // Step 1: Tree
+  // Tree (single server)
   treeRoots = signal<TreeNode[]>([]);
   treeLoading = signal(false);
   searchQuery = '';
@@ -659,12 +698,11 @@ export class PipelineWizardComponent {
   v2Selections = signal<Map<string, V2Selection>>(new Map());
   autoExpandingNodes = signal<Set<string>>(new Set());
 
-  // Derived: flat list of selected leaf nodes (backward compat for template counts etc.)
   selectedNodes = computed(() =>
     Array.from(this.v2Selections().values()).map((s) => s.node)
   );
 
-  // Derived: group selections by parent node
+  // Group selections by parent node
   parentGroups = computed(() => {
     const selections = this.v2Selections();
     const groups = new Map<string, { parent: V2Selection['parentNode']; children: V2Selection[] }>();
@@ -678,13 +716,10 @@ export class PipelineWizardComponent {
     return groups;
   });
 
-  // Derived: merge parents with overlapping columns into pipeline groups (union merge).
-  // In CREATE mode: groups with overlapping columns merge; zero-overlap stays separate.
-  // In EDIT mode: everything goes into ONE group (editing one pipeline).
+  // Merge parents with overlapping columns into pipeline groups
   pipelineGroups = computed<PipelineGroup[]>(() => {
     const groups = this.parentGroups();
 
-    // Build entries: one per parent group (using displayName as column key — original behavior)
     const entries: { columnNames: Set<string>; rowSource: RowSource }[] = [];
     for (const [, group] of groups) {
       entries.push({
@@ -703,7 +738,6 @@ export class PipelineWizardComponent {
     let clusters: { columnNames: Set<string>; rowSources: RowSource[] }[];
 
     if (this.editMode()) {
-      // Edit mode: force ALL entries into one group
       if (entries.length === 0) {
         clusters = [];
       } else {
@@ -716,19 +750,15 @@ export class PipelineWizardComponent {
         clusters = [{ columnNames: allColumns, rowSources: allRowSources }];
       }
     } else {
-      // Create mode: connected-components merge (groups sharing any column name get merged)
       const used = new Set<number>();
       clusters = [];
-
       for (let i = 0; i < entries.length; i++) {
         if (used.has(i)) continue;
         used.add(i);
-
         const cluster = {
           columnNames: new Set(entries[i].columnNames),
           rowSources: [entries[i].rowSource],
         };
-
         let changed = true;
         while (changed) {
           changed = false;
@@ -743,15 +773,11 @@ export class PipelineWizardComponent {
             }
           }
         }
-
         clusters.push(cluster);
       }
     }
 
-    // Post-processing: merge nested clusters into their parent clusters.
-    // If cluster B's row sources have paths that are children of cluster A's row sources,
-    // absorb B into A and prefix B's columns with the intermediate path.
-    // e.g., AC1/StateCondition/Quality merges into the AC1 cluster as "StateCondition/Quality"
+    // Nested cluster merge
     let mergedClusters = [...clusters];
     let mergeHappened = true;
     while (mergeHappened) {
@@ -761,36 +787,27 @@ export class PipelineWizardComponent {
         for (let a = 0; a < mergedClusters.length; a++) {
           if (a === b) continue;
           const parentCluster = mergedClusters[a];
-
-          // Check if ALL of childCluster's row sources are nested under some parentCluster row source
           let allNested = true;
           const matchMap: { childRS: RowSource; parentRS: RowSource; prefix: string }[] = [];
           for (const childRS of childCluster.rowSources) {
             let matched = false;
             for (const parentRS of parentCluster.rowSources) {
               if (childRS.path.startsWith(parentRS.path + '/')) {
-                const suffix = childRS.path.slice(parentRS.path.length + 1);
-                matchMap.push({ childRS, parentRS, prefix: suffix });
+                matchMap.push({ childRS, parentRS, prefix: childRS.path.slice(parentRS.path.length + 1) });
                 matched = true;
                 break;
               }
             }
             if (!matched) { allNested = false; break; }
           }
-
           if (allNested && matchMap.length > 0) {
-            // Merge: transfer child's columns (prefixed) and childNodes to parent cluster
             for (const { childRS, parentRS, prefix } of matchMap) {
               for (const cn of childRS.childNodes) {
                 const nestedPath = prefix + '/' + cn.displayName;
                 parentCluster.columnNames.add(nestedPath);
-                parentRS.childNodes = [
-                  ...parentRS.childNodes,
-                  { ...cn, relativePath: nestedPath.split('/') },
-                ];
+                parentRS.childNodes = [...parentRS.childNodes, { ...cn, relativePath: nestedPath.split('/') }];
               }
             }
-            // Remove the absorbed child cluster
             mergedClusters.splice(b, 1);
             mergeHappened = true;
             break;
@@ -800,69 +817,46 @@ export class PipelineWizardComponent {
       }
     }
 
-    // Auto-discover: for each row source, check its parent tree node's loaded children
-    // for any union columns the user didn't explicitly select.
+    // Auto-discover
     const treeRoots = this.treeRoots();
     for (const cluster of mergedClusters) {
       for (const rs of cluster.rowSources) {
         const parentTreeNode = this.findTreeNode(treeRoots, rs.nodeNs, rs.nodeId);
         if (!parentTreeNode?.children) continue;
-
         const existingNames = new Set(rs.childNodes.map((c) => c.displayName));
         for (const colName of cluster.columnNames) {
-          // Only auto-discover flat columns (not nested path-based ones)
           if (colName.includes('/')) continue;
           if (existingNames.has(colName)) continue;
-          const child = parentTreeNode.children.find(
-            (c) => c.displayName === colName && c.nodeCategory === 'variable'
-          );
+          const child = parentTreeNode.children.find((c) => c.displayName === colName && c.nodeCategory === 'variable');
           if (child) {
-            rs.childNodes = [
-              ...rs.childNodes,
-              { displayName: child.displayName, nodeNs: child.nodeNs, nodeId: child.nodeId, nodeIdType: child.nodeIdType },
-            ];
+            rs.childNodes = [...rs.childNodes, { displayName: child.displayName, nodeNs: child.nodeNs, nodeId: child.nodeId, nodeIdType: child.nodeIdType }];
           }
         }
       }
     }
 
-    // Convert to PipelineGroup format
     return mergedClusters.map((cluster) => {
       const sortedColumns = [...cluster.columnNames].sort();
       return {
         schemaKey: sortedColumns.join('|'),
-        columns: sortedColumns.map((name) => ({
-          displayName: name,
-          nodeCategory: 'variable',
-          relativePath: name.split('/'),
-        })),
+        columns: sortedColumns.map((name) => ({ displayName: name, nodeCategory: 'variable', relativePath: name.split('/') })),
         rowSources: cluster.rowSources,
       };
     });
   });
 
-  // v2: one deploy per pipeline group (not per row source)
   totalDeployUnits = computed(() => this.pipelineGroups().length);
 
   // Edit mode validation
-
-  // Columns from newly added nodes that have ZERO overlap with existing pipeline columns
   editNonMatchingColumns = computed<string[]>(() => {
     if (!this.editMode() || !this.existingPipeline()) return [];
     const existing = this.existingPipeline()!;
-    const existingColNames = new Set(
-      ((existing as any).nodes || []).map((n: any) => n.property || n.displayName)
-    );
+    const existingColNames = new Set(((existing as any).nodes || []).map((n: any) => n.property || n.displayName));
     if (existingColNames.size === 0) return [];
-
-    // Check each parent group: if ALL its columns are outside the existing schema, it's non-matching
     const nonMatching: string[] = [];
     for (const [, group] of this.parentGroups()) {
       const childNames = group.children.map((c) => c.node.displayName);
-      const hasOverlap = childNames.some((n) => existingColNames.has(n));
-      if (!hasOverlap) {
-        nonMatching.push(...childNames);
-      }
+      if (!childNames.some((n) => existingColNames.has(n))) nonMatching.push(...childNames);
     }
     return nonMatching;
   });
@@ -872,10 +866,8 @@ export class PipelineWizardComponent {
   editHasNoChanges = computed(() => {
     if (!this.editMode() || !this.existingPipeline()) return false;
     const existing = this.existingPipeline()!;
-    const existingColNames = ((existing as any).nodes || [])
-      .map((n: any) => n.property || n.displayName).sort().join('|');
-    const existingRSPaths = (existing.rowSources || [])
-      .map((rs) => rs.path).sort().join('|');
+    const existingColNames = ((existing as any).nodes || []).map((n: any) => n.property || n.displayName).sort().join('|');
+    const existingRSPaths = (existing.rowSources || []).map((rs) => rs.path).sort().join('|');
     const groups = this.pipelineGroups();
     if (groups.length === 0) return true;
     const newColNames = groups[0].columns.map((c) => c.displayName).sort().join('|');
@@ -883,14 +875,14 @@ export class PipelineWizardComponent {
     return existingColNames === newColNames && existingRSPaths === newRSPaths;
   });
 
-  // Step 3: Configure
+  // Configure
   packagePath = 'OPCUA.DS';
   className = '';
   dataSourceName = '';
   pipelineMode: 'polling' | 'subscription' = 'polling';
   autoStart = true;
 
-  // Step 4: Deploy
+  // Deploy
   deploying = signal(false);
   deployProgress = signal(0);
   deployError = signal('');
@@ -899,15 +891,24 @@ export class PipelineWizardComponent {
   deployResults = signal<{ name: string; success: boolean; message: string }[]>([]);
 
   constructor() {
-    this.loadTree();
+    const servers = this.config.getServers();
+    // Auto-select if only one server
+    if (servers.length === 1) {
+      this.selectedServer.set(servers[0]);
+      this.loadTreeForServer(servers[0]);
+    }
 
-    // Detect edit mode from route params
+    // Detect edit mode
     const name = this.route.snapshot.paramMap.get('name');
     if (name) {
       this.editMode.set(true);
       this.editPipelineName.set(name);
       this.loadExistingPipeline(name);
     }
+  }
+
+  selectServer(server: ServerProfile): void {
+    this.selectedServer.set(server);
   }
 
   private loadExistingPipeline(name: string): void {
@@ -919,7 +920,6 @@ export class PipelineWizardComponent {
         this.existingPipeline.set(pipeline);
         this.existingClassName.set((pipeline as any).dataSourceClass || '');
 
-        // Pre-fill configure fields
         const fullClass = (pipeline as any).dataSourceClass || '';
         const lastDot = fullClass.lastIndexOf('.');
         if (lastDot > 0) {
@@ -931,7 +931,13 @@ export class PipelineWizardComponent {
         this.dataSourceName = pipeline.name;
         this.pipelineMode = (pipeline.mode as 'polling' | 'subscription') || 'polling';
 
-        // Pre-populate v2Selections from pipeline's rowSources + childNodes
+        // Match server by URL
+        const matchedServer = this.config.getServers().find(s => s.url === pipeline.serverUrl);
+        if (matchedServer) {
+          this.selectedServer.set(matchedServer);
+          this.loadTreeForServer(matchedServer);
+        }
+
         if (pipeline.rowSources) {
           const selections = new Map<string, V2Selection>();
           for (const rs of pipeline.rowSources) {
@@ -943,8 +949,8 @@ export class PipelineWizardComponent {
               path: rs.path,
             };
             for (const child of rs.childNodes || []) {
-              const key = `${child.nodeNs}:${child.nodeId}`;
               const relativePath = child.relativePath || [child.displayName];
+              const key = `${child.nodeNs}:${child.nodeId}`;
               selections.set(key, {
                 node: {
                   displayName: child.displayName,
@@ -955,6 +961,7 @@ export class PipelineWizardComponent {
                   relativePath,
                 },
                 parentNode: parentInfo,
+                serverId: matchedServer?.id || '',
               });
             }
           }
@@ -964,15 +971,15 @@ export class PipelineWizardComponent {
     });
   }
 
-  // --- Tree Loading ---
+  // --- Tree Loading (single server) ---
 
-  loadTree(): void {
+  private loadTreeForServer(server: ServerProfile): void {
     const cfg = this.config.get();
-    if (!cfg.apiBaseUrl || !cfg.serverUrl) return;
+    if (!cfg.apiBaseUrl) return;
     this.treeLoading.set(true);
-    this.api.browse(cfg.rootNodeNs, cfg.rootNodeId, undefined).subscribe({
+    this.api.browse(server.rootNodeNs, server.rootNodeId, undefined, server).subscribe({
       next: (nodes) => {
-        this.treeRoots.set(nodes.map((n) => ({ ...n, level: 0 })));
+        this.treeRoots.set(nodes.map((n) => ({ ...n, level: 0, serverId: server.id })));
         this.treeLoading.set(false);
       },
       error: () => this.treeLoading.set(false),
@@ -1003,21 +1010,13 @@ export class PipelineWizardComponent {
       }
       node.loading = true;
       this.treeRoots.update((r) => [...r]);
-      this.api.browse(node.nodeNs, node.nodeId, node.nodeIdType).subscribe({
+      this.api.browse(node.nodeNs, node.nodeId, node.nodeIdType, this.selectedServer() || undefined).subscribe({
         next: (children) => {
-          node.children = children.map((c) => ({
-            ...c,
-            level: (node.level ?? 0) + 1,
-            parentRef: node,
-          }));
+          node.children = children.map((c) => ({ ...c, level: (node.level ?? 0) + 1, parentRef: node, serverId: node.serverId }));
           node.loading = false;
           this.treeRoots.update((r) => [...r]);
         },
-        error: () => {
-          node.loading = false;
-          node.children = [];
-          this.treeRoots.update((r) => [...r]);
-        },
+        error: () => { node.loading = false; node.children = []; this.treeRoots.update((r) => [...r]); },
       });
     }
   }
@@ -1026,7 +1025,6 @@ export class PipelineWizardComponent {
 
   isNodeSelected(node: TreeNode): boolean {
     if (node.nodeCategory === 'object' || node.nodeCategory === 'folder') {
-      // Object is "selected" if all its variable children are selected
       if (!node.children || node.children.length === 0) return false;
       const variableChildren = node.children.filter((c) => c.nodeCategory === 'variable');
       if (variableChildren.length === 0) return false;
@@ -1052,39 +1050,26 @@ export class PipelineWizardComponent {
 
   toggleNodeSelection(node: TreeNode): void {
     if (node.nodeCategory === 'object' || node.nodeCategory === 'folder') {
-      // Object node: auto-expand and select/unselect all variable children
       if (this.isNodeSelected(node)) {
         this.unselectAllChildren(node);
       } else {
         if (node.children && node.children.length > 0) {
           this.selectAllVariableChildren(node);
-          if (!node.expanded) {
-            node.expanded = true;
-            this.treeRoots.update((r) => [...r]);
-          }
+          if (!node.expanded) { node.expanded = true; this.treeRoots.update((r) => [...r]); }
         } else {
-          // Need to fetch children first
           const nk = this.nodeKey(node);
           this.autoExpandingNodes.update((s) => { const ns = new Set(s); ns.add(nk); return ns; });
-          this.api.browse(node.nodeNs, node.nodeId, node.nodeIdType).subscribe({
+          this.api.browse(node.nodeNs, node.nodeId, node.nodeIdType, this.selectedServer() || undefined).subscribe({
             next: (children) => {
-              node.children = children.map((c) => ({
-                ...c,
-                level: (node.level ?? 0) + 1,
-                parentRef: node,
-              }));
+              node.children = children.map((c) => ({ ...c, level: (node.level ?? 0) + 1, parentRef: node, serverId: node.serverId }));
               node.expanded = true;
               node.loading = false;
-              // Guard: only auto-select if still in auto-expanding state
-              if (this.autoExpandingNodes().has(nk)) {
-                this.selectAllVariableChildren(node);
-              }
+              if (this.autoExpandingNodes().has(nk)) this.selectAllVariableChildren(node);
               this.autoExpandingNodes.update((s) => { const ns = new Set(s); ns.delete(nk); return ns; });
               this.treeRoots.update((r) => [...r]);
             },
             error: () => {
-              node.children = [];
-              node.loading = false;
+              node.children = []; node.loading = false;
               this.autoExpandingNodes.update((s) => { const ns = new Set(s); ns.delete(nk); return ns; });
               this.treeRoots.update((r) => [...r]);
             },
@@ -1100,14 +1085,9 @@ export class PipelineWizardComponent {
         this.v2Selections.update((m) => {
           const nm = new Map(m);
           nm.set(key, {
-            node: {
-              displayName: node.displayName,
-              nodeNs: node.nodeNs,
-              nodeId: node.nodeId,
-              nodeIdType: node.nodeIdType,
-              path: this.buildNodePath(node),
-            },
+            node: { displayName: node.displayName, nodeNs: node.nodeNs, nodeId: node.nodeId, nodeIdType: node.nodeIdType, path: this.buildNodePath(node) },
             parentNode: parentInfo,
+            serverId: this.selectedServer()?.id || '',
           });
           return nm;
         });
@@ -1116,18 +1096,13 @@ export class PipelineWizardComponent {
   }
 
   removeSelectedNode(sel: SelectedNode): void {
-    const key = `${sel.nodeNs}:${sel.nodeId}`;
-    this.v2Selections.update((m) => { const nm = new Map(m); nm.delete(key); return nm; });
+    this.v2Selections.update((m) => { const nm = new Map(m); nm.delete(this.nodeKey(sel)); return nm; });
   }
 
   removeGroup(group: PipelineGroup): void {
     this.v2Selections.update((m) => {
       const nm = new Map(m);
-      for (const rs of group.rowSources) {
-        for (const child of rs.childNodes) {
-          nm.delete(`${child.nodeNs}:${child.nodeId}`);
-        }
-      }
+      for (const rs of group.rowSources) { for (const child of rs.childNodes) { nm.delete(this.nodeKey(child)); } }
       return nm;
     });
   }
@@ -1135,38 +1110,22 @@ export class PipelineWizardComponent {
   removeRowSource(group: PipelineGroup, rs: RowSource): void {
     this.v2Selections.update((m) => {
       const nm = new Map(m);
-      for (const child of rs.childNodes) {
-        nm.delete(`${child.nodeNs}:${child.nodeId}`);
-      }
+      for (const child of rs.childNodes) { nm.delete(this.nodeKey(child)); }
       return nm;
     });
   }
 
-  // --- Selection Helpers ---
-
   private selectAllVariableChildren(parentNode: TreeNode): void {
     if (!parentNode.children) return;
-    const parentInfo = {
-      displayName: parentNode.displayName,
-      nodeNs: parentNode.nodeNs,
-      nodeId: parentNode.nodeId,
-      nodeIdType: parentNode.nodeIdType,
-      path: this.buildNodePath(parentNode),
-    };
-
+    const parentInfo = { displayName: parentNode.displayName, nodeNs: parentNode.nodeNs, nodeId: parentNode.nodeId, nodeIdType: parentNode.nodeIdType, path: this.buildNodePath(parentNode) };
     this.v2Selections.update((m) => {
       const nm = new Map(m);
       for (const child of parentNode.children!) {
         if (child.nodeCategory === 'variable') {
           nm.set(this.nodeKey(child), {
-            node: {
-              displayName: child.displayName,
-              nodeNs: child.nodeNs,
-              nodeId: child.nodeId,
-              nodeIdType: child.nodeIdType,
-              path: this.buildNodePath(child),
-            },
+            node: { displayName: child.displayName, nodeNs: child.nodeNs, nodeId: child.nodeId, nodeIdType: child.nodeIdType, path: this.buildNodePath(child) },
             parentNode: parentInfo,
+            serverId: this.selectedServer()?.id || '',
           });
         }
       }
@@ -1176,43 +1135,19 @@ export class PipelineWizardComponent {
 
   private unselectAllChildren(parentNode: TreeNode): void {
     if (!parentNode.children) return;
-    this.v2Selections.update((m) => {
-      const nm = new Map(m);
-      for (const child of parentNode.children!) {
-        nm.delete(this.nodeKey(child));
-      }
-      return nm;
-    });
+    this.v2Selections.update((m) => { const nm = new Map(m); for (const child of parentNode.children!) { nm.delete(this.nodeKey(child)); } return nm; });
   }
 
   private resolveParentInfo(node: TreeNode): V2Selection['parentNode'] {
     const parent = node.parentRef;
-    if (parent) {
-      return {
-        displayName: parent.displayName,
-        nodeNs: parent.nodeNs,
-        nodeId: parent.nodeId,
-        nodeIdType: parent.nodeIdType,
-        path: this.buildNodePath(parent),
-      };
-    }
-    // Fallback: the node sits directly under the root, use a synthetic root parent
-    return {
-      displayName: 'Objects',
-      nodeNs: 0,
-      nodeId: 85,
-      nodeIdType: 0,
-      path: 'Objects',
-    };
+    if (parent) return { displayName: parent.displayName, nodeNs: parent.nodeNs, nodeId: parent.nodeId, nodeIdType: parent.nodeIdType, path: this.buildNodePath(parent) };
+    return { displayName: 'Objects', nodeNs: 0, nodeId: 85, nodeIdType: 0, path: 'Objects' };
   }
 
   private findTreeNode(roots: TreeNode[], nodeNs: number, nodeId: string | number): TreeNode | undefined {
     for (const node of roots) {
       if (node.nodeNs === nodeNs && String(node.nodeId) === String(nodeId)) return node;
-      if (node.children) {
-        const found = this.findTreeNode(node.children, nodeNs, nodeId);
-        if (found) return found;
-      }
+      if (node.children) { const found = this.findTreeNode(node.children, nodeNs, nodeId); if (found) return found; }
     }
     return undefined;
   }
@@ -1220,52 +1155,40 @@ export class PipelineWizardComponent {
   buildNodePath(node: TreeNode): string {
     const parts: string[] = [];
     let current: TreeNode | undefined = node;
-    while (current) {
-      parts.unshift(current.displayName);
-      current = current.parentRef;
-    }
+    while (current) { parts.unshift(current.displayName); current = current.parentRef; }
     return parts.join('/');
   }
 
-  // --- Tree Icons ---
+  // --- Icons ---
 
   getWizardNodeIcon(node: TreeNode): string {
-    switch (node.nodeCategory) {
-      case 'folder': return 'folder';
-      case 'object': return 'inventory_2';
-      case 'variable': return 'bar_chart';
-      case 'property': return 'build';
-      default: return 'circle';
-    }
+    switch (node.nodeCategory) { case 'folder': return 'folder'; case 'object': return 'inventory_2'; case 'variable': return 'bar_chart'; case 'property': return 'build'; default: return 'circle'; }
   }
 
   getWizardNodeIconClass(node: TreeNode): string {
-    switch (node.nodeCategory) {
-      case 'folder': return 'text-slate-500';
-      case 'object': return 'text-amber-600';
-      case 'variable': return 'text-blue-500';
-      default: return 'text-slate-400';
-    }
+    switch (node.nodeCategory) { case 'folder': return 'text-slate-500'; case 'object': return 'text-amber-600'; case 'variable': return 'text-blue-500'; default: return 'text-slate-400'; }
   }
 
   // --- Step Navigation ---
 
   nextStep(): void {
-    if (this.currentStep() < 3) {
+    // When leaving server step, load the tree
+    if (this.needsServerStep() && this.currentStep() === 0 && this.selectedServer()) {
+      this.loadTreeForServer(this.selectedServer()!);
+    }
+    const maxStep = this.totalSteps() - 1;
+    if (this.currentStep() < maxStep) {
       this.currentStep.update((s) => s + 1);
-      this.stepProgress.set((this.currentStep() / 3) * 100);
     }
   }
 
   prevStep(): void {
     if (this.currentStep() > 0) {
       this.currentStep.update((s) => s - 1);
-      this.stepProgress.set((this.currentStep() / 3) * 100);
     }
   }
 
   onReviewContinue(): void {
-    // Auto-suggest names from the first row source if not already set
     if (!this.className && this.pipelineGroups().length > 0) {
       const firstGroup = this.pipelineGroups()[0];
       if (firstGroup.rowSources.length === 1 && this.totalDeployUnits() === 1) {
@@ -1276,21 +1199,11 @@ export class PipelineWizardComponent {
     this.nextStep();
   }
 
-  cancel(): void {
-    this.router.navigate(['/pipelines']);
-  }
+  cancel(): void { this.router.navigate(['/pipelines']); }
+  openSettings(): void { document.dispatchEvent(new CustomEvent('open-settings')); }
+  createNewPipelineFromNonMatching(): void { this.router.navigate(['/pipelines/new']); }
 
-  openSettings(): void {
-    document.dispatchEvent(new CustomEvent('open-settings'));
-  }
-
-  createNewPipelineFromNonMatching(): void {
-    // Remove non-matching nodes from edit, then navigate to create with them
-    // For now, just navigate to create — user can re-select there
-    this.router.navigate(['/pipelines/new']);
-  }
-
-  // --- Deploy / Update (v2: one request per PipelineGroup) ---
+  // --- Deploy ---
 
   deploy(): void {
     this.deploying.set(true);
@@ -1300,178 +1213,96 @@ export class PipelineWizardComponent {
     const groups = this.pipelineGroups();
     if (groups.length === 0) return;
 
-    // Edit mode: update existing pipeline
+    const server = this.selectedServer() || undefined;
+
     if (this.editMode()) {
       const group = groups[0];
-      const fullClassName = this.existingClassName();
-      const payload = {
-        ...this.buildV2Payload(group, fullClassName, this.dataSourceName),
-        existingClassName: fullClassName,
-      };
-
-      this.api.editPipeline(payload).subscribe({
+      const payload = { ...this.buildV2Payload(group, this.existingClassName(), this.dataSourceName), existingClassName: this.existingClassName() };
+      this.api.editPipeline(payload, server).subscribe({
         next: (result: any) => {
           this.deploying.set(false);
-          if (result.updated) {
-            this.deploySuccess.set(true);
-            this.deployMessage.set(
-              `Pipeline "${this.dataSourceName}" updated successfully with ${group.rowSources.length} row source${group.rowSources.length !== 1 ? 's' : ''} and ${group.columns.length} column${group.columns.length !== 1 ? 's' : ''}.`
-            );
-            this.deployResults.set([{ name: this.dataSourceName, success: true, message: 'Updated successfully' }]);
-          } else {
-            this.deploySuccess.set(false);
-            this.deployMessage.set(result.error || 'Update failed.');
-            this.deployResults.set([{ name: this.dataSourceName, success: false, message: result.error || 'Failed' }]);
-          }
+          this.deploySuccess.set(!!result.updated);
+          this.deployMessage.set(result.updated
+            ? `Pipeline "${this.dataSourceName}" updated successfully.`
+            : result.error || 'Update failed.');
+          this.deployResults.set([{ name: this.dataSourceName, success: !!result.updated, message: result.updated ? 'Updated' : result.error || 'Failed' }]);
           this.nextStep();
         },
-        error: (err) => {
-          this.deploying.set(false);
-          this.deployError.set(err.message || 'Update failed');
-        },
+        error: (err) => { this.deploying.set(false); this.deployError.set(err.message || 'Update failed'); },
       });
       return;
     }
 
-    // Create mode
     if (groups.length === 1) {
-      // Single pipeline group -> single v2 deploy
       const group = groups[0];
-      const fullClassName = this.packagePath
-        ? `${this.packagePath}.${this.className}`
-        : this.className;
-
-      this.api
-        .deploy(this.buildV2Payload(group, fullClassName, this.dataSourceName) as any)
-        .subscribe({
-          next: (result) => {
-            this.deploying.set(false);
-            if (result.deployed) {
-              this.deploySuccess.set(true);
-              this.deployMessage.set(
-                `Pipeline "${this.dataSourceName}" deployed successfully as ${result.dataSourceClass} with ${group.rowSources.length} row source${group.rowSources.length !== 1 ? 's' : ''}.`
-              );
-              this.deployResults.set([{ name: this.dataSourceName, success: true, message: `Deployed as ${result.dataSourceClass}` }]);
-            } else {
-              this.deploySuccess.set(false);
-              this.deployMessage.set(result.error || 'Deployment failed.');
-              this.deployResults.set([{ name: this.dataSourceName, success: false, message: result.error || 'Failed' }]);
-            }
-            this.nextStep();
-          },
-          error: (err) => {
-            this.deploying.set(false);
-            this.deployError.set(err.message || 'Deployment failed');
-          },
-        });
+      const fullClassName = this.packagePath ? `${this.packagePath}.${this.className}` : this.className;
+      this.api.deploy(this.buildV2Payload(group, fullClassName, this.dataSourceName) as any, server).subscribe({
+        next: (result) => {
+          this.deploying.set(false);
+          this.deploySuccess.set(result.deployed);
+          this.deployMessage.set(result.deployed
+            ? `Pipeline "${this.dataSourceName}" deployed as ${result.dataSourceClass}.`
+            : result.error || 'Deployment failed.');
+          this.deployResults.set([{ name: this.dataSourceName, success: result.deployed, message: result.deployed ? `Deployed as ${result.dataSourceClass}` : result.error || 'Failed' }]);
+          this.nextStep();
+        },
+        error: (err) => { this.deploying.set(false); this.deployError.set(err.message || 'Deployment failed'); },
+      });
     } else {
-      // Multiple groups: deploy sequentially (one v2 request per group)
       this.deployProgress.set(0);
       this.deployGroupsSequential(groups, 0);
     }
   }
 
-  private buildV2Payload(
-    group: PipelineGroup,
-    fullClassName: string,
-    dataSourceName: string,
-  ): DeployV2Request {
+  private buildV2Payload(group: PipelineGroup, fullClassName: string, dataSourceName: string): DeployV2Request {
     return {
-      className: fullClassName,
-      dataSourceName,
-      mode: this.pipelineMode,
-      pipelineVersion: 2,
-      columns: group.columns.map((c) => ({
-        displayName: c.displayName,
-        relativePath: c.relativePath || [c.displayName],
-        inferredType: undefined, // backend will infer
-      })),
+      className: fullClassName, dataSourceName, mode: this.pipelineMode, pipelineVersion: 2,
+      columns: group.columns.map((c) => ({ displayName: c.displayName, relativePath: c.relativePath || [c.displayName], inferredType: undefined })),
       rowSources: group.rowSources.map((rs) => ({
-        displayName: rs.displayName,
-        nodeNs: rs.nodeNs,
-        nodeId: rs.nodeId,
-        nodeIdType: rs.nodeIdType,
-        path: rs.path,
-        childNodes: rs.childNodes.map((cn) => ({
-          displayName: cn.displayName,
-          nodeNs: cn.nodeNs,
-          nodeId: cn.nodeId,
-          nodeIdType: cn.nodeIdType,
-          relativePath: cn.relativePath || [cn.displayName],
-        })),
+        displayName: rs.displayName, nodeNs: rs.nodeNs, nodeId: rs.nodeId, nodeIdType: rs.nodeIdType, path: rs.path,
+        childNodes: rs.childNodes.map((cn) => ({ displayName: cn.displayName, nodeNs: cn.nodeNs, nodeId: cn.nodeId, nodeIdType: cn.nodeIdType, relativePath: cn.relativePath || [cn.displayName] })),
       })),
     };
   }
 
-  private deployGroupsSequential(
-    groups: PipelineGroup[],
-    index: number,
-  ): void {
+  private deployGroupsSequential(groups: PipelineGroup[], index: number): void {
     if (index >= groups.length) {
       this.deploying.set(false);
       const results = this.deployResults();
       const allSuccess = results.every((r) => r.success);
-      const successCount = results.filter((r) => r.success).length;
       this.deploySuccess.set(allSuccess);
-      this.deployMessage.set(
-        allSuccess
-          ? `All ${groups.length} pipelines deployed successfully.`
-          : `${successCount} of ${groups.length} pipelines deployed successfully.`
-      );
+      this.deployMessage.set(allSuccess ? `All ${groups.length} pipelines deployed successfully.` : `${results.filter((r) => r.success).length} of ${groups.length} deployed.`);
       this.nextStep();
       return;
     }
 
     const group = groups[index];
     const suffix = this.groupSuffix(group);
-    const fullClassName = this.packagePath
-      ? `${this.packagePath}.${this.className}_${suffix}`
-      : `${this.className}_${suffix}`;
-    const dsName = `${this.dataSourceName}_${suffix}`;
-
+    const fullClassName = this.packagePath ? `${this.packagePath}.${this.className}${suffix}` : `${this.className}${suffix}`;
+    const dsName = `${this.dataSourceName}${suffix}`;
     this.deployProgress.set(index + 1);
 
-    this.api
-      .deploy(this.buildV2Payload(group, fullClassName, dsName) as any)
-      .subscribe({
-        next: (result) => {
-          this.deployResults.update((r) => [
-            ...r,
-            {
-              name: dsName,
-              success: result.deployed,
-              message: result.deployed
-                ? `Deployed as ${result.dataSourceClass}`
-                : result.error || 'Failed',
-            },
-          ]);
-          this.deployGroupsSequential(groups, index + 1);
-        },
-        error: (err) => {
-          this.deployResults.update((r) => [
-            ...r,
-            { name: dsName, success: false, message: err.message || 'Failed' },
-          ]);
-          this.deployGroupsSequential(groups, index + 1);
-        },
-      });
+    const server = this.selectedServer() || undefined;
+    this.api.deploy(this.buildV2Payload(group, fullClassName, dsName) as any, server).subscribe({
+      next: (result) => {
+        this.deployResults.update((r) => [...r, { name: dsName, success: result.deployed, message: result.deployed ? `Deployed as ${result.dataSourceClass}` : result.error || 'Failed' }]);
+        this.deployGroupsSequential(groups, index + 1);
+      },
+      error: (err) => {
+        this.deployResults.update((r) => [...r, { name: dsName, success: false, message: err.message || 'Failed' }]);
+        this.deployGroupsSequential(groups, index + 1);
+      },
+    });
   }
 
-  private sanitizeSuffix(name: string): string {
-    return name.replace(/[^a-zA-Z0-9]/g, '');
-  }
+  private sanitizeSuffix(name: string): string { return name.replace(/[^a-zA-Z0-9]/g, ''); }
 
   groupSuffix(group: PipelineGroup): string {
-    if (group.rowSources.length === 1) {
-      return this.sanitizeSuffix(group.rowSources[0].displayName);
-    }
-    // Use the first column name as a distinguisher for multi-source groups
+    if (group.rowSources.length === 1) return this.sanitizeSuffix(group.rowSources[0].displayName);
     return this.sanitizeSuffix(group.columns[0]?.displayName || 'Group');
   }
 
-  finish(): void {
-    this.router.navigate(['/pipelines']);
-  }
+  finish(): void { this.router.navigate(['/pipelines']); }
 
   columnNames(group: PipelineGroup): string {
     return group.columns.map((c) => c.displayName).join(', ');

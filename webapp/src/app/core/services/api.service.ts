@@ -8,6 +8,7 @@ import {
   ConnectionTestResult,
   Pipeline,
   DeployResult,
+  ServerProfile,
 } from '../models/opcua.models';
 
 interface ApiEnvelope<T> {
@@ -37,8 +38,25 @@ export class ApiService {
     return headers;
   }
 
-  /** Build request body with connection params merged in */
-  private buildBody(params: Record<string, any> = {}): Record<string, any> {
+  /** Build request body with connection params from a specific server profile */
+  private buildBody(params: Record<string, any> = {}, server?: ServerProfile): Record<string, any> {
+    if (server) {
+      const body: Record<string, any> = {
+        url: server.url,
+        securityMode: server.securityMode,
+        ...params,
+      };
+      if (server.username) body['username'] = server.username;
+      if (server.password) body['password'] = server.password;
+      if (server.certPath) body['certPath'] = server.certPath;
+      if (server.keyPath) body['keyPath'] = server.keyPath;
+      if (server.trustDir) body['trustDir'] = server.trustDir;
+      if (server.crlDir) body['crlDir'] = server.crlDir;
+      if (server.clientURI) body['clientURI'] = server.clientURI;
+      return body;
+    }
+
+    // Legacy fallback: use flat config fields
     const cfg = this.configService.get();
     const body: Record<string, any> = {
       url: cfg.serverUrl,
@@ -55,9 +73,9 @@ export class ApiService {
     return body;
   }
 
-  private post<T>(endpoint: string, params: Record<string, any> = {}, timeoutMs = 15000): Observable<T> {
+  private post<T>(endpoint: string, params: Record<string, any> = {}, timeoutMs = 15000, server?: ServerProfile): Observable<T> {
     return this.http
-      .post<ApiEnvelope<T>>(`${this.baseUrl}${endpoint}`, this.buildBody(params), {
+      .post<ApiEnvelope<T>>(`${this.baseUrl}${endpoint}`, this.buildBody(params, server), {
         headers: this.headers,
       })
       .pipe(
@@ -89,28 +107,28 @@ export class ApiService {
       );
   }
 
-  browse(nodeNs?: number, nodeId?: string | number, nodeIdType?: number): Observable<OpcuaNode[]> {
+  browse(nodeNs?: number, nodeId?: string | number, nodeIdType?: number, server?: ServerProfile): Observable<OpcuaNode[]> {
     const params: Record<string, any> = {};
     if (nodeNs != null) params['nodeNs'] = nodeNs;
     if (nodeId != null) params['nodeId'] = String(nodeId);
     if (nodeIdType != null) params['nodeIdType'] = nodeIdType;
-    return this.post<OpcuaNode[]>('/browse', params);
+    return this.post<OpcuaNode[]>('/browse', params, 15000, server);
   }
 
-  read(nodeNs: number, nodeId: string | number, nodeIdType: number): Observable<NodeReadResult> {
+  read(nodeNs: number, nodeId: string | number, nodeIdType: number, server?: ServerProfile): Observable<NodeReadResult> {
     return this.post<NodeReadResult>('/read', {
       nodeNs,
       nodeId: String(nodeId),
       nodeIdType,
-    });
+    }, 15000, server);
   }
 
-  test(): Observable<ConnectionTestResult> {
-    return this.post<ConnectionTestResult>('/test', {});
+  test(server?: ServerProfile): Observable<ConnectionTestResult> {
+    return this.post<ConnectionTestResult>('/test', {}, 15000, server);
   }
 
-  deploy(params: Record<string, any>): Observable<DeployResult> {
-    return this.post<DeployResult>('/deploy', params, 60000);
+  deploy(params: Record<string, any>, server?: ServerProfile): Observable<DeployResult> {
+    return this.post<DeployResult>('/deploy', params, 60000, server);
   }
 
   listPipelines(): Observable<Pipeline[]> {
@@ -125,7 +143,7 @@ export class ApiService {
     return this.post('/pipelines/delete', { name });
   }
 
-  editPipeline(params: Record<string, any>): Observable<any> {
-    return this.post('/pipelines/edit', params, 60000);
+  editPipeline(params: Record<string, any>, server?: ServerProfile): Observable<any> {
+    return this.post('/pipelines/edit', params, 60000, server);
   }
 }
