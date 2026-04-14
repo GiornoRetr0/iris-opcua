@@ -57,11 +57,7 @@ ClassMethod Deploy(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		Quit:$$$ISERR(tSC)
 
 		set tSC = ..WriteAndCompile(tClassName, tDSText)
-		if $$$ISERR(tSC) {
-			set pResult.error = "DataSource compilation failed: "_$System.Status.GetErrorText(tSC)
-			set tSC = $$$OK
-			Quit
-		}
+		Quit:$$$ISERR(tSC)
 
 		set pResult.deployed = 1
 		set pResult.dataSourceClass = tClassName
@@ -74,32 +70,17 @@ ClassMethod Deploy(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 
 		// --- Add service item to shared production ---
 		set tSC = ..EnsureProductionExists()
-		if $$$ISERR(tSC) {
-			set pResult.error = "Failed to create production: "_$System.Status.GetErrorText(tSC)
-			set tSC = $$$OK
-			Quit
-		}
+		Quit:$$$ISERR(tSC)
 
 		set tSC = ..AddServiceItem(pBody, tClassName, tDataSourceName, tMode)
-		if $$$ISERR(tSC) {
-			set pResult.error = "Failed to add service item: "_$System.Status.GetErrorText(tSC)
-			set tSC = $$$OK
-			Quit
-		}
+		Quit:$$$ISERR(tSC)
 
 		set pResult.compiled = 1
 
 		// --- Start or update the production ---
-		set tEnableOnDeploy = pBody.%Get("enableOnDeploy")
-		if tEnableOnDeploy '= 0 {
-			set tSC = ..StartOrUpdateProduction()
-			if $$$ISERR(tSC) {
-				set pResult.error = "Failed to start production: "_$System.Status.GetErrorText(tSC)
-				set tSC = $$$OK
-				Quit
-			}
-			set pResult.started = 1
-		}
+		set tSC = ..StartOrUpdateProduction()
+		Quit:$$$ISERR(tSC)
+		set pResult.started = 1
 
 	} Catch (e) {
 		set tSC = e.AsStatus()
@@ -131,60 +112,78 @@ ClassMethod EnsureProductionExists() As %Status [ Private ]
 	Quit ..WriteAndCompile(..#ProductionClass, tText)
 }
 
-/// Add a new business service item to the shared production's XData.
+/// Add a new business service item to the shared production using the Ens.Config API.
 ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDSName As %String, pMode As %String) As %Status [ Private ]
 {
 	#dim tSC As %Status = $$$OK
 	Try {
-		// Open the production class definition
-		set tClassDef = ##class(%Dictionary.ClassDefinition).%OpenId(..#ProductionClass)
-		if '$IsObject(tClassDef) {
-			set tSC = $$$ERROR($$$GeneralError, "Cannot open production class definition")
+		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
+		if '$IsObject(tProd) {
+			set tSC = $$$ERROR($$$GeneralError, "Cannot open production: "_..#ProductionClass)
 			Quit
 		}
 
-		// Find the XData block
-		set tXData = ""
-		for i=1:1:tClassDef.XDatas.Count() {
-			if tClassDef.XDatas.GetAt(i).Name = "ProductionDefinition" {
-				set tXData = tClassDef.XDatas.GetAt(i)
-				Quit
-			}
-		}
-		if '$IsObject(tXData) {
-			set tSC = $$$ERROR($$$GeneralError, "Production XData not found")
-			Quit
-		}
-
-		// Read current XData content
-		set tContent = ""
-		while 'tXData.Data.AtEnd {
-			set tContent = tContent _ tXData.Data.Read(32000)
+		// Determine service class
+		set tVersion = +pBody.%Get("pipelineVersion")
+		if (pMode = "subscription") && (tVersion = 2) {
+			set tServiceClass = "OPCUA.Service.TCPSubscriptionRowSourceService"
+		} elseif pMode = "subscription" {
+			set tServiceClass = "OPCUA.Service.TCPSubscriptionService"
+		} elseif tVersion = 2 {
+			set tServiceClass = "OPCUA.Service.TCPPollingRowSourceService"
+		} else {
+			set tServiceClass = "OPCUA.Service.TCPPollingService"
 		}
 
-		// Build the new <Item> XML
-		set tItemXML = ..BuildItemXML(pBody, pDSClassName, pDSName, pMode)
+		// Create config item
+		set tItem = ##class(Ens.Config.Item).%New()
+		set tItem.Name = pDSName
+		set tItem.ClassName = tServiceClass
+		set tItem.PoolSize = 1
+		set tItem.Enabled = 1
+		set tItem.LogTraceEvents = 1
 
-		// Insert before </Production>
-		set tInsertPos = $Find(tContent, "</Production>")
-		if tInsertPos = 0 {
-			set tSC = $$$ERROR($$$GeneralError, "Cannot find </Production> tag in XData")
-			Quit
+		// Add adapter settings
+		do ..AddSetting(tItem, "Adapter", "DataSourceClass", pDSClassName)
+		do ..AddSetting(tItem, "Adapter", "URL", pBody.%Get("url"))
+
+		if pMode = "polling" {
+			set tInterval = +pBody.%Get("callInterval")
+			if tInterval < 1 set tInterval = 5
+			do ..AddSetting(tItem, "Adapter", "CallInterval", tInterval)
+		} else {
+			set tPubInterval = +pBody.%Get("publishingInterval")
+			if tPubInterval < 1 set tPubInterval = 1000
+			do ..AddSetting(tItem, "Adapter", "RequestedPublishingInterval", tPubInterval)
+			set tSampInterval = pBody.%Get("samplingInterval")
+			if tSampInterval = "" set tSampInterval = 0
+			do ..AddSetting(tItem, "Adapter", "RequestedSamplingInterval", +tSampInterval)
+			set tQueueSize = +pBody.%Get("queueSize")
+			if tQueueSize < 1 set tQueueSize = 5
+			do ..AddSetting(tItem, "Adapter", "RequestedQueueSize", tQueueSize)
 		}
-		// $Find returns position AFTER the match, so back up
-		set tInsertPos = tInsertPos - $Length("</Production>")
-		set tNewContent = $Extract(tContent, 1, tInsertPos - 1) _ tItemXML _ $Extract(tContent, tInsertPos, *)
 
-		// Write back
-		do tXData.Data.Clear()
-		do tXData.Data.Write(tNewContent)
+		// Security settings
+		set tSecMode = +pBody.%Get("securityMode")
+		if tSecMode '= 3 set tSecMode = 1
+		if tSecMode = 3 {
+			do ..AddSetting(tItem, "Adapter", "SecurityMode", 3)
+			do ..AddSettingIfNotEmpty(tItem, "Adapter", pBody, "clientURI", "ClientURI")
+			do ..AddSettingIfNotEmpty(tItem, "Adapter", pBody, "certPath", "PublicCertificate")
+			do ..AddSettingIfNotEmpty(tItem, "Adapter", pBody, "keyPath", "PrivateKey")
+			do ..AddSettingIfNotEmpty(tItem, "Adapter", pBody, "trustDir", "TrustListDir")
+			do ..AddSettingIfNotEmpty(tItem, "Adapter", pBody, "crlDir", "RevocationListDir")
+		}
 
-		// Save the class definition
-		set tSC = tClassDef.%Save()
+		// Credentials
+		do ..AddSettingIfNotEmpty(tItem, "Adapter", pBody, "username", "Username")
+		do ..AddSettingIfNotEmpty(tItem, "Adapter", pBody, "password", "Password")
+
+		// Insert into production, save, and persist to class
+		do tProd.Items.Insert(tItem)
+		set tSC = tProd.%Save()
 		$$$ThrowOnError(tSC)
-
-		// Recompile the production
-		set tSC = $System.OBJ.Compile(..#ProductionClass, "ck-d")
+		set tSC = tProd.SaveToClass()
 		$$$ThrowOnError(tSC)
 
 	} Catch (e) {
@@ -193,84 +192,27 @@ ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDS
 	Quit tSC
 }
 
-/// Build the XML fragment for a single <Item> element.
-ClassMethod BuildItemXML(pBody As %DynamicObject, pDSClassName As %String, pDSName As %String, pMode As %String) As %String [ Private ]
+/// Add a setting to a config item.
+ClassMethod AddSetting(pItem As Ens.Config.Item, pTarget As %String, pName As %String, pValue As %String) [ Private ]
 {
-	set tNL = $Char(10)
-	set tURL = pBody.%Get("url")
-	set tSecMode = +pBody.%Get("securityMode")
-	if tSecMode '= 3 set tSecMode = 1
-
-	set tVersion = +pBody.%Get("pipelineVersion")
-	if (pMode = "subscription") && (tVersion = 2) {
-		set tServiceClass = "OPCUA.Service.TCPSubscriptionRowSourceService"
-	} elseif pMode = "subscription" {
-		set tServiceClass = "OPCUA.Service.TCPSubscriptionService"
-	} elseif tVersion = 2 {
-		set tServiceClass = "OPCUA.Service.TCPPollingRowSourceService"
-	} else {
-		set tServiceClass = "OPCUA.Service.TCPPollingService"
-	}
-
-	set tXML = "  <Item Name="""_$ZConvert(pDSName, "O", "HTML")_""" Category="""" ClassName="""_tServiceClass_""""
-	set tXML = tXML_" PoolSize=""1"" Enabled=""true"" Foreground=""false"""
-	set tXML = tXML_" LogTraceEvents=""true"" Schedule="""">"_tNL
-
-	// DataSourceClass
-	set tXML = tXML_"    <Setting Target=""Adapter"" Name=""DataSourceClass"">"_pDSClassName_"</Setting>"_tNL
-
-	// URL
-	set tXML = tXML_"    <Setting Target=""Adapter"" Name=""URL"">"_$ZConvert(tURL, "O", "HTML")_"</Setting>"_tNL
-
-	// Mode-specific settings
-	if pMode = "polling" {
-		set tInterval = +pBody.%Get("callInterval")
-		if tInterval < 1 set tInterval = 5
-		set tXML = tXML_"    <Setting Target=""Adapter"" Name=""CallInterval"">"_tInterval_"</Setting>"_tNL
-	} else {
-		set tPubInterval = +pBody.%Get("publishingInterval")
-		if tPubInterval < 1 set tPubInterval = 1000
-		set tXML = tXML_"    <Setting Target=""Adapter"" Name=""RequestedPublishingInterval"">"_tPubInterval_"</Setting>"_tNL
-
-		set tSampInterval = pBody.%Get("samplingInterval")
-		if tSampInterval = "" set tSampInterval = 0
-		set tXML = tXML_"    <Setting Target=""Adapter"" Name=""RequestedSamplingInterval"">"_+tSampInterval_"</Setting>"_tNL
-
-		set tQueueSize = +pBody.%Get("queueSize")
-		if tQueueSize < 1 set tQueueSize = 5
-		set tXML = tXML_"    <Setting Target=""Adapter"" Name=""RequestedQueueSize"">"_tQueueSize_"</Setting>"_tNL
-	}
-
-	// Security settings
-	if tSecMode = 3 {
-		set tXML = tXML_"    <Setting Target=""Adapter"" Name=""SecurityMode"">3</Setting>"_tNL
-		do ..AppendSettingIfNotEmpty(.tXML, pBody, "clientURI", "ClientURI", tNL)
-		do ..AppendSettingIfNotEmpty(.tXML, pBody, "certPath", "PublicCertificate", tNL)
-		do ..AppendSettingIfNotEmpty(.tXML, pBody, "keyPath", "PrivateKey", tNL)
-		do ..AppendSettingIfNotEmpty(.tXML, pBody, "trustDir", "TrustListDir", tNL)
-		do ..AppendSettingIfNotEmpty(.tXML, pBody, "crlDir", "RevocationListDir", tNL)
-	}
-
-	// Username/password
-	do ..AppendSettingIfNotEmpty(.tXML, pBody, "username", "Username", tNL)
-	do ..AppendSettingIfNotEmpty(.tXML, pBody, "password", "Password", tNL)
-
-	set tXML = tXML_"  </Item>"_tNL
-
-	Quit tXML
+	set tSetting = ##class(Ens.Config.Setting).%New()
+	set tSetting.Target = pTarget
+	set tSetting.Name = pName
+	set tSetting.Value = pValue
+	do pItem.Settings.Insert(tSetting)
 }
 
-/// Helper: append a setting XML line if value is non-empty.
-ClassMethod AppendSettingIfNotEmpty(ByRef pXML As %String, pBody As %DynamicObject, pJsonKey As %String, pSettingName As %String, pNL As %String) [ Private ]
+/// Add a setting only if the JSON body has a non-empty value for the given key.
+ClassMethod AddSettingIfNotEmpty(pItem As Ens.Config.Item, pTarget As %String, pBody As %DynamicObject, pJsonKey As %String, pSettingName As %String) [ Private ]
 {
 	set tVal = pBody.%Get(pJsonKey)
 	if tVal '= "" {
-		set pXML = pXML_"    <Setting Target=""Adapter"" Name="""_pSettingName_""">"_$ZConvert(tVal, "O", "HTML")_"</Setting>"_pNL
+		do ..AddSetting(pItem, pTarget, pSettingName, tVal)
 	}
 }
 
 /// Start the production, or update it if already running.
-ClassMethod StartOrUpdateProduction() As %Status [ Private ]
+ClassMethod StartOrUpdateProduction() As %Status
 {
 	set tSC = ##class(Ens.Director).GetProductionStatus(.tProdName, .tState)
 
@@ -454,20 +396,12 @@ ClassMethod DeployV2(pBody As %DynamicObject, Output pResult As %DynamicObject) 
 			set tSerialClassName = $LI(tSerialClasses(iSC), 1)
 			set tSerialText = $LI(tSerialClasses(iSC), 2)
 			set tSC = ..WriteAndCompile(tSerialClassName, tSerialText)
-			if $$$ISERR(tSC) {
-				set pResult.error = "Serial class '"_tSerialClassName_"' compilation failed: "_$System.Status.GetErrorText(tSC)
-				set tSC = $$$OK
-				Quit
-			}
+			Quit:$$$ISERR(tSC)
 		}
-		if pResult.error '= "" Quit
+		Quit:$$$ISERR(tSC)
 
 		set tSC = ..WriteAndCompile(tClassName, tDSText)
-		if $$$ISERR(tSC) {
-			set pResult.error = "DataSource compilation failed: "_$System.Status.GetErrorText(tSC)
-			set tSC = $$$OK
-			Quit
-		}
+		Quit:$$$ISERR(tSC)
 
 		set pResult.deployed = 1
 		set pResult.dataSourceClass = tClassName
@@ -480,40 +414,21 @@ ClassMethod DeployV2(pBody As %DynamicObject, Output pResult As %DynamicObject) 
 
 		// --- Store row source metadata ---
 		set tSC = ..StoreRowSourceMetadata(tClassName, tRowSources, tColumns)
-		if $$$ISERR(tSC) {
-			set pResult.error = "Failed to store row source metadata: "_$System.Status.GetErrorText(tSC)
-			set tSC = $$$OK
-			Quit
-		}
+		Quit:$$$ISERR(tSC)
 
 		// --- Add service item to shared production ---
 		set tSC = ..EnsureProductionExists()
-		if $$$ISERR(tSC) {
-			set pResult.error = "Failed to create production: "_$System.Status.GetErrorText(tSC)
-			set tSC = $$$OK
-			Quit
-		}
+		Quit:$$$ISERR(tSC)
 
 		set tSC = ..AddServiceItem(pBody, tClassName, tDataSourceName, tMode)
-		if $$$ISERR(tSC) {
-			set pResult.error = "Failed to add service item: "_$System.Status.GetErrorText(tSC)
-			set tSC = $$$OK
-			Quit
-		}
+		Quit:$$$ISERR(tSC)
 
 		set pResult.compiled = 1
 
 		// --- Start or update the production ---
-		set tEnableOnDeploy = pBody.%Get("enableOnDeploy")
-		if tEnableOnDeploy '= 0 {
-			set tSC = ..StartOrUpdateProduction()
-			if $$$ISERR(tSC) {
-				set pResult.error = "Failed to start production: "_$System.Status.GetErrorText(tSC)
-				set tSC = $$$OK
-				Quit
-			}
-			set pResult.started = 1
-		}
+		set tSC = ..StartOrUpdateProduction()
+		Quit:$$$ISERR(tSC)
+		set pResult.started = 1
 
 	} Catch (e) {
 		set tSC = e.AsStatus()

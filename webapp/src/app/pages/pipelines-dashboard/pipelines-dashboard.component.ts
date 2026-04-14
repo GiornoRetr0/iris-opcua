@@ -309,12 +309,12 @@ export class PipelinesDashboardComponent implements OnInit {
     });
   }
 
-  /** API returns: enabled=1/0, running=1/0 */
+  /** Pipeline is running only if the production is running AND the item is enabled */
   isRunning(p: Pipeline): boolean {
+    const prodRunning: any = (p as any).productionRunning;
+    if (!(prodRunning === 1 || prodRunning === true || prodRunning === '1')) return false;
     const r: any = (p as any).running;
     if (r === 1 || r === true || r === '1') return true;
-    const e: any = p.enabled;
-    if (e === 1 || e === true || e === '1') return true;
     return false;
   }
 

@@ -14,66 +14,21 @@ ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %S
 	#dim tSC As %Status = $$$OK
 	set pResult = []
 	Try {
-		// Check if production class exists
-		if '##class(%Dictionary.ClassDefinition).%ExistsId(..#ProductionClass) {
-			Quit  // No production yet — return empty array
-		}
+		if '##class(%Dictionary.ClassDefinition).%ExistsId(..#ProductionClass) Quit
 
-		// Get running production info
+		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
+		if '$IsObject(tProd) Quit
+
 		do ##class(Ens.Director).GetProductionStatus(.tRunningProd, .tProdState)
 		set tProdRunning = (tRunningProd = ..#ProductionClass) && (tProdState = 1)
 
-		// Open class definition and parse XData
-		set tClassDef = ##class(%Dictionary.ClassDefinition).%OpenId(..#ProductionClass)
-		if '$IsObject(tClassDef) Quit
-
-		// Find XData
-		set tXData = ""
-		for i=1:1:tClassDef.XDatas.Count() {
-			if tClassDef.XDatas.GetAt(i).Name = "ProductionDefinition" {
-				set tXData = tClassDef.XDatas.GetAt(i)
-				Quit
-			}
-		}
-		if '$IsObject(tXData) Quit
-
-		// Read XData content
-		set tContent = ""
-		while 'tXData.Data.AtEnd {
-			set tContent = tContent _ tXData.Data.Read(32000)
-		}
-
-		// Parse XML to extract items
-		set tSC = ..ParseItems(tContent, tProdRunning, pResult)
-
-	} Catch (e) {
-		set tSC = e.AsStatus()
-	}
-	Quit tSC
-}
-
-/// Parse production XData XML and extract Item elements using string parsing.
-ClassMethod ParseItems(pContent As %String, pProdRunning As %Boolean, pResult As %DynamicArray) As %Status [ Private ]
-{
-	#dim tSC As %Status = $$$OK
-	Try {
-		// Find each <Item ...>...</Item> block
-		set tPos = 1
-		for {
-			set tItemStart = $Find(pContent, "<Item ", tPos)
-			if tItemStart = 0 Quit
-
-			set tItemEnd = $Find(pContent, "</Item>", tItemStart)
-			if tItemEnd = 0 Quit
-
-			// Extract the full item block (from <Item to </Item>)
-			set tBlock = $Extract(pContent, tItemStart - 6, tItemEnd - 1)
-			set tPos = tItemEnd
+		for i=1:1:tProd.Items.Count() {
+			set tCfgItem = tProd.Items.GetAt(i)
 
 			set tItem = {}
-			set tItem.name = ..ExtractAttr(tBlock, "Name")
-			set tItem.className = ..ExtractAttr(tBlock, "ClassName")
-			set tItem.enabled = (..ExtractAttr(tBlock, "Enabled") = "true")
+			set tItem.name = tCfgItem.Name
+			set tItem.className = tCfgItem.ClassName
+			set tItem.enabled = tCfgItem.Enabled
 
 			// Determine mode and pipeline version from service class
 			if tItem.className = "OPCUA.Service.TCPSubscriptionRowSourceService" {
@@ -90,11 +45,11 @@ ClassMethod ParseItems(pContent As %String, pProdRunning As %Boolean, pResult As
 				set tItem.pipelineVersion = 1
 			}
 
-			// Extract settings
-			set tItem.dataSourceClass = ..ExtractSetting(tBlock, "DataSourceClass")
-			set tItem.url = ..ExtractSetting(tBlock, "URL")
-			set tItem.callInterval = ..ExtractSetting(tBlock, "CallInterval")
-			set tItem.publishingInterval = ..ExtractSetting(tBlock, "RequestedPublishingInterval")
+			// Read settings from config item
+			set tItem.dataSourceClass = ..GetSettingValue(tCfgItem, "DataSourceClass")
+			set tItem.serverUrl = ..GetSettingValue(tCfgItem, "URL")
+			set tItem.callInterval = ..GetSettingValue(tCfgItem, "CallInterval")
+			set tItem.publishingInterval = ..GetSettingValue(tCfgItem, "RequestedPublishingInterval")
 
 			// Derive table name from DataSource class
 			if tItem.dataSourceClass '= "" {
@@ -103,8 +58,7 @@ ClassMethod ParseItems(pContent As %String, pProdRunning As %Boolean, pResult As
 				set tItem.tableName = $Select(tPkg="":tShort, 1:$Replace(tPkg, ".", "_")_"."_tShort)
 			}
 
-			// Get runtime status if production is running
-			if pProdRunning {
+			if tProdRunning {
 				set tItem.running = ##class(Ens.Director).IsItemEnabled(tItem.name, .tSCStatus)
 				set tItem.rowCount = ..GetRowCount(tItem.dataSourceClass)
 			} else {
@@ -112,42 +66,34 @@ ClassMethod ParseItems(pContent As %String, pProdRunning As %Boolean, pResult As
 				set tItem.rowCount = 0
 			}
 
-			set tItem.productionRunning = pProdRunning
+			set tItem.productionRunning = tProdRunning
 			set tItem.nodes = ..GetNodeNames(tItem.dataSourceClass)
 
-			// Add row source info for v2 pipelines
 			if tItem.pipelineVersion = 2 {
 				set tItem.rowSources = ..GetRowSourceInfo(tItem.dataSourceClass)
 			}
 
 			do pResult.%Push(tItem)
 		}
+
 	} Catch (e) {
 		set tSC = e.AsStatus()
 	}
 	Quit tSC
 }
 
-/// Extract an XML attribute value from a tag string.
-ClassMethod ExtractAttr(pXML As %String, pAttr As %String) As %String [ Private ]
+/// Get a setting value from a config item by name.
+ClassMethod GetSettingValue(pItem As Ens.Config.Item, pName As %String) As %String [ Private ]
 {
-	set tSearch = pAttr_"="""
-	set tPos = $Find(pXML, tSearch)
-	if tPos = 0 Quit ""
-	set tEnd = $Find(pXML, """", tPos)
-	if tEnd = 0 Quit ""
-	Quit $Extract(pXML, tPos, tEnd - 2)
-}
-
-/// Extract a Setting value by Name from an Item XML block.
-ClassMethod ExtractSetting(pXML As %String, pName As %String) As %String [ Private ]
-{
-	set tSearch = "Name="""_pName_""">"
-	set tPos = $Find(pXML, tSearch)
-	if tPos = 0 Quit ""
-	set tEnd = $Find(pXML, "</Setting>", tPos)
-	if tEnd = 0 Quit ""
-	Quit $Extract(pXML, tPos, tEnd - $Length("</Setting>") - 1)
+	set tValue = ""
+	for i=1:1:pItem.Settings.Count() {
+		set tSetting = pItem.Settings.GetAt(i)
+		if tSetting.Name = pName {
+			set tValue = tSetting.Value
+			Quit
+		}
+	}
+	Quit tValue
 }
 
 /// Get row count for a DataSource table.
@@ -194,9 +140,7 @@ ClassMethod GetNodeNames(pClassName As %String) As %DynamicArray [ Private ]
 	Quit tNodes
 }
 
-/// Toggle a pipeline service item on/off.
-/// Updates the XData Enabled attribute then calls UpdateProduction
-/// to apply the change — this is the correct IRIS pattern.
+/// Toggle a pipeline service item on/off using Ens.Config API.
 ClassMethod Toggle(pBody As %DynamicObject, Output pResult As %DynamicObject) As %Status
 {
 	#dim tSC As %Status = $$$OK
@@ -208,94 +152,39 @@ ClassMethod Toggle(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 			Quit
 		}
 
-		// Check production is running
-		do ##class(Ens.Director).GetProductionStatus(.tRunning, .tRunState)
-		if (tRunning '= ..#ProductionClass) || (tRunState '= 1) {
-			set tSC = $$$ERROR($$$GeneralError, "Pipeline production is not running")
+		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
+		if '$IsObject(tProd) {
+			set tSC = $$$ERROR($$$GeneralError, "Cannot open production")
 			Quit
 		}
 
-		set tEnabled = ##class(Ens.Director).IsItemEnabled(tName, .tSCCheck)
-		set tNewState = 'tEnabled
+		set tItem = tProd.FindItemByConfigName(tName, .tSC2)
+		if '$IsObject(tItem) {
+			set tSC = $$$ERROR($$$GeneralError, "Pipeline '"_tName_"' not found")
+			Quit
+		}
 
-		// Update XData Enabled attribute and recompile
-		set tSC = ..SetItemEnabledInXData(tName, tNewState)
+		set tNewState = 'tItem.Enabled
+		set tItem.Enabled = tNewState
+
+		set tSC = tProd.%Save()
+		$$$ThrowOnError(tSC)
+		set tSC = tProd.SaveToClass()
 		$$$ThrowOnError(tSC)
 
-		// UpdateProduction applies the XData change to the runtime
-		set tSC = ##class(Ens.Director).UpdateProduction()
-		$$$ThrowOnError(tSC)
+		// Start production if not running, otherwise just update
+		do ##class(Ens.Director).GetProductionStatus(.tRunning, .tRunState)
+		if (tRunning = ..#ProductionClass) && (tRunState = 1) {
+			set tSC = ##class(Ens.Director).UpdateProduction()
+			$$$ThrowOnError(tSC)
+		} elseif tNewState {
+			// Production not running and we're enabling — start it
+			set tSC = ##class(OPCUA.REST.DeployService).StartOrUpdateProduction()
+			$$$ThrowOnError(tSC)
+		}
 
 		set pResult.name = tName
 		set pResult.enabled = tNewState
-
-	} Catch (e) {
-		set tSC = e.AsStatus()
-	}
-	Quit tSC
-}
-
-/// Update the Enabled attribute of an Item in the production XData.
-ClassMethod SetItemEnabledInXData(pItemName As %String, pEnabled As %Boolean) As %Status [ Private ]
-{
-	#dim tSC As %Status = $$$OK
-	Try {
-		set tClassDef = ##class(%Dictionary.ClassDefinition).%OpenId(..#ProductionClass)
-		if '$IsObject(tClassDef) {
-			set tSC = $$$ERROR($$$GeneralError, "Cannot open production class")
-			Quit
-		}
-
-		set tXData = ""
-		for i=1:1:tClassDef.XDatas.Count() {
-			if tClassDef.XDatas.GetAt(i).Name = "ProductionDefinition" {
-				set tXData = tClassDef.XDatas.GetAt(i)
-				Quit
-			}
-		}
-		if '$IsObject(tXData) Quit
-
-		set tContent = ""
-		while 'tXData.Data.AtEnd {
-			set tContent = tContent _ tXData.Data.Read(32000)
-		}
-
-		// Find the Item with this Name and replace its Enabled attribute
-		set tEnabledStr = $Select(pEnabled: "true", 1: "false")
-
-		// Find Name="pItemName" then find the Enabled=" before it in the same <Item tag
-		set tNamePos = $Find(tContent, "Name="""_pItemName_"""")
-		if tNamePos = 0 Quit
-
-		// Walk back to find <Item
-		set tItemPos = tNamePos
-		for {
-			set tItemPos = tItemPos - 1
-			if tItemPos < 1 Quit
-			if $Extract(tContent, tItemPos, tItemPos+4) = "<Item" Quit
-		}
-
-		// Find Enabled="..." within this Item tag (before the closing >)
-		set tTagEnd = $Find(tContent, ">", tNamePos)
-		set tItemTag = $Extract(tContent, tItemPos, tTagEnd - 1)
-
-		// Replace Enabled="true" or Enabled="false" in the tag
-		set tOld1 = "Enabled=""true"""
-		set tOld2 = "Enabled=""false"""
-		set tNew = "Enabled="""_tEnabledStr_""""
-
-		set tNewTag = $Replace($Replace(tItemTag, tOld1, tNew), tOld2, tNew)
-
-		set tNewContent = $Extract(tContent, 1, tItemPos - 1) _ tNewTag _ $Extract(tContent, tTagEnd, *)
-
-		do tXData.Data.Clear()
-		do tXData.Data.Write(tNewContent)
-
-		set tSC = tClassDef.%Save()
-		$$$ThrowOnError(tSC)
-
-		set tSC = $System.OBJ.Compile(..#ProductionClass, "ck-d")
-		$$$ThrowOnError(tSC)
 
 	} Catch (e) {
 		set tSC = e.AsStatus()
@@ -315,32 +204,55 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 			Quit
 		}
 
+		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
+		if '$IsObject(tProd) {
+			set tSC = $$$ERROR($$$GeneralError, "Cannot open production")
+			Quit
+		}
+
+		// Find the item and get its DataSourceClass before removing
+		set tDSClass = ""
+		set tFoundIdx = 0
+		for i=1:1:tProd.Items.Count() {
+			set tCfgItem = tProd.Items.GetAt(i)
+			if tCfgItem.Name = tName {
+				set tDSClass = ..GetSettingValue(tCfgItem, "DataSourceClass")
+				set tFoundIdx = i
+				Quit
+			}
+		}
+		if tFoundIdx = 0 {
+			set tSC = $$$ERROR($$$GeneralError, "Pipeline '"_tName_"' not found in production")
+			Quit
+		}
+
 		// If production is running, disable the item first
 		do ##class(Ens.Director).GetProductionStatus(.tRunning, .tRunState2)
-		if (tRunning = ..#ProductionClass) && (tRunState2 = 1) {
+		set tProdRunning = (tRunning = ..#ProductionClass) && (tRunState2 = 1)
+		if tProdRunning {
 			if ##class(Ens.Director).IsItemEnabled(tName, .tSCCheck) {
 				do ##class(Ens.Director).EnableConfigItem(tName, 0)
 			}
 		}
 
-		// Find and remove the Item from the production XData (recompiles production)
-		set tSC = ..RemoveItemFromXData(tName, .tDSClass)
+		// Remove from production and persist
+		do tProd.Items.RemoveAt(tFoundIdx)
+		set tSC = tProd.%Save()
+		$$$ThrowOnError(tSC)
+		set tSC = tProd.SaveToClass()
 		$$$ThrowOnError(tSC)
 
-		// Update running production to remove the deleted item from runtime
-		// This is safe because the item is already gone from XData,
-		// so UpdateProduction won't re-enable anything
-		if (tRunning = ..#ProductionClass) && (tRunState2 = 1) {
+		if tProdRunning {
 			do ##class(Ens.Director).UpdateProduction()
 		}
 
-		// Delete serial object subclasses first (they depend on the main class)
+		// Delete DataSource class and serial subclasses
 		if (tDSClass '= "") && ##class(%Dictionary.ClassDefinition).%ExistsId(tDSClass) {
 			do ..DeleteSerialSubclasses(tDSClass)
 			do $System.OBJ.Delete(tDSClass, "-d")
 		}
 
-		// Clean up v2 row source metadata (no-op for v1 pipelines)
+		// Clean up v2 row source metadata
 		if tDSClass '= "" {
 			Kill ^OPCUA.RowSource(tDSClass)
 		}
@@ -423,39 +335,23 @@ ClassMethod Edit(pBody As %DynamicObject, Output pResult As %DynamicObject) As %
 
 		// --- Step 4: Generate new DataSource class (reuses DeployService logic, supports nesting) ---
 		set tSC = ##class(OPCUA.REST.DeployService).GenerateDataSourceTextV2(pBody, tColumns, tRowSources, tClassName, tDataSourceName, .tText, .tSerialClasses)
-		if $$$ISERR(tSC) {
-			set pResult.error = "Class generation failed: "_$System.Status.GetErrorText(tSC)
-			set tSC = $$$OK
-			Quit
-		}
+		Quit:$$$ISERR(tSC)
 
 		// --- Step 5: Compile serial classes first, then main class ---
 		for iSC=1:1:$Get(tSerialClasses, 0) {
 			set tSerialClassName = $LI(tSerialClasses(iSC), 1)
 			set tSerialText = $LI(tSerialClasses(iSC), 2)
 			set tSC = ##class(OPCUA.REST.DeployService).WriteAndCompile(tSerialClassName, tSerialText)
-			if $$$ISERR(tSC) {
-				set pResult.error = "Serial class compilation failed: "_$System.Status.GetErrorText(tSC)
-				set tSC = $$$OK
-				Quit
-			}
+			Quit:$$$ISERR(tSC)
 		}
-		if pResult.error '= "" Quit
+		Quit:$$$ISERR(tSC)
 
 		set tSC = ##class(OPCUA.REST.DeployService).WriteAndCompile(tClassName, tText)
-		if $$$ISERR(tSC) {
-			set pResult.error = "Compilation failed: "_$System.Status.GetErrorText(tSC)
-			set tSC = $$$OK
-			Quit
-		}
+		Quit:$$$ISERR(tSC)
 
 		// --- Step 6: Update row source metadata ---
 		set tSC = ##class(OPCUA.REST.DeployService).StoreRowSourceMetadata(tClassName, tRowSources, tColumns)
-		if $$$ISERR(tSC) {
-			set pResult.error = "Failed to update row source metadata: "_$System.Status.GetErrorText(tSC)
-			set tSC = $$$OK
-			Quit
-		}
+		Quit:$$$ISERR(tSC)
 
 		// --- Step 7: Re-enable and restart ---
 		if tProdRunning {
@@ -468,95 +364,6 @@ ClassMethod Edit(pBody As %DynamicObject, Output pResult As %DynamicObject) As %
 		set tPackage = $Piece(tClassName, ".", 1, *-1)
 		set tShort = $Piece(tClassName, ".", *)
 		set pResult.tableName = $Select(tPackage="":tShort, 1:$Replace(tPackage, ".", "_")_"."_tShort)
-
-	} Catch (e) {
-		set tSC = e.AsStatus()
-	}
-	Quit tSC
-}
-
-/// Remove an Item element from the production XData by name.
-/// Returns the DataSourceClass value so the caller can delete it.
-ClassMethod RemoveItemFromXData(pItemName As %String, Output pDSClass As %String) As %Status [ Private ]
-{
-	#dim tSC As %Status = $$$OK
-	set pDSClass = ""
-	Try {
-		set tClassDef = ##class(%Dictionary.ClassDefinition).%OpenId(..#ProductionClass)
-		if '$IsObject(tClassDef) {
-			set tSC = $$$ERROR($$$GeneralError, "Cannot open production class")
-			Quit
-		}
-
-		set tXData = ""
-		for i=1:1:tClassDef.XDatas.Count() {
-			if tClassDef.XDatas.GetAt(i).Name = "ProductionDefinition" {
-				set tXData = tClassDef.XDatas.GetAt(i)
-				Quit
-			}
-		}
-		if '$IsObject(tXData) {
-			set tSC = $$$ERROR($$$GeneralError, "Production XData not found")
-			Quit
-		}
-
-		set tContent = ""
-		while 'tXData.Data.AtEnd {
-			set tContent = tContent _ tXData.Data.Read(32000)
-		}
-
-		// Find the Item with matching Name attribute and extract DataSourceClass
-		// Use regex-like approach: find <Item Name="pItemName" ... </Item>
-		set tItemStart = $Find(tContent, "Name="""_pItemName_"""")
-		if tItemStart = 0 {
-			set tSC = $$$ERROR($$$GeneralError, "Pipeline '"_pItemName_"' not found in production")
-			Quit
-		}
-
-		// Find the <Item that precedes this Name attribute
-		set tPos = tItemStart
-		for {
-			set tPos = tPos - 1
-			if tPos < 1 Quit
-			if $Extract(tContent, tPos, tPos+4) = "<Item" Quit
-		}
-		set tStartPos = tPos
-
-		// Find closing </Item>
-		set tEndPos = $Find(tContent, "</Item>", tItemStart)
-		if tEndPos = 0 {
-			set tSC = $$$ERROR($$$GeneralError, "Malformed production XData")
-			Quit
-		}
-
-		// Extract the item XML to find DataSourceClass
-		set tItemXML = $Extract(tContent, tStartPos, tEndPos - 1)
-		set tDSPos = $Find(tItemXML, "Name=""DataSourceClass"">")
-		if tDSPos > 0 {
-			set tDSEnd = $Find(tItemXML, "</Setting>", tDSPos)
-			if tDSEnd > 0 {
-				set pDSClass = $Extract(tItemXML, tDSPos, tDSEnd - $Length("</Setting>") - 1)
-			}
-		}
-
-		// Remove the item from content (including any preceding whitespace/newline)
-		set tRemoveStart = tStartPos
-		// Back up over whitespace before <Item
-		while (tRemoveStart > 1) && ($Extract(tContent, tRemoveStart - 1) ? 1(1" ",1C)) {
-			set tRemoveStart = tRemoveStart - 1
-		}
-
-		set tNewContent = $Extract(tContent, 1, tRemoveStart - 1) _ $Extract(tContent, tEndPos, *)
-
-		// Write back
-		do tXData.Data.Clear()
-		do tXData.Data.Write(tNewContent)
-
-		set tSC = tClassDef.%Save()
-		$$$ThrowOnError(tSC)
-
-		set tSC = $System.OBJ.Compile(..#ProductionClass, "ck-d")
-		$$$ThrowOnError(tSC)
 
 	} Catch (e) {
 		set tSC = e.AsStatus()
