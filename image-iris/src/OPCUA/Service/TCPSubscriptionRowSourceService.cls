@@ -36,6 +36,21 @@ Property TotalSpecEntries As %Integer [ Private ];
 /// Nesting specification for building nested $LB storage (empty = flat layout)
 Property NestingSpec As %List [ Private ];
 
+/// Total number of $LB positions in a storage row (storage entries + 1 for class marker)
+Property RowSize As %Integer [ Private ];
+
+/// $LB position for NodePath in storage
+Property NodePathPos As %Integer [ Private ];
+
+/// $LB position for ServerTimeStamp in storage
+Property ServerTSPos As %Integer [ Private ];
+
+/// $LB position for SourceTimeStamp in storage
+Property SourceTSPos As %Integer [ Private ];
+
+/// $LB(pos1, pos2, ...) — maps data column index to $LB position in storage
+Property DataColumnPositions As %List [ Private ];
+
 Method OnInit() As %Status
 {
 	#dim tSC As %Status = $$$OK
@@ -68,6 +83,30 @@ Method OnInit() As %Status
 			set tSC = $$$ERROR($$$GeneralError, "Invalid row source metadata: "_..RowSourceCount_" row sources, "_..ColumnCount_" columns")
 			Quit
 		}
+
+		// 1b. Read compiled class storage to determine actual $LB positions.
+		// IRIS default storage orders properties alphabetically, so we must
+		// discover the actual positions of NodePath, ServerTimeStamp,
+		// SourceTimeStamp and each data column.
+		set oClassDef = ##class(%Dictionary.CompiledClass).%OpenId(tDSClass)
+		if '$IsObject(oClassDef) {
+			set tSC = $$$ERROR($$$GeneralError, "Cannot open compiled class: "_tDSClass)
+			Quit
+		}
+		set oEntries = oClassDef.Storages.GetAt(1).Data.GetAt(1).Values
+		set ..RowSize = oEntries.Count()
+		set tDataPositions = ""
+		for i=1:1:oEntries.Count() {
+			set tPropName = oEntries.GetAt(i).Value
+			set tPos = i
+			if tPropName = "NodePath" { set ..NodePathPos = tPos }
+			elseif tPropName = "ServerTimeStamp" { set ..ServerTSPos = tPos }
+			elseif tPropName = "SourceTimeStamp" { set ..SourceTSPos = tPos }
+			elseif $Extract(tPropName, 1) '= "%" {
+				set tDataPositions = tDataPositions _ $LB(tPos)
+			}
+		}
+		set ..DataColumnPositions = tDataPositions
 
 		// 2. Build row source paths, column masks, active counts
 		set tPaths = ""
@@ -185,7 +224,20 @@ Method OnProcessInput(ByRef pInputAsList As %RegisteredObject, Output pOutput As
 				set tValues = ##class(OPCUA.Service.TCPPollingRowSourceService).BuildNestedValues(..NestingSpec, .tLeafValues)
 			}
 
-			set tRowData = $LB("", $LI(..RowSourcePaths, iRS), tServerTS, tSourceTS) _ tValues
+			// Build row data matching the actual %Persistent storage layout.
+			// Storage positions are alphabetical, so we place each value at
+			// its compiled storage position rather than assuming a fixed order.
+			set tRowData = ""
+			for p=1:1:..RowSize { set tRowData = tRowData _ $LB("") }
+			set $LI(tRowData, 1) = ""
+			set $LI(tRowData, ..NodePathPos) = $LI(..RowSourcePaths, iRS)
+			set $LI(tRowData, ..ServerTSPos) = tServerTS
+			set $LI(tRowData, ..SourceTSPos) = tSourceTS
+			for v=1:1:$LL(tValues) {
+				if v <= $LL(..DataColumnPositions) {
+					set $LI(tRowData, $LI(..DataColumnPositions, v)) = $LI(tValues, v)
+				}
+			}
 
 			set tSC = $CLASSMETHOD(..Adapter.DataSourceClass, "SaveSourcedData", .tRowData)
 			if $$$ISERR(tSC) {
