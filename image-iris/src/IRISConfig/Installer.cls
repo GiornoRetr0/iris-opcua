@@ -55,6 +55,9 @@ ClassMethod Install() As %Status
 		Set tSC = ..CreateWebApp("OPCUA")
 		$$$ThrowOnError(tSC)
 
+		// Enable SAM interop metrics and register the custom opcua_* metrics class
+		Do ..EnableMonitorMetrics("OPCUA")
+
 		// Disable password change requirement for demo accounts
 		Set tSC = ..DisablePasswordExpiration()
 		$$$ThrowOnError(tSC)
@@ -159,6 +162,47 @@ ClassMethod DisablePasswordExpiration() As %Status
 		Set tSC = oException.AsStatus()
 	}
 
+	Quit tSC
+}
+
+/// Enable SAM interop metrics for the namespace and register the custom metrics class.
+/// Non-fatal: failures are logged but do not abort installation.
+ClassMethod EnableMonitorMetrics(pNamespace As %String) As %Status
+{
+	Set tSC = $$$OK
+	Try
+	{
+		Set tNS = $Namespace
+
+		ZN pNamespace
+		Try { Do ##class(Ens.Util.Statistics).EnableSAMForNamespace() } Catch (e1) {}
+
+		ZN "%SYS"
+		Try {
+			Do ##class(SYS.Monitor.SAM.Config).AddApplicationClass("OPCUA.Monitor.Metrics", pNamespace)
+		} Catch (e2) {}
+
+		// Grant UnknownUser the namespace DB role so the SAM daemon can read it
+		// when /api/monitor is scraped unauthenticated.
+		Try {
+			set tDBRole = "%DB_"_pNamespace
+			set tSC3 = ##class(Security.Users).Get("UnknownUser", .tUser)
+			if $$$ISOK(tSC3) {
+				set tRoles = $Get(tUser("Roles"))
+				if tRoles '[ tDBRole {
+					set tUser("Roles") = $Select(tRoles="":tDBRole, 1:tRoles_","_tDBRole)
+					do ##class(Security.Users).Modify("UnknownUser", .tUser)
+				}
+			}
+		} Catch (e3) {}
+
+		ZN tNS
+	}
+	Catch (oException)
+	{
+		Try { ZN tNS } Catch (e3) {}
+		Set tSC = oException.AsStatus()
+	}
 	Quit tSC
 }
 

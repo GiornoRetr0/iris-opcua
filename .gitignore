@@ -23,3 +23,4 @@ env/
 .python-version
 pip-log.txt
 pip-delete-this-directory.txt
+ARCHITECTURE.md

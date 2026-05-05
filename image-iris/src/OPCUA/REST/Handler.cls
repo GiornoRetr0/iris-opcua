@@ -41,6 +41,8 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/pipelines/toggle" Method="POST" Call="PipelinesToggle" />
   <Route Url="/pipelines/delete" Method="POST" Call="PipelinesDelete" />
   <Route Url="/pipelines/edit" Method="POST" Call="PipelinesEdit" />
+  <Route Url="/metrics" Method="GET" Call="Metrics" />
+  <Route Url="/metrics" Method="POST" Call="Metrics" />
 </Routes>
 }
 
@@ -211,6 +213,24 @@ ClassMethod PipelinesEdit() As %Status
 		set tSC = ..GetRequestParams(.tBody)
 		Quit:$$$ISERR(tSC)
 		set tSC = ##class(OPCUA.REST.PipelineService).Edit(tBody, .tResult)
+		Quit:$$$ISERR(tSC)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	if $$$ISERR(tSC) {
+		Quit ..SendError($System.Status.GetErrorText(tSC))
+	}
+	Quit ..SendOK(tResult)
+}
+
+/// Return a JSON snapshot of /api/monitor/metrics parsed from Prometheus text.
+ClassMethod Metrics() As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+		set tSC = ##class(OPCUA.REST.MetricsService).Get(tBody, .tResult)
 		Quit:$$$ISERR(tSC)
 	} Catch (e) {
 		set tSC = e.AsStatus()

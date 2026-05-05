@@ -9,6 +9,7 @@ import {
   Pipeline,
   DeployResult,
   ServerProfile,
+  MetricsSnapshot,
 } from '../models/opcua.models';
 
 interface ApiEnvelope<T> {
@@ -145,5 +146,9 @@ export class ApiService {
 
   editPipeline(params: Record<string, any>, server?: ServerProfile): Observable<any> {
     return this.post('/pipelines/edit', params, 60000, server);
+  }
+
+  getMetrics(): Observable<MetricsSnapshot> {
+    return this.post<MetricsSnapshot>('/metrics', {}, 10000);
   }
 }

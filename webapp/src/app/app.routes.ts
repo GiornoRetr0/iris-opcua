@@ -35,6 +35,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'monitoring',
+    loadComponent: () =>
+      import('./pages/monitoring/monitoring.component').then(
+        (m) => m.MonitoringComponent
+      ),
+  },
+  {
     path: 'docs',
     loadComponent: () =>
       import('./pages/documentation/documentation.component').then(

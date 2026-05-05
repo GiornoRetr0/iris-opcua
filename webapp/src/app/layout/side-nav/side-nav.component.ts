@@ -70,6 +70,19 @@ import { ServerProfile } from '../../core/models/opcua.models';
                 [class.filled]="pipelinesLink.isActive">sync_alt</span>
           <span class="text-sm font-medium">Pipelines</span>
         </a>
+
+        <a routerLink="/monitoring"
+           routerLinkActive="bg-blue-100/50 text-[#131c79]"
+           [routerLinkActiveOptions]="{exact: false}"
+           #monitoringLink="routerLinkActive"
+           class="rounded-lg flex items-center gap-3 px-3 py-2 cursor-pointer transition-all"
+           [class]="monitoringLink.isActive
+             ? 'bg-blue-100/50 text-[#131c79]'
+             : 'text-slate-600 hover:bg-slate-200/50'">
+          <span class="material-symbols-outlined text-xl"
+                [class.filled]="monitoringLink.isActive">monitoring</span>
+          <span class="text-sm font-medium">Monitoring</span>
+        </a>
       </nav>
 
       <!-- Footer -->

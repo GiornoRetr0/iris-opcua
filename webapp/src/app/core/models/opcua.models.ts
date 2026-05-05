@@ -208,3 +208,17 @@ export interface AppConfig {
   autoRefreshInterval: number;
   servers: ServerProfile[];
 }
+
+export interface Metric {
+  name: string;
+  labels: Record<string, string>;
+  value: number | null;
+  help?: string;
+  type?: string;
+  unit?: string;
+}
+
+export interface MetricsSnapshot {
+  scrapedAt: string;
+  metrics: Metric[];
+}
