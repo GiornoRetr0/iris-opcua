@@ -499,20 +499,44 @@
 
   async function doDeploy() {
     try {
-      // Build nodes array
-      var nodes = [];
+      // Build a v2 row-source payload. The extension currently supports a
+      // single (flat) row source: every selected leaf node becomes one column
+      // and one child of a synthetic "Objects" row source, producing a
+      // one-row-per-poll table. Multi-device grouping (the webapp's feature)
+      // is a future enhancement.
+      var columns = [];
+      var childNodes = [];
       _selectedNodes.forEach(function (entry) {
         var n = entry.node;
-        nodes.push({
+        columns.push({
+          displayName: n.displayName,
+          relativePath: [n.displayName],
+          inferredType: entry.inferredType || 'OPCUA.Types.StringDataValue'
+        });
+        childNodes.push({
+          displayName: n.displayName,
           nodeNs: n.nodeNs,
           nodeId: String(n.nodeId),
-          nodeIdType: n.nodeIdType,
-          displayName: n.displayName,
-          inferredType: entry.inferredType || 'OPCUA.Types.StringDataValue'
+          nodeIdType: n.nodeIdType || 0,
+          relativePath: [n.displayName]
         });
       });
 
-      var params = Object.assign({ nodes: nodes }, _config);
+      // Single row source rooted at the standard OPC UA Objects folder (ns=0, i=85).
+      var rowSources = [{
+        displayName: 'Objects',
+        nodeNs: 0,
+        nodeId: '85',
+        nodeIdType: 0,
+        path: 'Objects',
+        childNodes: childNodes
+      }];
+
+      var params = Object.assign({
+        pipelineVersion: 2,
+        columns: columns,
+        rowSources: rowSources
+      }, _config);
 
       _deployResult = await NS.ApiClient.deploy(params);
     } catch (err) {

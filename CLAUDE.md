@@ -74,7 +74,7 @@ SQL Explorer: http://localhost:52783/csp/sys/exp/%25CSP.UI.Portal.SQL.Home.zen?$
 
 - **Pipelines run in the `OPCUA` namespace**, not `APPINT`. Tests run in `APPINT`.
 - **All REST endpoints accept both GET (query params) and POST (JSON body).** Connection param is `url`, not `serverUrl`.
-- **v2 pipelines** use the row-source model (columns × devices → one table). v1 is legacy single-device.
+- **Wizard/REST deploy is row-source only** (columns × devices → one table, via `DeployService.DeployV2` → `TCP*RowSourceService`). There is no v1 deploy fork. The hand-authored Examples + `OPCUA.Tests` classes are a separate declarative path (typed `OPCUA.Types.*` properties → `TCPPollingService`/`TCPSubscriptionService`) kept for the test harness, not produced by the wizard.
 - **`%SerialObject` subclasses** are generated for nested folder hierarchies and appear as `Property_SubProperty` columns in SQL.
 - **The Projection** (`OPCUA.DataSource.Projection`) fires on every DataSource class compile, writes `^OPCUA.DataSource(className)`, and generates `SaveSourcedData()`. The runtime services depend entirely on this global.
 - **Do not call `$Get(obj.prop)`** — use `obj.prop` directly or `obj.%Get("prop")` (see ObjectScript Gotchas in parent CLAUDE.md).

@@ -1,7 +1,9 @@
 Include OPCUA.Constants
 
-/// A business service that uses the TCPPollingInboundAdpater
-/// to access data with OPC UA and append that data to a table.
+/// Runtime for hand-authored (declarative) DataSource classes: polls every
+/// node declared on an OPCUA.DataSource.Definition subclass and appends one
+/// row per poll. Used by the Examples and the OPCUA.Tests harness.
+/// The wizard /deploy path uses TCPPollingRowSourceService instead.
 Class OPCUA.Service.TCPPollingService Extends Ens.BusinessService
 {
 

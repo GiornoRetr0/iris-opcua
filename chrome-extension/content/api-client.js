@@ -153,7 +153,8 @@
 
   /**
    * Deploy a data pipeline (generate DataSource + Production, compile, start).
-   * @param {Object} params - {nodes, className, dataSourceName, productionName, mode, ...}
+   * Uses the v2 row-source model.
+   * @param {Object} params - {columns, rowSources, pipelineVersion, className, dataSourceName, mode, ...}
    * @returns {Object} {dataSourceClass, productionClass, tableName, deployed, compiled, started, error?}
    */
   async function deploy(params) {

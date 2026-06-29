@@ -1,8 +1,13 @@
-/// User-specified "DataSource" classes intended for use
-/// with each of <class>TCPPollingService</class> and
-/// <class>TCPSubscriptionService</class>, and indicating the 
-/// data types and node ids for data requested from an
-/// OPC UA server, should extend this class.
+/// Base class for hand-authored "DataSource" classes: declare one typed
+/// property per OPC UA node (using the OPCUA.Types.* value classes plus
+/// OPCUANODENAME) and extend this class to map a node graph to an IRIS table.
+/// These declarative DataSources run under <class>TCPPollingService</class> /
+/// <class>TCPSubscriptionService</class> and are used by the Examples and the
+/// OPCUA.Tests harness (which validate the C++ type marshalling end-to-end).
+///
+/// NOTE: The pipeline wizard / REST /deploy endpoint does NOT use this path —
+/// it generates flat row-source classes consumed by the *RowSourceService
+/// runtime instead. See OPCUA.REST.DeployService and ARCHITECTURE.md.
 Class OPCUA.DataSource.Definition Extends %Persistent [ Abstract, NoExtent, PropertyClass = OPCUA.DataSource.PropertyClass ]
 {
 

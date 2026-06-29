@@ -10,82 +10,20 @@ Class OPCUA.REST.DeployService
 /// The shared production class that holds all pipeline service items.
 Parameter ProductionClass = "OPCUA.Pipeline.Production";
 
-/// Source directory for generated class files.
-Parameter SourceDir = "/opt/irisapp/src/";
-
-/// Deploy a complete pipeline from selected nodes.
-/// Supports both v1 (flat nodes array) and v2 (columns + rowSources) payloads.
+/// Deploy a complete pipeline from the wizard. All deploys use the v2
+/// row-source model (columns + rowSources); see DeployV2().
 ClassMethod Deploy(pBody As %DynamicObject, Output pResult As %DynamicObject) As %Status
 {
-	// Detect v2 deploy request (has rowSources array)
 	set tRS = pBody.%Get("rowSources")
-	if $IsObject($Get(tRS)) && (tRS.%Size() > 0) {
-		Quit ..DeployV2(pBody, .pResult)
+	if '$IsObject($Get(tRS)) || (tRS.%Size() = 0) {
+		set pResult = {}
+		set pResult.deployed = 0
+		set pResult.compiled = 0
+		set pResult.started = 0
+		set pResult.productionClass = ..#ProductionClass
+		Quit $$$ERROR($$$GeneralError, "Deploy request must include a 'rowSources' array (v2 row-source model)")
 	}
-
-	#dim tSC As %Status = $$$OK
-	set pResult = {}
-	set pResult.deployed = 0
-	set pResult.compiled = 0
-	set pResult.started = 0
-	set pResult.productionClass = ..#ProductionClass
-	Try {
-		// --- Validate inputs ---
-		set tNodes = pBody.%Get("nodes")
-		if '$IsObject($Get(tNodes)) || (tNodes.%Size() = 0) {
-			set tSC = $$$ERROR($$$GeneralError, "No nodes selected")
-			Quit
-		}
-
-		set tClassName = pBody.%Get("className")
-		if tClassName = "" {
-			set tSC = $$$ERROR($$$GeneralError, "Missing className")
-			Quit
-		}
-
-		set tDataSourceName = pBody.%Get("dataSourceName")
-		if tDataSourceName = "" set tDataSourceName = $Piece(tClassName, ".", *)
-
-		set tMode = pBody.%Get("mode")
-		if (tMode '= "polling") && (tMode '= "subscription") set tMode = "polling"
-
-		// Check if DataSource class already exists
-		if ##class(%Dictionary.ClassDefinition).%ExistsId(tClassName) {
-			set tSC = $$$ERROR($$$GeneralError, "Class '"_tClassName_"' already exists. Choose a different name.")
-			Quit
-		}
-
-		// --- Generate and compile DataSource class ---
-		set tSC = ..GenerateDataSourceText(pBody, tNodes, tClassName, tDataSourceName, .tDSText)
-		Quit:$$$ISERR(tSC)
-
-		set pResult.deployed = 1
-		set pResult.dataSourceClass = tClassName
-
-		// Derive SQL table name
-		set tPackage = $Piece(tClassName, ".", 1, *-1)
-		set tShort = $Piece(tClassName, ".", *)
-		set pResult.tableName = $Select(tPackage="":tShort, 1:$Replace(tPackage, ".", "_")_"."_tShort)
-		set pResult.serviceItemName = tDataSourceName
-
-		// --- Add service item to shared production ---
-		set tSC = ..EnsureProductionExists()
-		Quit:$$$ISERR(tSC)
-
-		set tSC = ..AddServiceItem(pBody, tClassName, tDataSourceName, tMode)
-		Quit:$$$ISERR(tSC)
-
-		set pResult.compiled = 1
-
-		// --- Start or update the production ---
-		set tSC = ..StartOrUpdateProduction()
-		Quit:$$$ISERR(tSC)
-		set pResult.started = 1
-
-	} Catch (e) {
-		set tSC = e.AsStatus()
-	}
-	Quit tSC
+	Quit ..DeployV2(pBody, .pResult)
 }
 
 /// Ensure the shared production class exists. Creates it on first deploy.
@@ -130,16 +68,11 @@ ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDS
 			Quit
 		}
 
-		// Determine service class
-		set tVersion = +pBody.%Get("pipelineVersion")
-		if (pMode = "subscription") && (tVersion = 2) {
+		// All deploys use the v2 row-source runtime services.
+		if pMode = "subscription" {
 			set tServiceClass = "OPCUA.Service.TCPSubscriptionRowSourceService"
-		} elseif pMode = "subscription" {
-			set tServiceClass = "OPCUA.Service.TCPSubscriptionService"
-		} elseif tVersion = 2 {
-			set tServiceClass = "OPCUA.Service.TCPPollingRowSourceService"
 		} else {
-			set tServiceClass = "OPCUA.Service.TCPPollingService"
+			set tServiceClass = "OPCUA.Service.TCPPollingRowSourceService"
 		}
 
 		// Create config item
@@ -240,59 +173,6 @@ ClassMethod StartOrUpdateProduction() As %Status
 	Quit ##class(Ens.Director).StartProduction(..#ProductionClass)
 }
 
-/// Generate and compile a v1 DataSource class using %Dictionary API.
-ClassMethod GenerateDataSourceText(pBody As %DynamicObject, pNodes As %DynamicArray, pClassName As %String, pDataSourceName As %String, Output pText As %String) As %Status [ Private ]
-{
-	#dim tSC As %Status = $$$OK
-	Try {
-		set tNodeCount = pNodes.%Size()
-
-		// Determine default namespace (most common among selected nodes)
-		set tDefaultNS = ..FindDefaultNamespace(pNodes)
-
-		// Create class definition
-		set tClassDef = ##class(%Dictionary.ClassDefinition).%New(pClassName)
-		set tClassDef.Description = "Auto-generated OPC UA DataSource class."
-		set tClassDef.Super = "%Persistent,OPCUA.DataSource.Definition"
-
-		do ..AddParameter(tClassDef, "OPCUADATASOURCE", pDataSourceName)
-		do ..AddParameter(tClassDef, "OPCUDEFAULTANAMESPACE", tDefaultNS)
-
-		// Generate properties
-		for i=0:1:tNodeCount-1 {
-			set tNode = pNodes.%Get(i)
-			set tDisplayName = tNode.%Get("displayName")
-			set tNodeId = tNode.%Get("nodeId")
-			set tNodeNS = +tNode.%Get("nodeNs")
-			set tType = tNode.%Get("inferredType")
-			if tType = "" set tType = "OPCUA.Types.StringDataValue"
-
-			set tPropName = ##class(OPCUA.DataSource.Generator).SanitizePropertyName(tDisplayName, .tUsedNames)
-
-			set tProp = ##class(%Dictionary.PropertyDefinition).%New()
-			set tProp.Name = tPropName
-			set tProp.Type = tType
-			do tProp.Parameters.SetAt(tNodeId, "OPCUANODENAME")
-			if tNodeNS '= tDefaultNS {
-				do tProp.Parameters.SetAt(tNodeNS, "OPCUANAMESPACE")
-			}
-			do tClassDef.Properties.Insert(tProp)
-		}
-
-		set tSC = tClassDef.%Save()
-		$$$ThrowOnError(tSC)
-		set tSC = $System.OBJ.Compile(pClassName, "ck-d")
-		$$$ThrowOnError(tSC)
-
-		// pText not used by caller for v1, but set for consistency
-		set pText = ""
-
-	} Catch (e) {
-		set tSC = e.AsStatus()
-	}
-	Quit tSC
-}
-
 /// Find the most common namespace among a set of nodes.
 ClassMethod FindDefaultNamespace(pNodes As %DynamicArray) As %Integer [ Private ]
 {
@@ -321,34 +201,6 @@ ClassMethod AddParameter(pClassDef As %Dictionary.ClassDefinition, pName As %Str
 	set tParam.Name = pName
 	set tParam.Default = pValue
 	do pClassDef.Parameters.Insert(tParam)
-}
-
-/// Write class text to a temp file and compile it.
-ClassMethod WriteAndCompile(pClassName As %String, pText As %String) As %Status
-{
-	#dim tSC As %Status = $$$OK
-	Try {
-		set tRelPath = $Replace(pClassName, ".", "/")_".cls"
-		set tFilePath = ..#SourceDir_tRelPath
-
-		set tFileDir = ##class(%File).GetDirectory(tFilePath)
-		do ##class(%File).CreateDirectoryChain(tFileDir)
-
-		set tStream = ##class(%Stream.FileCharacter).%New()
-		set tSC = tStream.LinkToFile(tFilePath)
-		$$$ThrowOnError(tSC)
-		set tSC = tStream.Write(pText)
-		$$$ThrowOnError(tSC)
-		set tSC = tStream.%Save()
-		$$$ThrowOnError(tSC)
-
-		set tSC = $System.OBJ.Load(tFilePath, "ck-d")
-		$$$ThrowOnError(tSC)
-
-	} Catch (e) {
-		set tSC = e.AsStatus()
-	}
-	Quit tSC
 }
 
 // ==================== v2 Row-Source Pipeline Deploy ====================

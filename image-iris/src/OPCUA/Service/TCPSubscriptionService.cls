@@ -1,7 +1,9 @@
 Include OPCUA.Constants
 
-/// A business service that uses the TCPSubscriptionInboundAdpater
-/// to access data with OPC UA and append that data to a table.
+/// Runtime for hand-authored (declarative) DataSource classes: subscribes to
+/// every node declared on an OPCUA.DataSource.Definition subclass and appends
+/// rows on change notifications. Used by the Examples and the OPCUA.Tests
+/// harness. The wizard /deploy path uses TCPSubscriptionRowSourceService instead.
 Class OPCUA.Service.TCPSubscriptionService Extends Ens.BusinessService
 {
 

@@ -204,11 +204,11 @@ Each property has parameters (metadata annotations) that tell the system which O
 
 ### How classes are generated
 
-There are two paths:
+DataSource classes are created in **two ways**, depending on where they come from:
 
-**v1 (single device):** `DeployService.Deploy()` uses the `%Dictionary` API -- IRIS's way to programmatically create classes at runtime. It creates a `%Dictionary.ClassDefinition`, adds `%Dictionary.PropertyDefinition` entries for each column, then calls `$System.OBJ.Compile()` to compile it. Compiling is what creates the SQL table and the storage structure.
+**Hand-authored (declarative):** the Examples and the `OPCUA.Tests` harness ship `.cls` files that extend `(%Persistent, OPCUA.DataSource.Definition)` and declare one typed `OPCUA.Types.*` property per node. These run under `TCPPollingService` / `TCPSubscriptionService` and exist to validate the C++ type marshalling. They are *not* produced by the wizard.
 
-**v2 (multiple devices):** `DeployService.DeployV2()` generates the class as a text string (literal `.cls` file content), writes it to disk, and compiles it. This approach is used because v2 classes can have nested `%SerialObject` subclasses (for folder hierarchies), and it's easier to generate them as text.
+**Wizard deploy (v2 row-source):** `DeployService.DeployV2()` builds the class **in memory** via the `%Dictionary` API (`%Dictionary.ClassDefinition` + `%Dictionary.PropertyDefinition`), then calls `$System.OBJ.Compile()`. Nested folders are emitted first as `%SerialObject` subclasses (`GenerateSerialClasses()`). Columns are flattened to plain IRIS types (`MapToPlainType()`), not the `OPCUA.Types.*` wrappers. This is the **only** deploy path — there is no longer a v1 deploy fork.
 
 ### What happens when a class compiles
 
@@ -336,40 +336,30 @@ The pipeline wizard uses this to render the expandable tree where users check no
 
 **Key file:** `OPCUA/REST/DeployService.cls`
 
-Deployment is the most complex operation. It takes the user's selections (which nodes to poll, from which server, how often) and sets up everything needed for continuous data collection.
+Deployment is the most complex operation. It takes the user's selections (which nodes to poll, from which server, how often) and sets up everything needed for continuous data collection. `DeployService.Deploy()` is a thin dispatcher: it requires a `rowSources` array and forwards to `DeployV2()`. (Requests without `rowSources` are rejected — the old v1 single-device deploy fork has been removed.)
 
-### v1 deployment (single device, simpler)
+### v2 deployment (row-source model)
 
-1. **Generate the DataSource class:**
-   - Use `%Dictionary.ClassDefinition` API to create a new class
-   - Set it to extend `(%Persistent, OPCUA.DataSource.Definition)`
-   - For each selected node, add a `%Dictionary.PropertyDefinition` with the appropriate type and `OPCUANODENAME` parameter
+1. **Generate the DataSource class** (`GenerateDataSourceTextV2()`):
+   - Use the `%Dictionary.ClassDefinition` API to build a new class extending `(%Persistent, OPCUA.DataSource.Definition)`
+   - Add the three metadata properties (`NodePath`, `ServerTimeStamp`, `SourceTimeStamp`) plus one **plain-typed** column per union column (`MapToPlainType()`)
+   - Nested folders are emitted first as `%SerialObject` subclasses (`GenerateSerialClasses()`)
    - Call `$System.OBJ.Compile()` -- this creates the SQL table and triggers the Projection
 
-2. **Ensure the production exists:**
-   - Check if `OPCUA.Pipeline.Production` exists (a "production" is IRIS's name for a collection of background services/processes that run together)
-   - If not, create it as an empty production class
+2. **Store row-source metadata** (`StoreRowSourceMetadata()`):
+   - Write `^OPCUA.RowSource(class)` with the row-source list, per-row-source **column masks** (which devices have which columns), absolute node refs, and the nesting spec
+   - The runtime services depend entirely on this global (see [section 14](#14-v2-pipelines-multiple-devices-one-table))
 
-3. **Add a service item to the production:**
-   - An "item" is one background worker in the production
-   - Create an `Ens.Config.Item` (the configuration object for a production item)
-   - Set its class to `OPCUA.Service.TCPPollingService` or `OPCUA.Service.TCPSubscriptionService`
-   - Configure settings: DataSourceClass, URL, poll interval, security parameters
-   - Add it to the production's Items collection
-   - Save the production and call `SaveToClass()` (which writes the config into the class's XData block -- IRIS's way of embedding structured data in a class definition)
+3. **Ensure the production exists:** create `OPCUA.Pipeline.Production` (an empty production class) on first deploy if missing
 
-4. **Start or update the production:**
-   - If the production is already running, call `Ens.Director.UpdateProduction()` to hot-reload the new item
-   - If stopped, start it with `Ens.Director.StartProduction()`
+4. **Add a service item** (`AddServiceItem()`):
+   - Create an `Ens.Config.Item`, set its class to `OPCUA.Service.TCPPollingRowSourceService` or `OPCUA.Service.TCPSubscriptionRowSourceService` (chosen by `mode`)
+   - Configure settings: DataSourceClass, URL, poll/subscription intervals, security parameters
+   - Add it, save the production, call `SaveToClass()`
 
-### v2 deployment (multiple devices, union table)
+5. **Start or update the production:** `Ens.Director.UpdateProduction()` if already running, else `StartProduction()`
 
-Similar to v1, but:
-- The DataSource class text is generated as a string (including potential `%SerialObject` subclasses for nested folders)
-- `StoreRowSourceMetadata()` saves additional metadata to `^OPCUA.RowSource` about which devices have which columns (the "column mask")
-- The service class used is `TCPPollingRowSourceService` or `TCPSubscriptionRowSourceService`
-
-More on v2 in [section 14](#14-v2-pipelines-multiple-devices-one-table).
+> The hand-authored Examples/Tests classes use `TCPPollingService` / `TCPSubscriptionService` instead — see [section 12](#12-services-the-data-processors).
 
 ---
 
@@ -453,7 +443,9 @@ Used for change-based data collection (the OPC UA server pushes changes to us).
 
 A "business service" in Ensemble is the high-level component that owns an adapter and processes its output. Think of it as: the adapter handles "how to get data," the service handles "what to do with it."
 
-### v1 Polling Service (`TCPPollingService`)
+### Declarative Polling Service (`TCPPollingService`)
+
+Runtime for hand-authored DataSource classes (Examples + `OPCUA.Tests`). Not used by the wizard.
 
 **OnInit** (runs once at startup):
 1. Reads the DataSourceClass setting (e.g., `"OPCUA.DS.MyPipeline"`)
@@ -465,13 +457,13 @@ A "business service" in Ensemble is the high-level component that owns an adapte
 2. Calls `DataSourceClass.SaveSourcedData(list)` -- the code-generated method that persists it as a table row
 3. That's it -- one row saved per poll cycle
 
-### v1 Subscription Service (`TCPSubscriptionService`)
+### Declarative Subscription Service (`TCPSubscriptionService`)
 
-Same as polling service, but receives data from the subscription adapter. Each notification becomes one row.
+Same as the declarative polling service, but receives data from the subscription adapter. Each notification becomes one row.
 
-### v2 Services (RowSource variants)
+### Wizard Services (RowSource variants)
 
-More complex -- see [section 14](#14-v2-pipelines-multiple-devices-one-table).
+The runtime for wizard-deployed pipelines (the v2 row-source model) -- more complex, see [section 14](#14-v2-pipelines-multiple-devices-one-table).
 
 ---
 
@@ -752,38 +744,43 @@ Here's the complete journey of a data point from an OPC UA server to a SQL query
       - Stores in ^OPCUA.DataSource("OPCUA.DS.MyData")
       - Generates SaveSourcedData() method
 
-8. DeployService adds item to OPCUA.Pipeline.Production:
-   - ClassName: OPCUA.Service.TCPPollingService
+8. DeployService.StoreRowSourceMetadata() writes ^OPCUA.RowSource("OPCUA.DS.MyData")
+   (row sources, column masks, abs node refs, nesting spec)
+
+9. DeployService adds item to OPCUA.Pipeline.Production:
+   - ClassName: OPCUA.Service.TCPPollingRowSourceService
    - Settings: DataSourceClass=OPCUA.DS.MyData, URL=opc.tcp://plc:4840, CallInterval=5
 
-9. Production starts (or updates if already running)
+10. Production starts (or updates if already running)
 ```
 
 ### Runtime phase (repeats continuously)
 
 ```
-10. Ensemble calls TCPPollingService.OnInit():
-    - Reads ^OPCUA.DataSource("OPCUA.DS.MyData") to get spec
+11. Ensemble calls TCPPollingRowSourceService.OnInit():
+    - Reads ^OPCUA.RowSource(...) for row sources + masks, and the
+      ^OPCUA.DataSource(...) spec template, then builds the combined spec
     - Passes spec to adapter
 
-11. Adapter.Connect():
+12. Adapter.Connect():
     - Creates OPCUA.Client, calls $ZF to load C++ library
     - Calls SetupClient() and Connect(url)
     - Calls ReadBulkSetupC(spec) -> C++ prepares the query
 
-12. Every 5 seconds, Ensemble calls Adapter.OnTask():
+13. Every 5 seconds, Ensemble calls Adapter.OnTask():
     - Calls ReadBulkPollC(queryHandle) -> $ZF -> C++ -> OPC UA server
     - Server returns: Temperature=20.5 (source time: 12:00:05, server time: 12:00:05)
                       Humidity=65.2    (source time: 12:00:05, server time: 12:00:05)
     - C++ packs into $LB and returns to ObjectScript
 
-13. Adapter passes result to TCPPollingService.OnProcessInput():
-    - Calls OPCUA.DS.MyData.SaveSourcedData($LB("", 20.5, "2026-04-14 12:00:05", ..., 65.2, ...))
-    - SaveSourcedData() creates a new row in the table
+14. Adapter passes result to TCPPollingRowSourceService.OnProcessInput():
+    - Splits the flat result by row source / column mask, then for each row source
+      calls OPCUA.DS.MyData.SaveSourcedData($LB("", nodePath, serverTS, sourceTS, 20.5, 65.2))
+    - SaveSourcedData() creates one row per row source per poll
 
-14. Data is now queryable:
-    SELECT Temperature_Value, Humidity_Value FROM OPCUA_DS.MyData
-    -> 20.5, 65.2
+15. Data is now queryable (v2 stores plain values + a NodePath column):
+    SELECT NodePath, Temperature, Humidity FROM OPCUA_DS.MyData
+    -> Objects, 20.5, 65.2
 ```
 
 ---
@@ -808,8 +805,9 @@ InboundAdapter InboundAdapter   Svc   Svc   Svc    Svc
           \            /        OPCUA.DataSource.Generator
     OPCUA.Service.*                     |
      /    |    \              OPCUA.DataSource.Projection
-    v1    v1    v2                      |
+  decl  decl  rowsource                 |
   Poll   Sub   Poll/Sub    OPCUA.DataSource.Definition
+ (tests/examples)(wizard)
     \     |     /                       |
      \    |    /               Generated DataSource classes
       \   |   /               (OPCUA.DS.MyPipeline, etc.)
