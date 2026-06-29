@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **Detailed architecture, ObjectScript gotchas, C++ bridge, REST API, globals, and security are documented in `ARCHITECTURE.md` and `PIPELINE-ARCHITECTURE.md` in this directory. The parent `CLAUDE.md` (loaded automatically) consolidates all of that for Claude.**
+> **Detailed architecture, ObjectScript gotchas, C++ bridge, REST API, globals, security, and the v2 pipeline/wizard model are documented in `ARCHITECTURE.md` in this directory. The parent `CLAUDE.md` (loaded automatically) consolidates all of that for Claude.**
 
 ## Quick Command Reference
 

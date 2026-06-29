@@ -652,6 +652,43 @@ The **nesting spec** stored in `^OPCUA.RowSource` describes this tree structure 
 5. Updates production settings
 6. The running service picks up changes on next `UpdateProduction()`
 
+When a user adds nodes to an existing pipeline, the system browses the affected
+parent nodes on the OPC UA server (at edit time, not runtime), matches the
+discovered children against the pipeline's column list, and classifies the change:
+
+- **Case A — new row source with matching columns.** The new parent (e.g. AC3)
+  is added as a row source. Its children are browsed to discover which existing
+  columns it has; matching columns are read, missing ones store NULL. Updates
+  `^OPCUA.RowSource` and restarts the service — no DataSource recompile.
+- **Case B — new column on existing/new row sources.** The new column (e.g.
+  PowerConsumption) is added as a property. All existing row sources are browsed
+  for a child of that name; found → column mask set + absolute node ID stored,
+  not found → mask stays 0 (NULL). Requires a DataSource recompile.
+- **Case C — no column overlap.** The selection (e.g. SA1 under Objects) shares
+  zero columns with the pipeline, so every row would be mostly NULL. The edit is
+  **blocked** with a prompt to create a separate pipeline instead.
+
+Cases A and B can occur together (e.g. AC3 brings both a new row source and a new
+column). The masks and node IDs resolved here are exactly what the v2 service
+reads at startup (see §14).
+
+### Wizard schema-grouping algorithm
+
+The webapp wizard decides how selections become pipelines using the rule
+**"matching schema = same pipeline,"** not "same parent = same pipeline":
+
+1. **Selection & auto-expand.** Checking a node with children auto-selects all
+   children as columns (the parent's own value is included too); checking a leaf
+   selects it directly. The user can uncheck unwanted columns.
+2. **Group by parent.** Selected leaves are grouped by their parent node — the
+   parent becomes the row source.
+3. **Compare schemas & merge.** Groups with matching column schemas merge into one
+   pipeline with multiple row sources; mismatched schemas stay separate. (This is
+   the frontend counterpart to the connected-components + nested-merge logic in
+   `pipelineGroups`.)
+4. **Confirm.** If the selection yields multiple pipelines, the wizard shows the
+   grouping for the user to confirm before deploy.
+
 ---
 
 ## 17. Security and Certificates
