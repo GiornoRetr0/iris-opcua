@@ -29,3 +29,7 @@ pip-delete-this-directory.txt
 node_modules/
 webapp/dist/
 .angular/
+
+# Working notes (not for the open-source repo)
+OBJECTSCRIPT-AUDIT.md
+INHERITED-VS-ADDED.md
