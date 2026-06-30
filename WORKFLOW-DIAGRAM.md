@@ -119,7 +119,7 @@ sequenceDiagram
 
     DS->>DS: EnsureProductionExists()
     DS->>DS: AddServiceItem(pBody, class, dsName, mode)
-    Note over DS,ENS: Ens.Config.Item ClassName = TCPPollingRowSourceService<br/>(or TCPSubscriptionRowSourceService); AddSetting DataSourceClass, URL, CallInterval...
+    Note over DS,ENS: Ens.Config.Item ClassName = TCPPollingRowSourceService<br/>(or TCPSubscriptionRowSourceService) — AddSetting DataSourceClass / URL / CallInterval
     DS->>ENS: tProd.Items.Insert() + %Save() + SaveToClass()
     DS->>DS: StartOrUpdateProduction()
     DS->>ENS: Ens.Director.UpdateProduction() / StartProduction()
@@ -254,5 +254,4 @@ flowchart TB
   why renaming a property silently shifts the spec.
 - **`$ZF(-5)` ordinals** (17 = ReadBulkSetupC, 20 = ReadBulkPollC, 13/38 = Connect) come from
   `OPCUA/Constants.inc` and must match the closed-source C++ dispatch table.
-```
 

@@ -248,6 +248,21 @@ ClassMethod DeployV2(pBody As %DynamicObject, Output pResult As %DynamicObject) 
 			Quit
 		}
 
+		// Check if a service item with the same name already exists in the production.
+		// Config-item names must be unique: a duplicate would shadow the existing
+		// pipeline at runtime (only one DataSourceClass is read) and make name-keyed
+		// toggle/edit/delete ambiguous, orphaning the other DataSource class.
+		if ##class(%Dictionary.ClassDefinition).%ExistsId(..#ProductionClass) {
+			set tExistingProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
+			if $IsObject(tExistingProd) {
+				set tDupItem = tExistingProd.FindItemByConfigName(tDataSourceName, .tDupSC)
+				if $IsObject(tDupItem) {
+					set tSC = $$$ERROR($$$GeneralError, "A pipeline named '"_tDataSourceName_"' already exists. Choose a different name.")
+					Quit
+				}
+			}
+		}
+
 		// Validate row sources have correct child count
 		set tColCount = tColumns.%Size()
 		for iRS=0:1:tRowSources.%Size()-1 {
