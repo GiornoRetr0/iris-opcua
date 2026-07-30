@@ -100,6 +100,20 @@ Method Connect() As %Status
 		Set tSC=e.AsStatus()
 	}
 
+	// A live session with no query is not a usable connection.
+	//
+	// OnTask only re-Connects while IsConnected is false, and IsConnected is
+	// derived from the OPC UA session state — which stays perfectly healthy when
+	// it is *resolution* that failed. Leaving the session up would therefore let
+	// every later poll run against QueryHandle 0, whose "handle = 0" error then
+	// masks the real cause forever. Dropping the session makes the next OnTask
+	// retry Connect, and so retry resolution — which is also what lets a device
+	// that only becomes browsable later start reporting on its own.
+	if $$$ISERR(tSC) && (..QueryHandle '> 0) {
+		do ..Disconnect()
+		set ..IsConnected = 0
+	}
+
 	Quit tSC  // Quit $$$OK
 }
 
