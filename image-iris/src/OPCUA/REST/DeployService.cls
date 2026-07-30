@@ -15,10 +15,22 @@ Class OPCUA.REST.DeployService
 /// The shared production class that holds all pipeline service items.
 Parameter ProductionClass = "OPCUA.Pipeline.Production";
 
-/// Deploy a complete pipeline from the wizard. All deploys use the v2
-/// row-source model (columns + rowSources); see DeployV2().
+/// Deploy a pipeline. Two request shapes are accepted:
+///
+/// <b>Bind an existing schema</b> (preferred): <tt>{schemaClass, devices, ...}</tt>
+/// generates nothing — it binds devices to a schema that already exists. See
+/// <method>BindExistingSchema</method>.
+///
+/// <b>Create and bind in one call</b> (the wizard's shape):
+/// <tt>{columns[], rowSources[], ...}</tt> creates the schema first, then binds.
+/// See <method>DeployV2</method>.
 ClassMethod Deploy(pBody As %DynamicObject, Output pResult As %DynamicObject) As %Status
 {
+	// A named schema means "bind to this", with no generation.
+	if pBody.%Get("schemaClass") '= "" {
+		Quit ..BindExistingSchema(pBody, .pResult)
+	}
+
 	set tRS = pBody.%Get("rowSources")
 	if '$IsObject($Get(tRS)) || (tRS.%Size() = 0) {
 		set pResult = {}
@@ -26,9 +38,98 @@ ClassMethod Deploy(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		set pResult.compiled = 0
 		set pResult.started = 0
 		set pResult.productionClass = ..#ProductionClass
-		Quit $$$ERROR($$$GeneralError, "Deploy request must include a 'rowSources' array (v2 row-source model)")
+		Quit $$$ERROR($$$GeneralError, "Deploy request must include either 'schemaClass' (bind an existing schema) or a 'rowSources' array (create and bind)")
 	}
 	Quit ..DeployV2(pBody, .pResult)
+}
+
+/// Bind devices to an existing schema, generating nothing.
+///
+/// This is the reuse path: adding a pipeline over a schema that already exists
+/// costs one config item and no compilation.
+///
+/// Body: {
+///   schemaClass       required, must be an OPCUA.DataSource.DeviceSchema subclass
+///   devices           required, newline-separated nodepaths (DeviceNodePaths form)
+///   dataSourceName    config item name; defaults to the schema's short name
+///   mode              "polling" (default) or "subscription"
+///   strictSchemaMatch optional boolean
+///   url, callInterval / publishingInterval, security params — as for DeployV2
+/// }
+ClassMethod BindExistingSchema(pBody As %DynamicObject, Output pResult As %DynamicObject) As %Status
+{
+	#dim tSC As %Status = $$$OK
+	set pResult = {}
+	set pResult.deployed = 0
+	set pResult.compiled = 0
+	set pResult.started = 0
+	set pResult.productionClass = ..#ProductionClass
+	Try {
+		set tSchemaClass = pBody.%Get("schemaClass")
+
+		if '##class(%Dictionary.CompiledClass).%ExistsId(tSchemaClass) {
+			set tSC = $$$ERROR($$$GeneralError, "Schema '"_tSchemaClass_"' does not exist or is not compiled")
+			Quit
+		}
+		if '##class(OPCUA.REST.SchemaService).IsSchema(tSchemaClass) {
+			set tSC = $$$ERROR($$$GeneralError, "Class '"_tSchemaClass_"' is not an OPCUA.DataSource.DeviceSchema subclass")
+			Quit
+		}
+
+		set tDevices = pBody.%Get("devices")
+		if tDevices = "" set tDevices = pBody.%Get("deviceNodePaths")
+		if tDevices = "" {
+			set tSC = $$$ERROR($$$GeneralError, "No devices supplied — provide 'devices' as newline-separated nodepaths")
+			Quit
+		}
+
+		// Fail early on an unusable device list rather than at connect time.
+		// Report the per-line reasons, which are far more actionable than the summary.
+		set tSC = ##class(OPCUA.DataSource.Resolver).ParseDeviceNodePaths(tDevices, .tParsed, .tParseErrors)
+		if $$$ISERR(tSC) {
+			set tMsg = "No usable device entries in 'devices'"
+			for i=1:1:$LL(tParseErrors) { set tMsg = tMsg_" — "_$LI(tParseErrors, i) }
+			set tSC = $$$ERROR($$$GeneralError, tMsg)
+			Quit
+		}
+
+		set tItemName = pBody.%Get("dataSourceName")
+		if tItemName = "" set tItemName = $Piece(tSchemaClass, ".", *)
+
+		set tMode = pBody.%Get("mode")
+		if (tMode '= "polling") && (tMode '= "subscription") set tMode = "polling"
+
+		set tSC = ..EnsureProductionExists()
+		Quit:$$$ISERR(tSC)
+
+		// Config item names must stay unique — see AddServiceItem's callers.
+		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
+		if $IsObject(tProd) {
+			set tDup = tProd.FindItemByConfigName(tItemName, .tDupSC)
+			if $IsObject(tDup) {
+				set tSC = $$$ERROR($$$GeneralError, "A pipeline named '"_tItemName_"' already exists. Choose a different name.")
+				Quit
+			}
+		}
+
+		set tSC = ..AddServiceItem(pBody, tSchemaClass, tItemName, tMode, tDevices)
+		Quit:$$$ISERR(tSC)
+
+		set pResult.deployed = 1
+		set pResult.compiled = 1
+		set pResult.dataSourceClass = tSchemaClass
+		set pResult.tableName = ##class(OPCUA.REST.SchemaService).TableName(tSchemaClass)
+		set pResult.serviceItemName = tItemName
+		set pResult.deviceCount = $LL(tParsed)
+
+		set tSC = ..StartOrUpdateProduction()
+		Quit:$$$ISERR(tSC)
+		set pResult.started = 1
+
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit tSC
 }
 
 /// Ensure the shared production class exists. Creates it on first deploy.
@@ -63,7 +164,11 @@ ClassMethod EnsureProductionExists() As %Status [ Private ]
 }
 
 /// Add a new business service item to the shared production using the Ens.Config API.
-ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDSName As %String, pMode As %String) As %Status [ Private ]
+///
+/// pDeviceNodePaths, when supplied, is used verbatim as the DeviceNodePaths
+/// setting (the bind-an-existing-schema path already has it in that form).
+/// Otherwise it is rendered from the request's rowSources array.
+ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDSName As %String, pMode As %String, pDeviceNodePaths As %String = "") As %Status [ Private ]
 {
 	#dim tSC As %Status = $$$OK
 	Try {
@@ -94,7 +199,14 @@ ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDS
 
 		// The device list lives in the config item, so it is visible and editable
 		// in the Management Portal — adding a device is a one-line edit here.
-		do ..AddSetting(tItem, "Adapter", "DeviceNodePaths", ..BuildDeviceNodePaths(pBody.%Get("rowSources")))
+		set tDevices = pDeviceNodePaths
+		if tDevices = "" set tDevices = ..BuildDeviceNodePaths(pBody.%Get("rowSources"))
+		do ..AddSetting(tItem, "Adapter", "DeviceNodePaths", tDevices)
+
+		// Optional strictness: refuse to start rather than storing NULL columns.
+		if +pBody.%Get("strictSchemaMatch") {
+			do ..AddSetting(tItem, "Adapter", "StrictSchemaMatch", 1)
+		}
 
 		if pMode = "polling" {
 			set tInterval = +pBody.%Get("callInterval")
