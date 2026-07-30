@@ -281,7 +281,7 @@ Touch points to clean up:
 - `PipelineService.Edit()` — no longer rewrites the global ([PipelineService.cls:333](image-iris/src/OPCUA/REST/PipelineService.cls#L333))
 - `Projection.RemoveProjection()` — drop the `Kill ^OPCUA.RowSource` ([Projection.cls:245](image-iris/src/OPCUA/DataSource/Projection.cls#L245))
 
-**Migration.** Any pipeline deployed with the current code has a populated global and no `DeviceNodePaths` setting, and would silently poll nothing after upgrade. Required: `OPCUA.Utils.MigrateRowSourceToSettings()`, which walks `^OPCUA.RowSource`, reconstructs a `DeviceNodePaths` value from each `rsList` entry's `path`/`nodeNs`/`nodeId`/`nodeIdType`, writes it onto the matching config item, and reports anything it could not map. Run it from the installer and expose it as a manual terminal command. Keep a read-only fallback to the global for one release, behind a deprecation warning in the event log.
+**Migration — not required.** The repo is still under active development with no important pipelines deployed anywhere, so there is nothing to migrate. The global can be retired outright: delete the write/read paths in the same commit, no migration utility, no fallback-read grace period. If a stale `^OPCUA.RowSource` happens to exist in a dev instance, just `Kill` it manually.
 
 ### 4.9 REST API — separate schema and pipeline lifecycles
 
@@ -362,7 +362,6 @@ Q1–Q4 block implementation of their respective sections; Q5–Q6 can be settle
 | Risk | Severity | Mitigation |
 |---|---|---|
 | **Deferred failure.** A renamed/missing node now fails at runtime rather than at deploy, when the wizard verified every node up front. | **High** | `/schemas/:name/validate` dry run (§4.9); `StrictSchemaMatch` (Q2); explicit event-log warnings listing unresolved columns per device. |
-| **Migration gap.** Existing pipelines silently poll nothing after upgrade. | **High** | `MigrateRowSourceToSettings()` + one-release read fallback (§4.8). Ship migration in the same commit as the global's retirement. |
 | **Connect-sequence regression.** Reordering `##super()` inside `Connect()` touches the shared v1 path used by Examples and the `OPCUA.Tests` harness. | **High** | Default no-op `ResolveSpecification()` hook keeps v1 behaviour byte-identical; run `OPCUA.Tests.DataTest.Run()` before and after; treat `TCPSubscriptionInboundAdapter` as separate work. |
 | **Browse overhead per reconnect.** N devices × M columns of round-trips on every reconnect. | Medium | Measure (Q5); cache if warranted; batch the browse calls. |
 | **Name collisions.** Two children with the same BrowseName under one device. | Low | Resolver logs a warning and takes the first match deterministically. |
@@ -381,10 +380,10 @@ Each phase is independently shippable and leaves the system working.
 `SchemaService` + `/schemas` endpoints. `DeployV2` refactored to call `CreateSchema()` then `BindDevices()` internally. External behaviour and payloads unchanged — this is the "split the functionality" note, done invisibly.
 
 **Phase 3 — Generic service.**
-`DeviceNodePaths` setting; `DataSourceClass` dropdown; `ResolveSpecification()` hook and `Connect()` reordering; row-source services switched to settings + `Resolver`; nesting spec derived from the class. Ship the migration utility here. **Acceptance test: build a working pipeline entirely from the Management Portal, with the webapp closed.**
+`DeviceNodePaths` setting; `DataSourceClass` dropdown; `ResolveSpecification()` hook and `Connect()` reordering; row-source services switched to settings + `Resolver`; nesting spec derived from the class. **Acceptance test: build a working pipeline entirely from the Management Portal, with the webapp closed.**
 
 **Phase 4 — Retire `^OPCUA.RowSource`.**
-Delete `StoreRowSourceMetadata()` and the fallback read path; clean up the touch points in §4.8.
+Delete `StoreRowSourceMetadata()` and all read paths; clean up the touch points in §4.8. No migration needed (no deployed pipelines).
 
 **Phase 5 — Webapp split.**
 Schema library, device-binding step, per-device validation, reuse flow.
@@ -413,5 +412,5 @@ Phases 1–4 deliver everything the supervisor asked for. Phase 5 is the ergonom
 4. A pipeline can be created **entirely from the Management Portal** — add service item, pick schema from dropdown, type device nodepaths, start — with no webapp involvement.
 5. Adding a fourth device is a one-line edit to `DeviceNodePaths`, requiring no regeneration and no recompile.
 6. A device missing a column stores NULL for it and logs a warning naming the device and the column.
-7. `^OPCUA.RowSource` is gone, and pipelines deployed before the change still poll correctly after running the migration.
+7. `^OPCUA.RowSource` is gone, with no read or write paths remaining anywhere in the codebase.
 8. `OPCUA.Tests.DataTest.Run()` passes unchanged.
