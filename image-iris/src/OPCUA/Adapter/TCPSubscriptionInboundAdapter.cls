@@ -142,6 +142,12 @@ Method Connect() As %Status
 
 	try {
 
+		// Row-source adapters resolve their Specification here, against the live
+		// session established above (browsing needs one). Default is a no-op, so
+		// the declarative v1 path is unaffected.
+		set tSC = ..ResolveSpecification()
+		Quit:$$$ISERR(tSC)
+
 		#dim tHandle as %Integer
 		#dim tPublishingInterval as %Double = ..RequestedPublishingInterval
 		#dim tLifetimeCount as %Integer = ..RequestedLifetimeCount

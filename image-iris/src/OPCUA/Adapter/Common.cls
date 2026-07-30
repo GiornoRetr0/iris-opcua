@@ -162,6 +162,23 @@ Method Connect() As %Status [ Private ]
 	Quit tSC
 }
 
+/// Overridable hook, invoked by the concrete adapters once a live OPC UA session
+/// exists but before the read/subscription query is prepared.
+///
+/// Row-source services override this to browse each configured device and build
+/// the adapter Specification by matching node names — which is only possible with
+/// a live session, hence a hook here rather than work done in the service's
+/// OnInit(). It runs on every (re)connect, so a device that comes online after
+/// startup is picked up automatically.
+///
+/// The default is a deliberate no-op: the declarative v1 path (Examples,
+/// OPCUA.Tests) configures its Specification in OnInit() from the compiled class
+/// and must keep behaving exactly as before.
+Method ResolveSpecification() As %Status
+{
+	Quit $$$OK
+}
+
 Method Disconnect() As %Status [ Private ]
 {
 	#dim tSC as %Status = $$$OK

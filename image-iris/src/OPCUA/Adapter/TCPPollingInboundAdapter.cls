@@ -24,9 +24,14 @@ Method Configure(pSpecification As %List) As %Status
 	Quit tSC
 }
 
-/// Used internally to setup of the OPC-UA client, connect to the 
+/// Used internally to setup of the OPC-UA client, connect to the
 /// server, and intialize the query that will be used to poll for
 /// results.
+///
+/// The session is established (##super) BEFORE the query is prepared, because
+/// <method>ResolveSpecification</method> may need to browse the server to work
+/// out which nodes to read. ReadBulkSetupC does not require a live session, so
+/// the previous order also worked for the declarative path — but browsing does.
 Method Connect() As %Status
 {
 	#dim tSC as %Status = $$$OK
@@ -41,19 +46,24 @@ Method Connect() As %Status
 			set ..QueryHandle = 0
 		}
 
+		set tSC = ##super()
+		Quit:$$$ISERR(tSC)
+
+		// Row-source adapters resolve their Specification here, against the live
+		// session. Default implementation is a no-op.
+		set tSC = ..ResolveSpecification()
+		Quit:$$$ISERR(tSC)
+
 		#dim tmp as %Integer
 		set tSC = ..Client.ReadBulkSetupC(.tmp,..Specification)
 		Quit:$$$ISERR(tSC)
 
 		set ..QueryHandle = tmp
 
-		set tSC = ##super()
-		Quit:$$$ISERR(tSC)
-
 	} catch (e) {
 		Set tSC=e.AsStatus()
 	}
-	
+
 	Quit tSC  // Quit $$$OK
 }
 
