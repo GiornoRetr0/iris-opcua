@@ -91,8 +91,8 @@ import { Schema, ServerProfile, DeviceBinding, DeviceValidation } from '../../co
           <label class="block text-xs font-semibold text-on-surface-variant mb-2">
             OPC UA device roots — one per line
           </label>
-          <textarea [(ngModel)]="deviceText"
-                    (ngModelChange)="onDeviceTextChange()"
+          <textarea [ngModel]="deviceText()"
+                    (ngModelChange)="onDeviceTextChange($event)"
                     rows="6"
                     spellcheck="false"
                     placeholder="ns=2;s=Plant.AC1|AC1&#10;ns=2;s=Plant.AC2|AC2&#10;ns=0;i=85|Objects"
@@ -113,7 +113,7 @@ import { Schema, ServerProfile, DeviceBinding, DeviceValidation } from '../../co
           <div class="mt-5 pt-5 border-t border-outline-variant/10 flex flex-wrap items-end gap-3">
             <div class="flex-1 min-w-[220px]">
               <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Server</label>
-              <select [(ngModel)]="serverId"
+              <select [ngModel]="serverId()" (ngModelChange)="serverId.set($event)"
                       class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary/30">
                 @for (srv of servers(); track srv.id) {
                   <option [value]="srv.id">{{ srv.name }} — {{ srv.url }}</option>
@@ -121,9 +121,9 @@ import { Schema, ServerProfile, DeviceBinding, DeviceValidation } from '../../co
               </select>
             </div>
             <button (click)="validate()"
-                    [disabled]="validating() || deviceCount() === 0 || !serverId"
+                    [disabled]="validating() || deviceCount() === 0 || !serverId()"
                     class="px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all"
-                    [class]="validating() || deviceCount() === 0 || !serverId
+                    [class]="validating() || deviceCount() === 0 || !serverId()
                       ? 'bg-surface-container-highest text-on-surface-variant/40 cursor-not-allowed'
                       : 'bg-tertiary-container text-on-primary hover:brightness-110 active:scale-95'">
               <span class="material-symbols-outlined text-lg" [class.animate-spin]="validating()">
@@ -200,7 +200,7 @@ import { Schema, ServerProfile, DeviceBinding, DeviceValidation } from '../../co
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
             <div>
               <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Pipeline name</label>
-              <input [(ngModel)]="pipelineName" spellcheck="false"
+              <input [ngModel]="pipelineName()" (ngModelChange)="pipelineName.set($event)" spellcheck="false"
                      class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary/30" />
               <p class="text-[11px] text-on-surface-variant mt-1">Shown as the production config item.</p>
             </div>
@@ -224,19 +224,19 @@ import { Schema, ServerProfile, DeviceBinding, DeviceValidation } from '../../co
             @if (mode() === 'polling') {
               <div>
                 <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Poll interval (seconds)</label>
-                <input type="number" min="1" [(ngModel)]="callInterval"
+                <input type="number" min="1" [ngModel]="callInterval()" (ngModelChange)="callInterval.set($event)"
                        class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary/30" />
               </div>
             } @else {
               <div>
                 <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Publishing interval (ms)</label>
-                <input type="number" min="1" [(ngModel)]="publishingInterval"
+                <input type="number" min="1" [ngModel]="publishingInterval()" (ngModelChange)="publishingInterval.set($event)"
                        class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary/30" />
               </div>
             }
 
             <div class="sm:col-span-2 flex items-start gap-3 pt-2">
-              <input type="checkbox" id="strict" [(ngModel)]="strictSchemaMatch"
+              <input type="checkbox" id="strict" [ngModel]="strictSchemaMatch()" (ngModelChange)="strictSchemaMatch.set($event)"
                      class="mt-0.5 rounded border-outline-variant/40 text-primary focus:ring-primary/30" />
               <label for="strict" class="text-sm text-on-surface cursor-pointer">
                 <span class="font-semibold">Strict schema match</span>
@@ -282,35 +282,35 @@ export class DeviceBindingComponent implements OnInit {
   error = signal('');
 
   servers = signal<ServerProfile[]>([]);
-  serverId = '';
+  serverId = signal('');
 
-  deviceText = '';
+  deviceText = signal('');
   validation = signal<{ columnCount: number; devices: DeviceValidation[]; allResolved: boolean } | null>(null);
   validating = signal(false);
 
-  pipelineName = '';
+  pipelineName = signal('');
   mode = signal<'polling' | 'subscription'>('polling');
-  callInterval = 5;
-  publishingInterval = 1000;
-  strictSchemaMatch = false;
+  callInterval = signal(5);
+  publishingInterval = signal(1000);
+  strictSchemaMatch = signal(false);
   deploying = signal(false);
 
   /** Usable device lines: blank and #-commented lines don't count. */
-  deviceCount = computed(() => this.parseLines(this.deviceText).length);
+  deviceCount = computed(() => this.parseLines(this.deviceText()).length);
 
   canDeploy = computed(
     () =>
       !this.deploying() &&
       !!this.schema() &&
       this.deviceCount() > 0 &&
-      !!this.pipelineName.trim() &&
-      !!this.serverId
+      !!this.pipelineName().trim() &&
+      !!this.serverId()
   );
 
   ngOnInit(): void {
     this.servers.set(this.config.getServers());
     const first = this.servers()[0];
-    if (first) this.serverId = first.id;
+    if (first) this.serverId.set(first.id);
 
     const schemaClass = this.route.snapshot.paramMap.get('schema') || '';
     if (!schemaClass) {
@@ -323,7 +323,7 @@ export class DeviceBindingComponent implements OnInit {
       next: (s) => {
         this.schema.set(s);
         // Default the pipeline name to the schema name, de-duplicated by the server if taken.
-        this.pipelineName = s.name;
+        this.pipelineName.set(s.name);
         this.loadingSchema.set(false);
       },
       error: (err) => {
@@ -334,7 +334,8 @@ export class DeviceBindingComponent implements OnInit {
   }
 
   /** Editing the device list invalidates any previous coverage result. */
-  onDeviceTextChange(): void {
+  onDeviceTextChange(value: string): void {
+    this.deviceText.set(value);
     if (this.validation()) this.validation.set(null);
   }
 
@@ -344,7 +345,7 @@ export class DeviceBindingComponent implements OnInit {
 
     this.validating.set(true);
     this.error.set('');
-    this.api.validateSchema(s.schemaClass, this.deviceText, this.server()).subscribe({
+    this.api.validateSchema(s.schemaClass, this.deviceText(), this.server()).subscribe({
       next: (v) => {
         this.validation.set(v);
         this.validating.set(false);
@@ -365,15 +366,15 @@ export class DeviceBindingComponent implements OnInit {
 
     const params: Record<string, any> = {
       schemaClass: s.schemaClass,
-      dataSourceName: this.pipelineName.trim(),
-      devices: this.deviceText,
+      dataSourceName: this.pipelineName().trim(),
+      devices: this.deviceText(),
       mode: this.mode(),
-      strictSchemaMatch: this.strictSchemaMatch ? 1 : 0,
+      strictSchemaMatch: this.strictSchemaMatch() ? 1 : 0,
     };
     if (this.mode() === 'polling') {
-      params['callInterval'] = this.callInterval;
+      params['callInterval'] = this.callInterval();
     } else {
-      params['publishingInterval'] = this.publishingInterval;
+      params['publishingInterval'] = this.publishingInterval();
     }
 
     this.api.deploy(params, this.server()).subscribe({
@@ -393,7 +394,7 @@ export class DeviceBindingComponent implements OnInit {
   }
 
   private server(): ServerProfile | undefined {
-    return this.servers().find((s) => s.id === this.serverId);
+    return this.servers().find((s) => s.id === this.serverId());
   }
 
   private parseLines(text: string): string[] {

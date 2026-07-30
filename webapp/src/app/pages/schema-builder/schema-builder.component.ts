@@ -64,14 +64,14 @@ interface DraftColumn {
           </div>
 
           <div class="flex gap-2 mb-4">
-            <select [(ngModel)]="serverId"
+            <select [ngModel]="serverId()" (ngModelChange)="serverId.set($event)"
                     class="flex-1 rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary/30">
               @for (srv of servers(); track srv.id) {
                 <option [value]="srv.id">{{ srv.name }}</option>
               }
             </select>
             <button (click)="loadRoot()"
-                    [disabled]="!serverId || browsing()"
+                    [disabled]="!serverId() || browsing()"
                     class="px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider bg-surface-container text-primary hover:bg-primary-fixed/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5">
               <span class="material-symbols-outlined text-lg" [class.animate-spin]="browsing()">
                 {{ browsing() ? 'progress_activity' : 'travel_explore' }}
@@ -155,12 +155,12 @@ interface DraftColumn {
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-6">
           <div>
             <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Schema name</label>
-            <input [(ngModel)]="schemaName" spellcheck="false" placeholder="AirConditioner"
+            <input [ngModel]="schemaName()" (ngModelChange)="schemaName.set($event)" spellcheck="false" placeholder="AirConditioner"
                    class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary/30" />
           </div>
           <div>
             <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Package</label>
-            <input [(ngModel)]="packagePath" spellcheck="false"
+            <input [ngModel]="packagePath()" (ngModelChange)="packagePath.set($event)" spellcheck="false"
                    class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary/30" />
           </div>
         </div>
@@ -227,42 +227,42 @@ export class SchemaBuilderComponent implements OnInit {
   private config = inject(ConfigService);
 
   servers = signal<ServerProfile[]>([]);
-  serverId = '';
+  serverId = signal('');
 
   roots = signal<TreeNode[]>([]);
   browsing = signal(false);
 
   columns = signal<DraftColumn[]>([]);
-  schemaName = '';
-  packagePath = 'OPCUA.DS';
+  schemaName = signal('');
+  packagePath = signal('OPCUA.DS');
   saving = signal(false);
   error = signal('');
 
   nestedCount = computed(() => this.columns().filter((c) => c.relativePath.length > 1).length);
 
   fullClassName = computed(() => {
-    const n = this.schemaName.trim();
+    const n = this.schemaName().trim();
     if (!n) return '';
     if (n.includes('.')) return n;
-    const p = this.packagePath.trim() || 'OPCUA.DS';
+    const p = this.packagePath().trim() || 'OPCUA.DS';
     return `${p}.${n}`;
   });
 
   canSave = computed(
-    () => !this.saving() && this.columns().length > 0 && !!this.schemaName.trim()
+    () => !this.saving() && this.columns().length > 0 && !!this.schemaName().trim()
   );
 
   ngOnInit(): void {
     this.servers.set(this.config.getServers());
     const first = this.servers()[0];
     if (first) {
-      this.serverId = first.id;
+      this.serverId.set(first.id);
       this.loadRoot();
     }
   }
 
   private server(): ServerProfile | undefined {
-    return this.servers().find((s) => s.id === this.serverId);
+    return this.servers().find((s) => s.id === this.serverId());
   }
 
   loadRoot(): void {
@@ -389,8 +389,8 @@ export class SchemaBuilderComponent implements OnInit {
 
     this.api
       .createSchema({
-        name: this.schemaName.trim(),
-        packagePath: this.packagePath.trim() || 'OPCUA.DS',
+        name: this.schemaName().trim(),
+        packagePath: this.packagePath().trim() || 'OPCUA.DS',
         defaultNamespace: defaultNs,
         columns: cols.map((c) => ({
           displayName: c.displayName,
