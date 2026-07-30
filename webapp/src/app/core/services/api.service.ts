@@ -10,6 +10,10 @@ import {
   DeployResult,
   ServerProfile,
   MetricsSnapshot,
+  Schema,
+  CreateSchemaRequest,
+  CreateSchemaResult,
+  SchemaValidation,
 } from '../models/opcua.models';
 
 interface ApiEnvelope<T> {
@@ -150,5 +154,76 @@ export class ApiService {
 
   getMetrics(): Observable<MetricsSnapshot> {
     return this.post<MetricsSnapshot>('/metrics', {}, 10000);
+  }
+
+  // ── Schemas: reusable device types, independent of any pipeline ──
+
+  /** GET/DELETE helper — /schemas uses real verbs, unlike the POST-only endpoints. */
+  private request<T>(
+    method: 'get' | 'delete',
+    endpoint: string,
+    timeoutMs = 15000
+  ): Observable<T> {
+    return this.http
+      .request<ApiEnvelope<T>>(method, `${this.baseUrl}${endpoint}`, { headers: this.headers })
+      .pipe(
+        timeout(timeoutMs),
+        map((res) => {
+          if (res.status === 'error') throw new Error(res.error || 'Unknown API error');
+          return res.data as T;
+        }),
+        catchError((err) => {
+          if (err.name === 'TimeoutError') {
+            return throwError(() => new Error('Request timed out'));
+          }
+          return throwError(() => err);
+        })
+      );
+  }
+
+  listSchemas(): Observable<Schema[]> {
+    return this.request<Schema[]>('get', '/schemas');
+  }
+
+  getSchema(schemaClass: string): Observable<Schema> {
+    return this.request<Schema>('get', `/schemas/${encodeURIComponent(schemaClass)}`);
+  }
+
+  /** Create a schema. No production, service item, or device binding side effects. */
+  createSchema(req: CreateSchemaRequest): Observable<CreateSchemaResult> {
+    return this.http
+      .post<ApiEnvelope<CreateSchemaResult>>(`${this.baseUrl}/schemas`, req, {
+        headers: this.headers,
+      })
+      .pipe(
+        timeout(60000),
+        map((res) => {
+          if (res.status === 'error') throw new Error(res.error || 'Unknown API error');
+          return res.data as CreateSchemaResult;
+        })
+      );
+  }
+
+  /** Delete a schema. Refused by the server while a pipeline still references it. */
+  deleteSchema(schemaClass: string): Observable<{ deleted: boolean; schemaClass: string }> {
+    return this.request('delete', `/schemas/${encodeURIComponent(schemaClass)}`, 30000);
+  }
+
+  /**
+   * Dry-run a device binding: browse each device and report which of the
+   * schema's columns resolve. Moves "does this device really have these nodes?"
+   * back to before deploy.
+   */
+  validateSchema(
+    schemaClass: string,
+    devices: string,
+    server?: ServerProfile
+  ): Observable<SchemaValidation> {
+    return this.post<SchemaValidation>(
+      `/schemas/${encodeURIComponent(schemaClass)}/validate`,
+      { devices },
+      30000,
+      server
+    );
   }
 }

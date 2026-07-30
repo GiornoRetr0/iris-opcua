@@ -209,6 +209,77 @@ export interface AppConfig {
   servers: ServerProfile[];
 }
 
+/** A reusable device schema: the columns of one device type, with no device binding. */
+export interface Schema {
+  schemaClass: string;
+  name: string;
+  packagePath: string;
+  tableName: string;
+  dataSourceName?: string;
+  defaultNamespace?: number;
+  columnCount: number;
+  /** Populated by GET /schemas/:name only */
+  columns?: SchemaColumn[];
+  /** Names of the pipelines currently bound to this schema */
+  usedBy: string[];
+}
+
+export interface SchemaColumn {
+  nodeName: string;
+  namespace: number;
+  attributeId: number;
+  /** Enclosing %SerialObject folder, or "" for a top-level column */
+  folder: string;
+  propertyPath: string;
+}
+
+export interface CreateSchemaRequest {
+  name: string;
+  packagePath?: string;
+  dataSourceName?: string;
+  defaultNamespace?: number;
+  columns: { displayName: string; inferredType?: string; relativePath?: string[]; nodeNs?: number }[];
+}
+
+export interface CreateSchemaResult {
+  created: boolean;
+  schemaClass: string;
+  dataSourceName: string;
+  tableName: string;
+  columnCount: number;
+  serialClasses: number;
+}
+
+/** Per-device outcome of a dry-run binding check against a live server. */
+export interface SchemaValidation {
+  schemaClass: string;
+  columnCount: number;
+  devices: DeviceValidation[];
+  allResolved: boolean;
+  diagnostics: { device: string; column: string; reason: string }[];
+}
+
+export interface DeviceValidation {
+  label: string;
+  nodeNs: number;
+  nodeId: string | number;
+  matched: string[];
+  missing: string[];
+  matchedCount: number;
+  missingCount: number;
+  complete: boolean;
+}
+
+/** A device bound to a schema, expressed as an OPC UA nodepath plus a label. */
+export interface DeviceBinding {
+  /** e.g. "ns=2;s=Plant.AC1" */
+  nodePath: string;
+  /** NodePath column value; defaults to nodePath when blank */
+  label: string;
+  /** Last known validation outcome, if a dry run has been performed */
+  validation?: DeviceValidation;
+}
+
 export interface Metric {
   name: string;
   labels: Record<string, string>;
