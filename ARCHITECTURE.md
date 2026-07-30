@@ -206,9 +206,13 @@ Each property has parameters (metadata annotations) that tell the system which O
 
 DataSource classes are created in **two ways**, depending on where they come from:
 
-**Hand-authored (declarative):** the Examples and the `OPCUA.Tests` harness ship `.cls` files that extend `(%Persistent, OPCUA.DataSource.Definition)` and declare one typed `OPCUA.Types.*` property per node. These run under `TCPPollingService` / `TCPSubscriptionService` and exist to validate the C++ type marshalling. They are *not* produced by the wizard.
+**Hand-authored (declarative):** the Examples and the `OPCUA.Tests` harness ship `.cls` files that extend `(%Persistent, OPCUA.DataSource.Definition)` and declare one typed `OPCUA.Types.*` property per node. These run under `TCPPollingService` / `TCPSubscriptionService` and exist to validate the C++ type marshalling. They are *not* generated.
 
-**Wizard deploy (v2 row-source):** `DeployService.DeployV2()` builds the class **in memory** via the `%Dictionary` API (`%Dictionary.ClassDefinition` + `%Dictionary.PropertyDefinition`), then calls `$System.OBJ.Compile()`. Nested folders are emitted first as `%SerialObject` subclasses (`GenerateSerialClasses()`). Columns are flattened to plain IRIS types (`MapToPlainType()`), not the `OPCUA.Types.*` wrappers. This is the **only** deploy path — there is no longer a v1 deploy fork.
+**Generated (device schemas):** `SchemaService.GenerateSchemaClass()` builds the class **in memory** via the `%Dictionary` API (`%Dictionary.ClassDefinition` + `%Dictionary.PropertyDefinition`), then calls `$System.OBJ.Compile()`. Nested folders are emitted first as `%SerialObject` subclasses (`GenerateSerialClasses()`). Columns are flattened to plain IRIS types (`MapToPlainType()`), not the `OPCUA.Types.*` wrappers.
+
+Generated schemas extend `OPCUA.DataSource.DeviceSchema` (itself an abstract subclass of `Definition`). That common superclass is what lets the `DataSourceClass` production setting render as a dropdown of exactly the classes the row-source services can consume — the hand-authored Examples don't appear in it.
+
+Crucially, schema generation **has no production side effects and stores no device information**. A schema describes a device *type*: the column names and their types. Which concrete devices get read is a separate, later decision — see [section 14](#14-v2-pipelines-multiple-devices-one-table).
 
 ### What happens when a class compiles
 
@@ -253,7 +257,7 @@ The Projection also generates the `SaveSourcedData()` class method -- this is a 
 
 **Key files:** `OPCUA/REST/Handler.cls`, `OPCUA/REST/ClientManager.cls`, `OPCUA/REST/*.cls`
 
-The Angular web app (pipeline wizard) communicates with IRIS through a REST API. IRIS has built-in REST support through `%CSP.REST` (CSP = Cache Server Pages, IRIS's web framework).
+The Angular web app (the OPC UA console) communicates with IRIS through a REST API. IRIS has built-in REST support through `%CSP.REST` (CSP = Cache Server Pages, IRIS's web framework).
 
 ### The Handler (router)
 
@@ -263,14 +267,21 @@ The Angular web app (pipeline wizard) communicates with IRIS through a REST API.
 |----------|--------|-------------|
 | `/ping` | GET | Health check -- returns timestamp |
 | `/browse` | GET/POST | Browse OPC UA server nodes |
-| `/read` | GET/POST | Read a single node's value |
+| `/read` | GET/POST | Read a single node's value (and infer its type) |
 | `/generate` | GET/POST | Generate a DataSource class from selected nodes |
 | `/test` | GET/POST | Test connection to an OPC UA server |
-| `/deploy` | POST | Deploy a new pipeline |
+| `/schemas` | GET | List device schemas, with the pipelines using each |
+| `/schemas` | POST | Create a device schema (no production side effects) |
+| `/schemas/:name` | GET | One schema, including its column list |
+| `/schemas/:name` | DELETE | Delete a schema — refuses while a pipeline uses it |
+| `/schemas/:name/validate` | POST | Dry-run a device list against a schema |
+| `/deploy` | POST | Bind devices to an existing schema → a pipeline |
 | `/pipelines` | GET/POST | List all deployed pipelines |
-| `/pipelines/edit` | POST | Modify an existing pipeline |
+| `/pipelines/rebind` | POST | Change a pipeline's device list / strictness |
 | `/pipelines/toggle` | POST | Enable/disable a pipeline |
-| `/pipelines/delete` | POST | Delete a pipeline |
+| `/pipelines/delete` | POST | Delete a pipeline (keeps its schema) |
+
+The two halves are deliberately separate: `/schemas` creates a reusable device *type*, and `/deploy` binds concrete devices to one. A schema can exist with no pipeline, and several pipelines can share one schema.
 
 Each route maps to a method in Handler that delegates to a specialized service class.
 
@@ -315,7 +326,7 @@ This means every REST call (browse, read, test) opens a fresh OPC UA connection,
 
 **Key file:** `OPCUA/REST/BrowseService.cls`
 
-When you expand a node in the pipeline wizard's tree view, the frontend calls `/browse` with the node's coordinates (namespace + node ID). Here's what happens:
+When you expand a node in a tree view, the frontend calls `/browse` with the node's coordinates (namespace + node ID). Here's what happens:
 
 1. `BrowseService.Browse()` receives the request
 2. Creates a temporary OPC UA client via `ClientManager.Connect()`
@@ -328,7 +339,7 @@ When you expand a node in the pipeline wizard's tree view, the frontend calls `/
    - **Is it an object?** (a container for other nodes) Everything else
 6. Returns a JSON array with each child's display name, namespace, node ID, category (variable/folder/object/property), and whether it has children of its own
 
-The pipeline wizard uses this to render the expandable tree where users check nodes they want to poll.
+The webapp uses this to render the expandable trees: the node explorer, the schema builder's column picker, and the device picker on the binding screen.
 
 ---
 
@@ -336,28 +347,26 @@ The pipeline wizard uses this to render the expandable tree where users check no
 
 **Key file:** `OPCUA/REST/DeployService.cls`
 
-Deployment is the most complex operation. It takes the user's selections (which nodes to poll, from which server, how often) and sets up everything needed for continuous data collection. `DeployService.Deploy()` is a thin dispatcher: it requires a `rowSources` array and forwards to `DeployV2()`. (Requests without `rowSources` are rejected — the old v1 single-device deploy fork has been removed.)
+Deploying **generates nothing**. By the time you deploy, the schema class already exists (created via `/schemas`), so a deploy is just "bind these devices to that schema and wire it into the production". `DeployService.Deploy()` requires a `schemaClass` and forwards to `BindExistingSchema()`.
 
-### v2 deployment (row-source model)
+That is why adding a second pipeline over an existing schema costs one config item and **no compilation**.
 
-1. **Generate the DataSource class** (`GenerateDataSourceTextV2()`):
-   - Use the `%Dictionary.ClassDefinition` API to build a new class extending `(%Persistent, OPCUA.DataSource.Definition)`
-   - Add the three metadata properties (`NodePath`, `ServerTimeStamp`, `SourceTimeStamp`) plus one **plain-typed** column per union column (`MapToPlainType()`)
-   - Nested folders are emitted first as `%SerialObject` subclasses (`GenerateSerialClasses()`)
-   - Call `$System.OBJ.Compile()` -- this creates the SQL table and triggers the Projection
+### Binding devices to a schema
 
-2. **Store row-source metadata** (`StoreRowSourceMetadata()`):
-   - Write `^OPCUA.RowSource(class)` with the row-source list, per-row-source **column masks** (which devices have which columns), absolute node refs, and the nesting spec
-   - The runtime services depend entirely on this global (see [section 14](#14-v2-pipelines-multiple-devices-one-table))
+1. **Validate the schema:** it must exist, be compiled, and be an `OPCUA.DataSource.DeviceSchema` subclass.
 
-3. **Ensure the production exists:** create `OPCUA.Pipeline.Production` (an empty production class) on first deploy if missing
+2. **Parse the device list** (`Resolver.ParseDeviceNodePaths()`): newline-separated nodepaths, so an unusable entry is reported per-line now rather than failing at connect time.
+
+3. **Ensure the production exists:** create `OPCUA.Pipeline.Production` (an empty production class) on first deploy if missing.
 
 4. **Add a service item** (`AddServiceItem()`):
    - Create an `Ens.Config.Item`, set its class to `OPCUA.Service.TCPPollingRowSourceService` or `OPCUA.Service.TCPSubscriptionRowSourceService` (chosen by `mode`)
-   - Configure settings: DataSourceClass, URL, poll/subscription intervals, security parameters
+   - Configure settings: `DataSourceClass`, **`DeviceNodePaths`**, `URL`, `StrictSchemaMatch`, poll/subscription intervals, security parameters
    - Add it, save the production, call `SaveToClass()`
 
 5. **Start or update the production:** `Ens.Director.UpdateProduction()` if already running, else `StartProduction()`
+
+**The device list is an ordinary production setting.** It lives in the config item, which means it is visible and editable in the Management Portal — adding a device is a one-line edit there, needing no regeneration and no recompile. There is no metadata global to keep in sync.
 
 > The hand-authored Examples/Tests classes use `TCPPollingService` / `TCPSubscriptionService` instead — see [section 12](#12-services-the-data-processors).
 
@@ -403,6 +412,30 @@ This is the base class that both adapters extend. It manages:
   - If `AlwaysConnect=0`, give up and stop the adapter
   - If `ResetClientFlag` is set, destroy the old client object entirely and create a fresh one
 
+### Configuring a pipeline from the Management Portal
+
+`Common` declares a `SETTINGS` parameter, which is what makes every pipeline
+configurable in the Production Configuration UI with no webapp involved:
+
+```objectscript
+Parameter SETTINGS = "...,DataSourceClass:Data:selector?context={Ens.ContextSearch/SubclassOf?class=OPCUA.DataSource.DeviceSchema},DeviceNodePaths:Data,StrictSchemaMatch:Data,..."
+```
+
+- **`DataSourceClass`** renders as a **dropdown** of available schemas, populated by
+  `Ens.ContextSearch.SubclassOf` from the common superclass. Note the parameter is
+  named `class` (not `super`), and it already excludes abstract classes, so the
+  `DeviceSchema` base itself never appears.
+- **`DeviceNodePaths`** is a free-text list, one device per line.
+- **`StrictSchemaMatch`** is the refuse-to-collect toggle.
+
+Two consequences worth knowing:
+
+- A pipeline can be built **entirely from the Portal** — add a service item, pick a
+  schema from the dropdown, type the device roots, start. No REST call required.
+- `SETTINGS` must be a **single line**; a multi-line concatenation does not parse.
+  Entries are also first-wins per name, so a `-Name` suppression entry earlier in
+  the string removes that setting outright.
+
 ### Polling adapter (`TCPPollingInboundAdapter`)
 
 Used for periodic reading of values (like checking a sensor every 5 seconds).
@@ -445,7 +478,7 @@ A "business service" in Ensemble is the high-level component that owns an adapte
 
 ### Declarative Polling Service (`TCPPollingService`)
 
-Runtime for hand-authored DataSource classes (Examples + `OPCUA.Tests`). Not used by the wizard.
+Runtime for hand-authored DataSource classes (Examples + `OPCUA.Tests`). Not used by generated schemas.
 
 **OnInit** (runs once at startup):
 1. Reads the DataSourceClass setting (e.g., `"OPCUA.DS.MyPipeline"`)
@@ -461,9 +494,9 @@ Runtime for hand-authored DataSource classes (Examples + `OPCUA.Tests`). Not use
 
 Same as the declarative polling service, but receives data from the subscription adapter. Each notification becomes one row.
 
-### Wizard Services (RowSource variants)
+### Row-source services (generated schemas)
 
-The runtime for wizard-deployed pipelines (the v2 row-source model) -- more complex, see [section 14](#14-v2-pipelines-multiple-devices-one-table).
+The runtime for every deployed pipeline (the v2 row-source model) -- more complex, see [section 14](#14-v2-pipelines-multiple-devices-one-table).
 
 ---
 
@@ -540,16 +573,29 @@ Unit1 mask: [1, 1, 1]   -- has all three
 Unit2 mask: [1, 1, 0]   -- no Pressure sensor
 ```
 
-### v2 Service startup (OnInit)
+### Where devices come from: name-based resolution
 
-1. Load metadata from `^OPCUA.RowSource(className)`:
-   - How many row sources
-   - How many columns
-   - List of row source paths
-   - Column masks per row source
-   - Nesting spec (for folder hierarchies)
-2. Build a combined spec: for each row source, for each active column (mask=1), add one read entry
-3. Pass the combined spec to the adapter -- so one poll cycle reads ALL nodes for ALL devices
+Devices are **not** frozen into the schema at deploy time. Two settings on the config item are the whole binding:
+
+- `DataSourceClass` — the schema (which columns exist)
+- `DeviceNodePaths` — one device root per line, e.g. `ns=2;s=Plant.AC1|AC1`
+
+At **connect time**, `OPCUA.DataSource.Resolver.ResolveSpecification()` browses each device root and matches its children **by name** against the schema's column names. That produces the read spec and the column masks fresh on every connect.
+
+This is why:
+- Adding a device is a one-line edit to a production setting — no regeneration, no recompile
+- A device that is offline at startup begins reporting on its own once it becomes reachable, because resolution re-runs on every reconnect
+- Nothing needs to be stored: masks are *derived*, not remembered
+
+Unresolved columns store NULL and log a warning naming the device and column. Setting `StrictSchemaMatch` makes the service refuse to collect at all instead — useful when a silently NULL column would be worse than a stopped pipeline.
+
+### v2 Service startup (OnInit / Connect)
+
+1. `OnInit()` reads the schema's column layout from the compiled class (via `^OPCUA.DataSource`) and derives the nesting spec.
+2. On **connect**, the adapter's `ResolveSpecification()` hook browses every device in `DeviceNodePaths` and builds the combined spec: for each device, for each resolved column, one read entry.
+3. The combined spec goes to the adapter -- so one poll cycle reads ALL nodes for ALL devices.
+
+The ordering matters: the session must be established *before* the spec is built, because building it requires browsing. Both adapters connect first, then resolve, then prepare the read/subscription query.
 
 ### v2 Data processing (OnProcessInput)
 
@@ -598,7 +644,7 @@ Class OPCUA.DS.MyPipeline.StateCondition Extends %SerialObject
 
 In SQL, this appears as flattened columns: `Temperature`, `Humidity`, `StateCondition_CurrentState`, `StateCondition_LastSeverity`.
 
-The **nesting spec** stored in `^OPCUA.RowSource` describes this tree structure so the v2 runtime services know how to assemble the nested `$ListBuild` structures from flat leaf values. Each entry is either:
+The **nesting spec** describes this tree structure so the v2 runtime services know how to assemble the nested `$ListBuild` structures from flat leaf values. It is *derived at startup* by `Resolver.DeriveNestingSpec()`, which walks the compiled class's storage order — nothing is stored. Each entry is either:
 - `$LB("leaf", index)` -- a direct value at a specific position
 - `$LB("serial", folderName, innerSpec...)` -- a nested object with its own entries
 
@@ -616,7 +662,8 @@ The **nesting spec** stored in `^OPCUA.RowSource` describes this tree structure 
 1. Opens `OPCUA.Pipeline.Production` configuration
 2. Walks through all Items in the production
 3. For each item, returns: name, class, enabled state, settings (URL, interval, etc.), runtime status, row count (via SQL query on the DataSource table)
-4. For v2 pipelines: also reads `^OPCUA.RowSource` metadata to return row source paths and column info
+4. Describes the devices by parsing the item's `DeviceNodePaths` setting against the schema's column list (`GetRowSourceInfo()`)
+5. Reports **health** (`GetHealth()`), which is not the same as "enabled": a pipeline that can't connect or whose columns don't resolve stays enabled and keeps retrying while writing nothing. The adapters publish an OK/Error verdict per cycle via `$$$SetHostMonitor`, and this reads it back — so the UI can distinguish `ok`, `error`, `starting`, `disabled` and `stopped`.
 
 ### Toggling (enable/disable)
 
@@ -630,56 +677,44 @@ The **nesting spec** stored in `^OPCUA.RowSource` describes this tree structure 
 `PipelineService.Delete()`:
 1. Removes the item from the production's Items collection
 2. Saves and updates the production
-3. Deletes the DataSource class using `$System.OBJ.Delete()` -- which also drops the SQL table
-4. For v2: also deletes any generated `%SerialObject` subclasses
-5. Cleans up `^OPCUA.DataSource` and `^OPCUA.RowSource` globals
+3. **Leaves the schema alone.** A schema is a reusable asset that may back several pipelines, so deleting one pipeline must not destroy it — that would break every sibling still bound to it and, since the schema class owns the table, discard the collected rows. The response reports `schemaRetained` and `schemaStillUsedBy` so a caller can decide for itself.
 
-### Editing (v2 only)
+Deleting a schema is `SchemaService.Delete()`, which refuses while any pipeline still references it.
 
-`PipelineService.Edit()`:
-1. Receives updated columns and row sources
-2. Regenerates the DataSource class text
-3. Recompiles (this modifies the SQL table schema)
-4. Updates `^OPCUA.RowSource` metadata
-5. Updates production settings
-6. The running service picks up changes on next `UpdateProduction()`
+### Editing: rebinding devices
 
-When a user adds nodes to an existing pipeline, the system browses the affected
-parent nodes on the OPC UA server (at edit time, not runtime), matches the
-discovered children against the pipeline's column list, and classifies the change:
+`PipelineService.Rebind()` (`POST /pipelines/rebind`):
+1. Parses and validates the new device list
+2. Writes the `DeviceNodePaths` setting (and `StrictSchemaMatch`, if supplied)
+3. Calls `UpdateProduction()` — the service re-resolves on its next connect
 
-- **Case A — new row source with matching columns.** The new parent (e.g. AC3)
-  is added as a row source. Its children are browsed to discover which existing
-  columns it has; matching columns are read, missing ones store NULL. Updates
-  `^OPCUA.RowSource` and restarts the service — no DataSource recompile.
-- **Case B — new column on existing/new row sources.** The new column (e.g.
-  PowerConsumption) is added as a property. All existing row sources are browsed
-  for a child of that name; found → column mask set + absolute node ID stored,
-  not found → mask stays 0 (NULL). Requires a DataSource recompile.
-- **Case C — no column overlap.** The selection (e.g. SA1 under Objects) shares
-  zero columns with the pipeline, so every row would be mostly NULL. The edit is
-  **blocked** with a prompt to create a separate pipeline instead.
+That is the whole of editing a pipeline. Because devices are resolved by name at connect time, changing the list is a **settings update**: no regeneration, no recompile, no metadata to migrate.
 
-Cases A and B can occur together (e.g. AC3 brings both a new row source and a new
-column). The masks and node IDs resolved here are exactly what the v2 service
-reads at startup (see §14).
+Changing a schema's **columns** is deliberately not possible here, and currently not possible anywhere — the regenerating edit path was removed along with the combined create-and-deploy wizard that drove it. Recreating the schema is the supported route, which does drop the table and its data. An `ALTER`-style schema edit is the obvious thing to build if that becomes painful.
 
-### Wizard schema-grouping algorithm
+### The webapp flow
 
-The webapp wizard decides how selections become pipelines using the rule
-**"matching schema = same pipeline,"** not "same parent = same pipeline":
+There is no combined "create everything at once" wizard, and deliberately so:
+schema creation and device binding are separate screens because they are separate
+decisions, made at different times and often by different people.
 
-1. **Selection & auto-expand.** Checking a node with children auto-selects all
-   children as columns (the parent's own value is included too); checking a leaf
-   selects it directly. The user can uncheck unwanted columns.
-2. **Group by parent.** Selected leaves are grouped by their parent node — the
-   parent becomes the row source.
-3. **Compare schemas & merge.** Groups with matching column schemas merge into one
-   pipeline with multiple row sources; mismatched schemas stay separate. (This is
-   the frontend counterpart to the connected-components + nested-merge logic in
-   `pipelineGroups`.)
-4. **Confirm.** If the selection yields multiple pipelines, the wizard shows the
-   grouping for the user to confirm before deploy.
+1. **Schemas** (`/schemas`) — the library. Lists every schema with the pipelines
+   using it, so deleting one that is still in use is refused rather than silently
+   breaking a pipeline.
+2. **New Schema** (`/schemas/new`) — browse **one representative device** and tick
+   the nodes that define the type. Its node IDs are not stored; each ticked column
+   is read once to infer its storage type. Ends at "Save Schema" and never touches
+   a production.
+3. **Bind Devices** (`/pipelines/bind/:schema`) — pick device roots from the live
+   address space, or paste nodepaths as text. Both views read and write the same
+   list, so pasting lights up the tree. **Check Coverage** dry-runs the list and
+   reports exactly which columns resolve per device, moving "does this device
+   really have these nodes?" to before deploy.
+4. **Pipelines** (`/pipelines`) — the dashboard. Shows real collection health, not
+   just enabled/disabled. Editing a pipeline reopens the binding screen: the schema
+   and name are fixed, only devices and strictness change.
+
+Reusing a schema across more devices therefore costs one visit to step 3.
 
 ---
 
@@ -712,8 +747,9 @@ IRIS "globals" are persistent key-value trees (like a hierarchical NoSQL store).
 | Global | Set by | Read by | Contains |
 |--------|--------|---------|----------|
 | `^OPCUA.DataSource(className)` | Projection (on class compile) | Services (on startup) | Config spec: `$LB(name, storageGlobal, specList)` |
-| `^OPCUA.RowSource(className)` | DeployService (on v2 deploy) | v2 Services (on startup) | Row source metadata: `$LB(rsCount, colCount, rsList, colPaths, nestingSpec)` |
 | `^OPCUA.Library.Pathname` | Installer | Utils.Initialize() | Path to the C++ shared library |
+
+There is deliberately **no** device-metadata global. An earlier design stored row sources, column masks, absolute node IDs and the nesting spec in `^OPCUA.RowSource`; all of that is now derived — masks and node IDs by browsing at connect time, the nesting spec from the compiled class's storage order. Removing it is what made "add a device" a settings edit rather than a regeneration.
 | `%ZUtilsIrisOpcuaLibraryId` | Utils.Initialize() | Client (every call) | Loaded library handle (process-scoped, not persistent) |
 
 These globals are the "glue" between compile-time (class generation, projection) and runtime (service startup, data collection).
@@ -727,14 +763,17 @@ Here's the complete journey of a data point from an OPC UA server to a SQL query
 ### Setup phase (happens once)
 
 ```
-1. User opens pipeline wizard in browser
-2. Angular app calls /browse -> BrowseService -> Client.Browse() -> C++ -> OPC UA server
-3. User sees tree of nodes, checks "Temperature" and "Humidity"
-4. User clicks Deploy
-5. Angular app calls /deploy with selected nodes + server URL + settings
+--- Step A: create the schema (once per device TYPE) ---
 
-6. DeployService generates class text:
-     Class OPCUA.DS.MyData Extends (%Persistent, OPCUA.DataSource.Definition) { ... }
+1. User opens Schemas > New Schema in browser
+2. Angular app calls /browse -> BrowseService -> Client.Browse() -> C++ -> OPC UA server
+3. User browses ONE representative device and ticks "Temperature" and "Humidity".
+   Its node IDs are NOT captured — only the column names.
+4. Each ticked column is read once (/read) to infer its type
+5. User clicks Save Schema -> POST /schemas
+
+6. SchemaService.GenerateSchemaClass() builds the class via %Dictionary:
+     Class OPCUA.DS.MyData Extends (%Persistent, OPCUA.DataSource.DeviceSchema) { ... }
 
 7. $System.OBJ.Compile() compiles the class:
    a. IRIS creates SQL table OPCUA_DS.MyData
@@ -744,12 +783,19 @@ Here's the complete journey of a data point from an OPC UA server to a SQL query
       - Stores in ^OPCUA.DataSource("OPCUA.DS.MyData")
       - Generates SaveSourcedData() method
 
-8. DeployService.StoreRowSourceMetadata() writes ^OPCUA.RowSource("OPCUA.DS.MyData")
-   (row sources, column masks, abs node refs, nesting spec)
+   No production is touched. The schema now exists on its own.
 
-9. DeployService adds item to OPCUA.Pipeline.Production:
+--- Step B: bind devices (once per PIPELINE; repeatable per schema) ---
+
+8. User opens Bind Devices, picks device roots from the tree (or pastes nodepaths),
+   optionally runs Check Coverage (/schemas/:name/validate) as a dry run
+
+9. POST /deploy {schemaClass, devices} -> DeployService.BindExistingSchema()
+   adds an item to OPCUA.Pipeline.Production. It GENERATES NOTHING:
    - ClassName: OPCUA.Service.TCPPollingRowSourceService
-   - Settings: DataSourceClass=OPCUA.DS.MyData, URL=opc.tcp://plc:4840, CallInterval=5
+   - Settings: DataSourceClass=OPCUA.DS.MyData, URL=opc.tcp://plc:4840,
+               DeviceNodePaths="ns=2;s=Unit1|Unit1<newline>ns=2;s=Unit2|Unit2",
+               CallInterval=5
 
 10. Production starts (or updates if already running)
 ```
@@ -758,14 +804,19 @@ Here's the complete journey of a data point from an OPC UA server to a SQL query
 
 ```
 11. Ensemble calls TCPPollingRowSourceService.OnInit():
-    - Reads ^OPCUA.RowSource(...) for row sources + masks, and the
-      ^OPCUA.DataSource(...) spec template, then builds the combined spec
-    - Passes spec to adapter
+    - Reads the ^OPCUA.DataSource(...) spec template for the column layout
+      and derives the nesting spec from the compiled class
 
 12. Adapter.Connect():
     - Creates OPCUA.Client, calls $ZF to load C++ library
-    - Calls SetupClient() and Connect(url)
+    - Calls SetupClient() and Connect(url)   <-- session established FIRST
+    - ResolveSpecification(): browses each device in DeviceNodePaths and matches
+      children BY NAME against the schema's columns, producing the combined spec
+      + per-device column masks. Unmatched columns -> NULL + a warning.
     - Calls ReadBulkSetupC(spec) -> C++ prepares the query
+
+    Because this runs on every (re)connect, editing DeviceNodePaths takes effect
+    without a recompile, and a device that was offline starts reporting on its own.
 
 13. Every 5 seconds, Ensemble calls Adapter.OnTask():
     - Calls ReadBulkPollC(queryHandle) -> $ZF -> C++ -> OPC UA server
@@ -807,7 +858,7 @@ InboundAdapter InboundAdapter   Svc   Svc   Svc    Svc
      /    |    \              OPCUA.DataSource.Projection
   decl  decl  rowsource                 |
   Poll   Sub   Poll/Sub    OPCUA.DataSource.Definition
- (tests/examples)(wizard)
+ (tests/examples)(generated)
     \     |     /                       |
      \    |    /               Generated DataSource classes
       \   |   /               (OPCUA.DS.MyPipeline, etc.)
@@ -836,7 +887,10 @@ InboundAdapter InboundAdapter   Svc   Svc   Svc    Svc
 | How tables are auto-created | `OPCUA/DataSource/Definition.cls`, `Projection.cls` |
 | How the REST API works | `OPCUA/REST/Handler.cls` |
 | How browsing works | `OPCUA/REST/BrowseService.cls` |
-| How deployment works | `OPCUA/REST/DeployService.cls` |
+| How schemas are generated | `OPCUA/REST/SchemaService.cls` |
+| How devices are bound to a schema | `OPCUA/REST/DeployService.cls` |
+| How devices are matched by name at connect time | `OPCUA/DataSource/Resolver.cls` |
+| Why `DataSourceClass` is a dropdown | `OPCUA/DataSource/DeviceSchema.cls`, `SETTINGS` in `Adapter/Common.cls` |
 | How polling works at runtime | `OPCUA/Adapter/TCPPollingInboundAdapter.cls`, `OPCUA/Service/TCPPollingService.cls` |
 | How subscriptions work | `OPCUA/Adapter/TCPSubscriptionInboundAdapter.cls`, `OPCUA/Service/TCPSubscriptionService.cls` |
 | How multi-device (v2) works | `OPCUA/Service/TCPPollingRowSourceService.cls` |
