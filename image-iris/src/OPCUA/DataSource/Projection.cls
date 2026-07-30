@@ -11,8 +11,10 @@ ClassMethod CreateProjection(cls As %String, ByRef params) As %Status
     Set tSC = $$$OK
     Try 
     {
-        // We don't do nothing when the basic OPCUA.DataSourceDef class definition is compiled
+        // We don't do nothing when the abstract base classes are compiled —
+        // they declare no properties and carry no OPCUADATASOURCE parameter.
         Quit:cls="OPCUA.DataSource.Definition"
+        Quit:cls="OPCUA.DataSource.DeviceSchema"
 
         Set oClassDef = ##class(%Dictionary.CompiledClass).%OpenId(cls)
         

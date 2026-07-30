@@ -21,7 +21,9 @@ Parameter OPCUAPIPELINEVERSION;
 
 ClassMethod SaveSourcedData(ByRef pSourceData As %List, Output pAssignedID As %String) [ CodeMode = objectgenerator ]
 {
+    // Abstract base classes have no storage definition to generate against.
     Quit:%class.Name="OPCUA.DataSource.Definition" $$$OK
+    Quit:%class.Name="OPCUA.DataSource.DeviceSchema" $$$OK
 
     // %class is an instance of %Dictionary.ClassDefinition
     Set tStorageGlobal = %class.Storages.GetAt(1).DataLocation
