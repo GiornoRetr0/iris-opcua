@@ -5,7 +5,7 @@ import { Router, ActivatedRoute } from '@angular/router';
 import { ApiService } from '../../core/services/api.service';
 import { ConfigService } from '../../core/services/config.service';
 import { OpcuaTreeComponent } from '../../shared/opcua-tree/opcua-tree.component';
-import { Schema, ServerProfile, DeviceBinding, DeviceValidation, TreeNode } from '../../core/models/opcua.models';
+import { Schema, ServerProfile, DeviceValidation, TreeNode } from '../../core/models/opcua.models';
 
 /** One line of the device list, decoded for display. */
 interface ParsedDevice {
