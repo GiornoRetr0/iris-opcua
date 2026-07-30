@@ -2,6 +2,8 @@ import { Component, inject, signal, computed, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
+import { forkJoin, of, Observable } from 'rxjs';
+import { catchError, map, switchMap } from 'rxjs/operators';
 import { ApiService } from '../../core/services/api.service';
 import { ConfigService } from '../../core/services/config.service';
 import { ServerProfile, TreeNode } from '../../core/models/opcua.models';
@@ -13,8 +15,32 @@ interface DraftColumn {
   /** ["Leaf"] or ["Folder", "Leaf"] */
   relativePath: string[];
   nodeNs: number;
+  nodeId: string | number;
+  nodeIdType: number;
+  /**
+   * `OPCUA.Types.*` name from reading the template node's value. The backend maps
+   * it to a real property type; absent means it falls back to %String.
+   */
   inferredType?: string;
+  /** Set once a type probe has finished, successfully or not. */
+  typeProbed?: boolean;
   key: string;
+}
+
+/** Short label for a column's storage type, for the draft list. */
+function typeLabel(inferredType?: string): string {
+  if (!inferredType) return 'text';
+  if (inferredType.includes('ArrayDataValue')) return 'array → text';
+  const m = /OPCUA\.Types\.(\w+?)DataValue/.exec(inferredType);
+  if (!m) return 'text';
+  switch (m[1]) {
+    case 'Double': return 'number';
+    case 'Integer': return 'integer';
+    case 'Boolean': return 'boolean';
+    case 'TimeStamp': return 'timestamp';
+    case 'String': return 'text';
+    default: return m[1].toLowerCase();
+  }
 }
 
 /**
@@ -126,7 +152,17 @@ interface DraftColumn {
                         <span class="text-on-surface-variant">{{ col.relativePath[0] }}/</span>
                       }{{ col.displayName }}
                     </p>
-                    <p class="text-[10px] text-on-surface-variant">ns={{ col.nodeNs }}</p>
+                    <p class="text-[10px] text-on-surface-variant flex items-center gap-1.5">
+                      <span>ns={{ col.nodeNs }}</span>
+                      @if (col.typeProbed) {
+                        <span class="px-1.5 rounded bg-surface-container font-mono"
+                              [class]="col.inferredType ? 'text-tertiary' : 'text-on-surface-variant/60'">
+                          {{ typeLabel(col) }}
+                        </span>
+                      } @else {
+                        <span class="material-symbols-outlined text-[11px] animate-spin">progress_activity</span>
+                      }
+                    </p>
                   </div>
                   <button (click)="removeColumn(col)"
                           class="p-1 rounded text-on-surface-variant/40 hover:text-error hover:bg-error-container/20 opacity-0 group-hover:opacity-100 transition-all">
@@ -360,9 +396,41 @@ export class SchemaBuilderComponent implements OnInit {
         displayName: node.displayName,
         relativePath: path,
         nodeNs: node.nodeNs,
+        nodeId: node.nodeId,
+        nodeIdType: node.nodeIdType,
         key,
       },
     ]);
+
+    // Probe the type now rather than only at save, so the column list shows what
+    // each column will actually be stored as while there is still time to react.
+    this.probeType(key);
+  }
+
+  /**
+   * Read the template node's value to learn its type.
+   *
+   * Browse returns only structure — no value, so no type — which is why this
+   * needs a separate read. Failure is not an error: the column keeps its %String
+   * fallback, which is what happens for an unreadable node at runtime anyway.
+   */
+  private probeType(key: string): void {
+    const col = this.columns().find((c) => c.key === key);
+    if (!col) return;
+    this.api.read(col.nodeNs, col.nodeId, col.nodeIdType, this.server()).subscribe({
+      next: (r) => this.applyType(key, r.inferredType),
+      error: () => this.applyType(key, undefined),
+    });
+  }
+
+  private applyType(key: string, inferredType?: string): void {
+    this.columns.update((cols) =>
+      cols.map((c) => (c.key === key ? { ...c, inferredType, typeProbed: true } : c))
+    );
+  }
+
+  typeLabel(col: DraftColumn): string {
+    return typeLabel(col.inferredType);
   }
 
   removeColumn(col: DraftColumn): void {
@@ -374,31 +442,37 @@ export class SchemaBuilderComponent implements OnInit {
     this.saving.set(true);
     this.error.set('');
 
-    const cols = this.columns();
-    // Most common namespace becomes the schema default; outliers get an override.
-    const tally = new Map<number, number>();
-    for (const c of cols) tally.set(c.nodeNs, (tally.get(c.nodeNs) || 0) + 1);
-    let defaultNs = 0;
-    let best = -1;
-    for (const [ns, count] of tally) {
-      if (count > best) {
-        best = count;
-        defaultNs = ns;
-      }
-    }
+    // Any column whose probe hasn't finished (or was never started) is read now.
+    // Without this, saving quickly after ticking a node would silently store it
+    // as %String — the bug this replaces.
+    this.ensureTypes()
+      .pipe(
+        switchMap((cols) => {
+          // Most common namespace becomes the schema default; outliers get an override.
+          const tally = new Map<number, number>();
+          for (const c of cols) tally.set(c.nodeNs, (tally.get(c.nodeNs) || 0) + 1);
+          let defaultNs = 0;
+          let best = -1;
+          for (const [ns, count] of tally) {
+            if (count > best) {
+              best = count;
+              defaultNs = ns;
+            }
+          }
 
-    this.api
-      .createSchema({
-        name: this.schemaName().trim(),
-        packagePath: this.packagePath().trim() || 'OPCUA.DS',
-        defaultNamespace: defaultNs,
-        columns: cols.map((c) => ({
-          displayName: c.displayName,
-          relativePath: c.relativePath,
-          nodeNs: c.nodeNs,
-          inferredType: c.inferredType,
-        })),
-      })
+          return this.api.createSchema({
+            name: this.schemaName().trim(),
+            packagePath: this.packagePath().trim() || 'OPCUA.DS',
+            defaultNamespace: defaultNs,
+            columns: cols.map((c) => ({
+              displayName: c.displayName,
+              relativePath: c.relativePath,
+              nodeNs: c.nodeNs,
+              inferredType: c.inferredType,
+            })),
+          });
+        })
+      )
       .subscribe({
         next: () => {
           this.saving.set(false);
@@ -409,6 +483,34 @@ export class SchemaBuilderComponent implements OnInit {
           this.saving.set(false);
         },
       });
+  }
+
+  /**
+   * Resolve types for every column that doesn't have one yet, then return the
+   * completed list.
+   *
+   * A failed read leaves inferredType undefined, which the backend maps to
+   * %String — the same outcome as before, so a partially unreadable device still
+   * produces a usable schema rather than blocking the save.
+   */
+  private ensureTypes(): Observable<DraftColumn[]> {
+    const pending = this.columns().filter((c) => !c.typeProbed);
+    if (!pending.length) return of(this.columns());
+
+    const srv = this.server();
+    return forkJoin(
+      pending.map((c) =>
+        this.api.read(c.nodeNs, c.nodeId, c.nodeIdType, srv).pipe(
+          map((r) => ({ key: c.key, inferredType: r.inferredType })),
+          catchError(() => of({ key: c.key, inferredType: undefined as string | undefined }))
+        )
+      )
+    ).pipe(
+      map((results) => {
+        for (const r of results) this.applyType(r.key, r.inferredType);
+        return this.columns();
+      })
+    );
   }
 
   back(): void {
