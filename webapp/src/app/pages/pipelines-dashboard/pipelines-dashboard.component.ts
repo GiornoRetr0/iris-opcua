@@ -1,4 +1,4 @@
-import { Component, inject, signal, OnInit } from '@angular/core';
+import { Component, inject, signal, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { ApiService } from '../../core/services/api.service';
@@ -290,7 +290,7 @@ import { Pipeline, PipelineHealth } from '../../core/models/opcua.models';
 
   `,
 })
-export class PipelinesDashboardComponent implements OnInit {
+export class PipelinesDashboardComponent implements OnInit, OnDestroy {
   private api = inject(ApiService);
   private router = inject(Router);
   config = inject(ConfigService);
@@ -303,12 +303,30 @@ export class PipelinesDashboardComponent implements OnInit {
   errorCount = signal(0);
   stoppedCount = signal(0);
 
+  private refreshTimer: any;
+
   ngOnInit(): void {
     this.loadPipelines();
+
+    // Health changes on its own — a device goes offline, resolution starts
+    // failing, a rebind takes a poll cycle to take effect — so a card loaded once
+    // will keep asserting whatever was true when the page opened. Re-fetch on a
+    // timer so what's on screen stays true.
+    const seconds = this.config.get().autoRefreshInterval || 5;
+    this.refreshTimer = setInterval(() => this.loadPipelines(true), seconds * 1000);
   }
 
-  loadPipelines(): void {
-    this.loading.set(true);
+  ngOnDestroy(): void {
+    if (this.refreshTimer) clearInterval(this.refreshTimer);
+  }
+
+  /**
+   * @param background true for timer-driven refreshes, which must not touch the
+   * loading flag — flashing the spinner every few seconds would make the page
+   * look broken, and would blank the list mid-read on a transient failure.
+   */
+  loadPipelines(background = false): void {
+    if (!background) this.loading.set(true);
     this.api.listPipelines().subscribe({
       next: (pipelines) => {
         this.pipelines.set(pipelines);
@@ -321,7 +339,9 @@ export class PipelinesDashboardComponent implements OnInit {
       },
       error: () => {
         this.loading.set(false);
-        this.pipelines.set([]);
+        // Keep the last known list on a background failure: a blip in the API
+        // shouldn't wipe the dashboard.
+        if (!background) this.pipelines.set([]);
       },
     });
   }
