@@ -2,6 +2,7 @@ import { Component, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute } from '@angular/router';
+import { Observable, switchMap } from 'rxjs';
 import { ApiService } from '../../core/services/api.service';
 import { ConfigService } from '../../core/services/config.service';
 import {
@@ -10,6 +11,8 @@ import {
   SelectedNode,
   Pipeline,
   DeployV2Request,
+  DeployResult,
+  CreateSchemaRequest,
   V2Selection,
   PipelineGroup,
   ColumnDef,
@@ -1236,7 +1239,7 @@ export class PipelineWizardComponent {
     if (groups.length === 1) {
       const group = groups[0];
       const fullClassName = this.packagePath ? `${this.packagePath}.${this.className}` : this.className;
-      this.api.deploy(this.buildV2Payload(group, fullClassName, this.dataSourceName) as any, server).subscribe({
+      this.deployGroupAsSchema(group, fullClassName, this.dataSourceName, server).subscribe({
         next: (result) => {
           this.deploying.set(false);
           this.deploySuccess.set(result.deployed);
@@ -1265,6 +1268,97 @@ export class PipelineWizardComponent {
     };
   }
 
+  /** Path key used to line a column up with the row-source child it came from. */
+  private columnKey(relativePath: string[] | undefined, displayName: string): string {
+    return (relativePath && relativePath.length ? relativePath : [displayName]).join('/');
+  }
+
+  /**
+   * Render a group's row sources as a DeviceNodePaths setting value: one device
+   * per line in OPC UA NodeId form, labelled with the tree path so the NodePath
+   * column reads as the user's selection did.
+   */
+  private buildDevicesString(group: PipelineGroup): string {
+    return group.rowSources
+      .map((rs) => {
+        // nodeIdType 0 = numeric, anything else is treated as a string identifier
+        const kind = Number(rs.nodeIdType) === 0 ? 'i=' : 's=';
+        const line = `ns=${Number(rs.nodeNs) || 0};${kind}${rs.nodeId}`;
+        return rs.path ? `${line}|${rs.path}` : line;
+      })
+      .join('\n');
+  }
+
+  /**
+   * Build the schema half of a deploy: the columns, plus the namespaces they
+   * live in.
+   *
+   * Each column's namespace is looked up from the matching row-source child by
+   * path, rather than by position, so a device with partial coverage cannot
+   * shift the mapping. The most common namespace becomes the class default and
+   * the rest are emitted as per-column overrides.
+   */
+  private buildSchemaRequest(group: PipelineGroup, fullClassName: string): CreateSchemaRequest {
+    const nsByKey = new Map<string, number>();
+    for (const rs of group.rowSources) {
+      for (const cn of rs.childNodes) {
+        const key = this.columnKey(cn.relativePath, cn.displayName);
+        if (!nsByKey.has(key)) nsByKey.set(key, Number(cn.nodeNs) || 0);
+      }
+    }
+
+    const columns = group.columns.map((c) => {
+      const relativePath = c.relativePath || [c.displayName];
+      const key = this.columnKey(relativePath, c.displayName);
+      return {
+        displayName: c.displayName,
+        relativePath,
+        nodeNs: nsByKey.get(key) ?? 0,
+        inferredType: undefined,
+      };
+    });
+
+    const tally = new Map<number, number>();
+    for (const col of columns) tally.set(col.nodeNs, (tally.get(col.nodeNs) || 0) + 1);
+    let defaultNamespace = 0;
+    let best = -1;
+    for (const [ns, count] of tally) {
+      if (count > best) { best = count; defaultNamespace = ns; }
+    }
+
+    return { name: fullClassName, defaultNamespace, columns };
+  }
+
+  /**
+   * Deploy one group as a schema plus a device binding.
+   *
+   * These are the two halves the backend now exposes separately: POST /schemas
+   * creates the reusable device type, then POST /deploy binds devices to it by
+   * name. Deploying this way means the schema is a first-class artifact the user
+   * can later bind more devices to, without re-running this wizard.
+   */
+  private deployGroupAsSchema(
+    group: PipelineGroup,
+    fullClassName: string,
+    dataSourceName: string,
+    server: ServerProfile | undefined
+  ): Observable<DeployResult> {
+    const devices = this.buildDevicesString(group);
+    return this.api.createSchema(this.buildSchemaRequest(group, fullClassName)).pipe(
+      switchMap((created) =>
+        this.api.deploy(
+          {
+            schemaClass: created.schemaClass,
+            dataSourceName,
+            devices,
+            mode: this.pipelineMode,
+          },
+          server
+        )
+      )
+    );
+  }
+
   private deployGroupsSequential(groups: PipelineGroup[], index: number): void {
     if (index >= groups.length) {
       this.deploying.set(false);
@@ -1283,7 +1377,7 @@ export class PipelineWizardComponent {
     this.deployProgress.set(index + 1);
 
     const server = this.selectedServer() || undefined;
-    this.api.deploy(this.buildV2Payload(group, fullClassName, dsName) as any, server).subscribe({
+    this.deployGroupAsSchema(group, fullClassName, dsName, server).subscribe({
       next: (result) => {
         this.deployResults.update((r) => [...r, { name: dsName, success: result.deployed, message: result.deployed ? `Deployed as ${result.dataSourceClass}` : result.error || 'Failed' }]);
         this.deployGroupsSequential(groups, index + 1);
