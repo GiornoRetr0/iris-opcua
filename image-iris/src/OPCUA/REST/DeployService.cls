@@ -1,9 +1,14 @@
 Include %occInclude
 
-/// Deploy an OPC UA data pipeline: generate a DataSource class,
+/// Deploy an OPC UA data pipeline: create a device schema, bind devices to it,
 /// add a business service item to the shared production, compile, and start.
 /// Uses a single shared production (OPCUA.Pipeline.Production) where each
 /// pipeline is a separate business service item.
+///
+/// Schema *generation* belongs to <class>OPCUA.REST.SchemaService</class>; this
+/// class owns device *binding* and the production wiring. A deploy is therefore
+/// "create a schema, then bind devices to it" — the two halves are separately
+/// usable, which is what lets a schema exist without any pipeline.
 Class OPCUA.REST.DeployService
 {
 
@@ -173,40 +178,14 @@ ClassMethod StartOrUpdateProduction() As %Status
 	Quit ##class(Ens.Director).StartProduction(..#ProductionClass)
 }
 
-/// Find the most common namespace among a set of nodes.
-ClassMethod FindDefaultNamespace(pNodes As %DynamicArray) As %Integer [ Private ]
-{
-	for i=0:1:pNodes.%Size()-1 {
-		set tNS = +pNodes.%Get(i).%Get("nodeNs")
-		set tNSCount(tNS) = $Get(tNSCount(tNS), 0) + 1
-	}
-	set tDefaultNS = 0
-	set tMaxCount = 0
-	set tNS = ""
-	for {
-		set tNS = $Order(tNSCount(tNS))
-		if tNS = "" Quit
-		if tNSCount(tNS) > tMaxCount {
-			set tMaxCount = tNSCount(tNS)
-			set tDefaultNS = tNS
-		}
-	}
-	Quit tDefaultNS
-}
-
-/// Add a parameter to a class definition.
-ClassMethod AddParameter(pClassDef As %Dictionary.ClassDefinition, pName As %String, pValue As %String) [ Private ]
-{
-	set tParam = ##class(%Dictionary.ParameterDefinition).%New()
-	set tParam.Name = pName
-	set tParam.Default = pValue
-	do pClassDef.Parameters.Insert(tParam)
-}
-
 // ==================== v2 Row-Source Pipeline Deploy ====================
 
 /// Deploy a v2 pipeline with multiple row sources sharing the same column schema.
 /// Produces one DataSource class, one service item, one table — multiple rows per poll.
+///
+/// Internally this is two independent steps — <method>CreateSchema</method> then
+/// <method>BindDevices</method> — which is what makes standalone schema creation
+/// possible. The request payload and response envelope are unchanged.
 ClassMethod DeployV2(pBody As %DynamicObject, Output pResult As %DynamicObject) As %Status
 {
 	#dim tSC As %Status = $$$OK
@@ -216,35 +195,67 @@ ClassMethod DeployV2(pBody As %DynamicObject, Output pResult As %DynamicObject) 
 	set pResult.started = 0
 	set pResult.productionClass = ..#ProductionClass
 	Try {
-		// --- Validate inputs ---
-		set tRowSources = pBody.%Get("rowSources")
-		set tColumns = pBody.%Get("columns")
+		set tSC = ..ValidateDeployRequest(pBody, .tColumns, .tRowSources, .tClassName, .tDataSourceName, .tMode)
+		Quit:$$$ISERR(tSC)
 
-		if '$IsObject($Get(tColumns)) || (tColumns.%Size() = 0) {
+		// --- Step 1: the schema (no production side effects) ---
+		set tSC = ..CreateSchema(pBody, tColumns, tRowSources, tClassName, tDataSourceName)
+		Quit:$$$ISERR(tSC)
+
+		set pResult.deployed = 1
+		set pResult.dataSourceClass = tClassName
+		set pResult.tableName = ##class(OPCUA.REST.SchemaService).TableName(tClassName)
+		set pResult.serviceItemName = tDataSourceName
+
+		// --- Step 2: bind devices and wire up the production ---
+		set tSC = ..BindDevices(pBody, tClassName, tDataSourceName, tMode, tColumns, tRowSources)
+		Quit:$$$ISERR(tSC)
+
+		set pResult.compiled = 1
+
+		set tSC = ..StartOrUpdateProduction()
+		Quit:$$$ISERR(tSC)
+		set pResult.started = 1
+
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit tSC
+}
+
+/// Validate a wizard deploy request and normalise its key fields.
+ClassMethod ValidateDeployRequest(pBody As %DynamicObject, Output pColumns, Output pRowSources, Output pClassName As %String, Output pDataSourceName As %String, Output pMode As %String) As %Status [ Private ]
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set pRowSources = pBody.%Get("rowSources")
+		set pColumns = pBody.%Get("columns")
+
+		if '$IsObject($Get(pColumns)) || (pColumns.%Size() = 0) {
 			set tSC = $$$ERROR($$$GeneralError, "No columns defined")
 			Quit
 		}
 
-		if '$IsObject($Get(tRowSources)) || (tRowSources.%Size() = 0) {
+		if '$IsObject($Get(pRowSources)) || (pRowSources.%Size() = 0) {
 			set tSC = $$$ERROR($$$GeneralError, "No row sources defined")
 			Quit
 		}
 
-		set tClassName = pBody.%Get("className")
-		if tClassName = "" {
+		set pClassName = pBody.%Get("className")
+		if pClassName = "" {
 			set tSC = $$$ERROR($$$GeneralError, "Missing className")
 			Quit
 		}
 
-		set tDataSourceName = pBody.%Get("dataSourceName")
-		if tDataSourceName = "" set tDataSourceName = $Piece(tClassName, ".", *)
+		set pDataSourceName = pBody.%Get("dataSourceName")
+		if pDataSourceName = "" set pDataSourceName = $Piece(pClassName, ".", *)
 
-		set tMode = pBody.%Get("mode")
-		if (tMode '= "polling") && (tMode '= "subscription") set tMode = "polling"
+		set pMode = pBody.%Get("mode")
+		if (pMode '= "polling") && (pMode '= "subscription") set pMode = "polling"
 
 		// Check if class already exists
-		if ##class(%Dictionary.ClassDefinition).%ExistsId(tClassName) {
-			set tSC = $$$ERROR($$$GeneralError, "Class '"_tClassName_"' already exists. Choose a different name.")
+		if ##class(%Dictionary.ClassDefinition).%ExistsId(pClassName) {
+			set tSC = $$$ERROR($$$GeneralError, "Class '"_pClassName_"' already exists. Choose a different name.")
 			Quit
 		}
 
@@ -255,18 +266,18 @@ ClassMethod DeployV2(pBody As %DynamicObject, Output pResult As %DynamicObject) 
 		if ##class(%Dictionary.ClassDefinition).%ExistsId(..#ProductionClass) {
 			set tExistingProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
 			if $IsObject(tExistingProd) {
-				set tDupItem = tExistingProd.FindItemByConfigName(tDataSourceName, .tDupSC)
+				set tDupItem = tExistingProd.FindItemByConfigName(pDataSourceName, .tDupSC)
 				if $IsObject(tDupItem) {
-					set tSC = $$$ERROR($$$GeneralError, "A pipeline named '"_tDataSourceName_"' already exists. Choose a different name.")
+					set tSC = $$$ERROR($$$GeneralError, "A pipeline named '"_pDataSourceName_"' already exists. Choose a different name.")
 					Quit
 				}
 			}
 		}
 
 		// Validate row sources have correct child count
-		set tColCount = tColumns.%Size()
-		for iRS=0:1:tRowSources.%Size()-1 {
-			set tRS = tRowSources.%Get(iRS)
+		set tColCount = pColumns.%Size()
+		for iRS=0:1:pRowSources.%Size()-1 {
+			set tRS = pRowSources.%Get(iRS)
 			set tChildren = tRS.%Get("childNodes")
 			if '$IsObject($Get(tChildren)) || (tChildren.%Size() = 0) {
 				set tSC = $$$ERROR($$$GeneralError, "Row source '"_tRS.%Get("displayName")_"' has no child nodes")
@@ -278,48 +289,47 @@ ClassMethod DeployV2(pBody As %DynamicObject, Output pResult As %DynamicObject) 
 				Quit
 			}
 		}
-		Quit:$$$ISERR(tSC)
-
-		// --- Generate and compile v2 DataSource class (serial classes compiled first internally) ---
-		set tSC = ..GenerateDataSourceTextV2(pBody, tColumns, tRowSources, tClassName, tDataSourceName, .tDSText, .tSerialClasses)
-		Quit:$$$ISERR(tSC)
-
-		set pResult.deployed = 1
-		set pResult.dataSourceClass = tClassName
-
-		// Derive SQL table name
-		set tPackage = $Piece(tClassName, ".", 1, *-1)
-		set tShort = $Piece(tClassName, ".", *)
-		set pResult.tableName = $Select(tPackage="":tShort, 1:$Replace(tPackage, ".", "_")_"."_tShort)
-		set pResult.serviceItemName = tDataSourceName
-
-		// --- Store row source metadata ---
-		set tSC = ..StoreRowSourceMetadata(tClassName, tRowSources, tColumns)
-		Quit:$$$ISERR(tSC)
-
-		// --- Add service item to shared production ---
-		set tSC = ..EnsureProductionExists()
-		Quit:$$$ISERR(tSC)
-
-		set tSC = ..AddServiceItem(pBody, tClassName, tDataSourceName, tMode)
-		Quit:$$$ISERR(tSC)
-
-		set pResult.compiled = 1
-
-		// --- Start or update the production ---
-		set tSC = ..StartOrUpdateProduction()
-		Quit:$$$ISERR(tSC)
-		set pResult.started = 1
-
 	} Catch (e) {
 		set tSC = e.AsStatus()
 	}
 	Quit tSC
 }
 
-/// Generate and compile a v2 DataSource class using %Dictionary API.
-/// Supports nested columns via %SerialObject classes for sub-folders.
-/// pText and pSerialClasses are kept as output params for compatibility with Edit flow.
+/// Step 1 of a deploy: create and compile the device schema.
+/// Touches no production and writes no device metadata — exactly what
+/// <class>OPCUA.REST.SchemaService</class> does when called on its own.
+ClassMethod CreateSchema(pBody As %DynamicObject, pColumns As %DynamicArray, pRowSources As %DynamicArray, pClassName As %String, pDataSourceName As %String) As %Status [ Private ]
+{
+	Quit ..GenerateDataSourceTextV2(pBody, pColumns, pRowSources, pClassName, pDataSourceName, .tDSText, .tSerialClasses)
+}
+
+/// Step 2 of a deploy: bind devices to an existing schema and add the service item.
+ClassMethod BindDevices(pBody As %DynamicObject, pClassName As %String, pDataSourceName As %String, pMode As %String, pColumns As %DynamicArray, pRowSources As %DynamicArray) As %Status [ Private ]
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..StoreRowSourceMetadata(pClassName, pRowSources, pColumns)
+		Quit:$$$ISERR(tSC)
+
+		set tSC = ..EnsureProductionExists()
+		Quit:$$$ISERR(tSC)
+
+		set tSC = ..AddServiceItem(pBody, pClassName, pDataSourceName, pMode)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit tSC
+}
+
+/// Generate and compile a v2 DataSource class (schema) for a wizard deploy.
+///
+/// Schema generation itself lives in <class>OPCUA.REST.SchemaService</class> —
+/// this wrapper exists to translate the wizard's row-source-shaped request into
+/// the schema-shaped one, by deriving the default namespace and the per-column
+/// namespace overrides from the first row source's browsed child nodes.
+///
+/// pText and pSerialClasses are kept as output params for compatibility with the
+/// Edit flow.
 ClassMethod GenerateDataSourceTextV2(pBody As %DynamicObject, pColumns As %DynamicArray, pRowSources As %DynamicArray, pClassName As %String, pDataSourceName As %String, Output pText As %String, Output pSerialClasses) As %Status
 {
 	#dim tSC As %Status = $$$OK
@@ -327,161 +337,21 @@ ClassMethod GenerateDataSourceTextV2(pBody As %DynamicObject, pColumns As %Dynam
 	kill pSerialClasses
 	set pSerialClasses = 0
 	Try {
-		// Determine default namespace from the first row source's child nodes
+		// Namespaces come from the first row source's browsed children: the most
+		// common one becomes the class default, and any column whose node sits in
+		// a different namespace gets an explicit OPCUANAMESPACE override.
 		set tFirstRS = pRowSources.%Get(0)
 		set tChildren = tFirstRS.%Get("childNodes")
-		set tDefaultNS = ..FindDefaultNamespace(tChildren)
+		set tDefaultNS = ##class(OPCUA.REST.SchemaService).FindDefaultNamespace(tChildren)
 
-		// Separate flat columns from nested columns and build folder tree
-		kill tFolderColumns
-		set tHasNesting = 0
+		kill tColNS
 		for i=0:1:pColumns.%Size()-1 {
-			set tCol = pColumns.%Get(i)
-			set tRelPath = tCol.%Get("relativePath")
-			if '$IsObject($Get(tRelPath)) || (tRelPath.%Size() <= 1) continue
-			set tFolderName = tRelPath.%Get(0)
-			set tHasNesting = 1
-			if '$Data(tFolderColumns(tFolderName)) {
-				set tFolderColumns(tFolderName) = ##class(%DynamicArray).%New()
-			}
-			set tSubCol = ##class(%DynamicObject).%New()
-			set tSubCol.displayName = tCol.%Get("displayName")
-			set tSubCol.inferredType = tCol.%Get("inferredType")
-			set tSubCol.leafName = tRelPath.%Get(tRelPath.%Size()-1)
-			do tFolderColumns(tFolderName).%Push(tSubCol)
-		}
-
-		// Generate and compile serial object classes first
-		if tHasNesting {
-			set tSC = ..GenerateSerialClasses(pClassName, tDefaultNS, .tFolderColumns, .pSerialClasses)
-			Quit:$$$ISERR(tSC)
-		}
-
-		// Create main class definition
-		set tClassDef = ##class(%Dictionary.ClassDefinition).%New(pClassName)
-		set tClassDef.Description = "Auto-generated OPC UA DataSource class (v2 row-source model)."
-		// Extend DeviceSchema (not Definition) so the class is discoverable by the
-		// DataSourceClass dropdown, which filters on this superclass.
-		set tClassDef.Super = "%Persistent,OPCUA.DataSource.DeviceSchema"
-
-		do ..AddParameter(tClassDef, "OPCUADATASOURCE", pDataSourceName)
-		do ..AddParameter(tClassDef, "OPCUDEFAULTANAMESPACE", tDefaultNS)
-		do ..AddParameter(tClassDef, "OPCUAPIPELINEVERSION", 2)
-
-		// Row metadata properties
-		set tProp = ##class(%Dictionary.PropertyDefinition).%New()
-		set tProp.Name = "NodePath"
-		set tProp.Type = "%String"
-		do tProp.Parameters.SetAt(500, "MAXLEN")
-		do tClassDef.Properties.Insert(tProp)
-
-		set tProp = ##class(%Dictionary.PropertyDefinition).%New()
-		set tProp.Name = "ServerTimeStamp"
-		set tProp.Type = "%TimeStamp"
-		do tClassDef.Properties.Insert(tProp)
-
-		set tProp = ##class(%Dictionary.PropertyDefinition).%New()
-		set tProp.Name = "SourceTimeStamp"
-		set tProp.Type = "%TimeStamp"
-		do tClassDef.Properties.Insert(tProp)
-
-		// Generate column properties
-		kill tEmittedFolders
-		for i=0:1:pColumns.%Size()-1 {
-			set tCol = pColumns.%Get(i)
-			set tDisplayName = tCol.%Get("displayName")
-			set tInferredType = tCol.%Get("inferredType")
-			set tRelPath = tCol.%Get("relativePath")
-
-			set tIsNested = $IsObject($Get(tRelPath)) && (tRelPath.%Size() > 1)
-			if tIsNested {
-				set tFolderName = tRelPath.%Get(0)
-				if $Data(tEmittedFolders(tFolderName)) continue
-				set tEmittedFolders(tFolderName) = 1
-
-				set tSerialClassName = pClassName_"."_tFolderName_"Type"
-				set tPropName = ##class(OPCUA.DataSource.Generator).SanitizePropertyName(tFolderName, .tUsedNames)
-				set tProp = ##class(%Dictionary.PropertyDefinition).%New()
-			set tProp.Name = tPropName
-				set tProp.Type = tSerialClassName
-				do tProp.Parameters.SetAt(tFolderName, "OPCUANODENAME")
-				do tClassDef.Properties.Insert(tProp)
-			} else {
-				set tType = ..MapToPlainType(tInferredType)
-				set tChildNS = tDefaultNS
-				if i < tChildren.%Size() {
-					set tChildNS = +tChildren.%Get(i).%Get("nodeNs")
-				}
-				set tLeafName = tDisplayName
-				if $IsObject($Get(tRelPath)) && (tRelPath.%Size() = 1) {
-					set tLeafName = tRelPath.%Get(0)
-				}
-				set tPropName = ##class(OPCUA.DataSource.Generator).SanitizePropertyName(tLeafName, .tUsedNames)
-				set tProp = ##class(%Dictionary.PropertyDefinition).%New()
-			set tProp.Name = tPropName
-				set tProp.Type = tType
-				do tProp.Parameters.SetAt(tLeafName, "OPCUANODENAME")
-				if tChildNS '= tDefaultNS {
-					do tProp.Parameters.SetAt(tChildNS, "OPCUANAMESPACE")
-				}
-				do tClassDef.Properties.Insert(tProp)
+			if i < tChildren.%Size() {
+				set tColNS(i) = +tChildren.%Get(i).%Get("nodeNs")
 			}
 		}
 
-		set tSC = tClassDef.%Save()
-		$$$ThrowOnError(tSC)
-		set tSC = $System.OBJ.Compile(pClassName, "ck-d")
-		$$$ThrowOnError(tSC)
-
-	} Catch (e) {
-		set tSC = e.AsStatus()
-	}
-	Quit tSC
-}
-
-/// Generate and compile %SerialObject classes for nested folder columns using %Dictionary API.
-ClassMethod GenerateSerialClasses(pMainClassName As %String, pDefaultNS As %Integer, ByRef pFolderColumns, Output pSerialClasses) As %Status [ Private ]
-{
-	#dim tSC As %Status = $$$OK
-	Try {
-		set pSerialClasses = 0
-
-		set tFolderName = ""
-		for {
-			set tFolderName = $Order(pFolderColumns(tFolderName))
-			if tFolderName = "" Quit
-
-			set tSerialClassName = pMainClassName_"."_tFolderName_"Type"
-			set tColumns = pFolderColumns(tFolderName)
-
-			set tClassDef = ##class(%Dictionary.ClassDefinition).%New(tSerialClassName)
-			set tClassDef.Description = "Auto-generated serial object for nested OPC UA folder: "_tFolderName
-			set tClassDef.Super = "%SerialObject"
-			set tClassDef.PropertyClass = "OPCUA.DataSource.PropertyClass"
-
-			kill tUsedNames
-			for i=0:1:tColumns.%Size()-1 {
-				set tSubCol = tColumns.%Get(i)
-				set tLeafName = tSubCol.%Get("leafName")
-				set tType = ..MapToPlainType(tSubCol.%Get("inferredType"))
-				set tPropName = ##class(OPCUA.DataSource.Generator).SanitizePropertyName(tLeafName, .tUsedNames)
-
-				set tProp = ##class(%Dictionary.PropertyDefinition).%New()
-				set tProp.Name = tPropName
-				set tProp.Type = tType
-				do tProp.Parameters.SetAt(tLeafName, "OPCUANODENAME")
-				do tClassDef.Properties.Insert(tProp)
-			}
-
-			set tSC = tClassDef.%Save()
-			$$$ThrowOnError(tSC)
-			set tSC = $System.OBJ.Compile(tSerialClassName, "ck-d")
-			$$$ThrowOnError(tSC)
-
-			// Track for caller (pSerialClasses kept for Edit flow compatibility)
-			set pSerialClasses = pSerialClasses + 1
-			set pSerialClasses(pSerialClasses) = $LB(tSerialClassName, "")
-		}
+		set tSC = ##class(OPCUA.REST.SchemaService).GenerateSchemaClass(pClassName, pDataSourceName, pColumns, tDefaultNS, .tColNS, .pSerialClasses)
 
 	} Catch (e) {
 		set tSC = e.AsStatus()
@@ -611,23 +481,6 @@ ClassMethod StoreRowSourceMetadata(pClassName As %String, pRowSources As %Dynami
 		set tSC = e.AsStatus()
 	}
 	Quit tSC
-}
-
-/// Map OPCUA.Types.*DataValue to plain IRIS types for v2 flat columns.
-ClassMethod MapToPlainType(pInferredType As %String) As %String
-{
-	if pInferredType = "" Quit "%String"
-	if pInferredType = "OPCUA.Types.DoubleDataValue" Quit "%Double"
-	if pInferredType = "OPCUA.Types.IntegerDataValue" Quit "%Integer"
-	if pInferredType = "OPCUA.Types.BooleanDataValue" Quit "%Boolean"
-	if pInferredType = "OPCUA.Types.TimeStampDataValue" Quit "%TimeStamp"
-	if pInferredType = "OPCUA.Types.StringDataValue" Quit "%String"
-	// Array types → store as string (JSON)
-	if pInferredType [ "ArrayDataValue" Quit "%String(MAXLEN=32000)"
-	// Already a plain type (e.g., %Double passed directly)
-	if $Extract(pInferredType, 1) = "%" Quit pInferredType
-	// Default fallback
-	Quit "%String"
 }
 
 }

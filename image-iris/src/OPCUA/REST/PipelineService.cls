@@ -454,7 +454,8 @@ ClassMethod GetRowSourceInfo(pClassName As %String) As %DynamicArray [ Private ]
 
 /// Delete serial object subclasses for a DataSource class.
 /// Scans the class's properties for types extending %SerialObject (excluding OPCUA.Types.*).
-ClassMethod DeleteSerialSubclasses(pClassName As %String) [ Private ]
+/// Also called by <class>OPCUA.REST.SchemaService</class> when deleting a schema.
+ClassMethod DeleteSerialSubclasses(pClassName As %String)
 {
 	Try {
 		set tClassDef = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
