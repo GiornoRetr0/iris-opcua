@@ -209,14 +209,34 @@ import { Pipeline } from '../../core/models/opcua.models';
               </div>
             </div>
 
-            <!-- v2 Row Sources -->
-            @if (pipeline.pipelineVersion === 2 && pipeline.rowSources?.length) {
-              <div class="flex items-center gap-2 mb-4 px-2">
-                <span class="material-symbols-outlined text-sm text-amber-600">device_hub</span>
-                <span class="text-xs font-bold text-on-surface-variant">{{ pipeline.rowSources!.length }} row source{{ pipeline.rowSources!.length !== 1 ? 's' : '' }}</span>
-                <span class="text-[10px] text-on-surface-variant font-mono truncate">
-                  {{ getRowSourcePaths(pipeline) }}
-                </span>
+            <!-- v2: the schema it binds, and the devices bound to it -->
+            @if (pipeline.pipelineVersion === 2) {
+              <div class="flex flex-wrap items-center gap-x-4 gap-y-2 mb-4 px-2">
+                @if (pipeline['dataSourceClass']) {
+                  <button (click)="viewSchemas()"
+                          title="Open the schema library"
+                          class="flex items-center gap-1.5 text-xs text-on-surface-variant hover:text-primary transition-colors">
+                    <span class="material-symbols-outlined text-sm text-tertiary">schema</span>
+                    <span class="font-mono">{{ getSchemaName(pipeline) }}</span>
+                  </button>
+                }
+                @if (getDeviceCount(pipeline)) {
+                  <div class="flex items-center gap-1.5 min-w-0">
+                    <span class="material-symbols-outlined text-sm text-amber-600">device_hub</span>
+                    <span class="text-xs font-bold text-on-surface-variant shrink-0">
+                      {{ getDeviceCount(pipeline) }} device{{ getDeviceCount(pipeline) === 1 ? '' : 's' }}
+                    </span>
+                    <span class="text-[10px] text-on-surface-variant font-mono truncate">
+                      {{ getRowSourcePaths(pipeline) }}
+                    </span>
+                  </div>
+                }
+                @if (pipeline['strictSchemaMatch']) {
+                  <span class="px-2 py-0.5 rounded-full bg-primary-fixed/40 text-[10px] font-bold uppercase tracking-wider text-primary"
+                        title="Refuses to start if any column fails to resolve">
+                    Strict
+                  </span>
+                }
               </div>
             }
 
@@ -407,6 +427,31 @@ export class PipelinesDashboardComponent implements OnInit {
 
   getRowSourcePaths(p: Pipeline): string {
     return (p.rowSources || []).map((rs) => rs.path).join(', ');
+  }
+
+  /** Short schema name — the full class name is long and mostly package. */
+  getSchemaName(p: Pipeline): string {
+    const cls: string = p['dataSourceClass'] || '';
+    return cls.split('.').pop() || cls;
+  }
+
+  /**
+   * Device count, preferring the DeviceNodePaths setting (the source of truth)
+   * and falling back to the described row sources.
+   */
+  getDeviceCount(p: Pipeline): number {
+    const setting: string = p['deviceNodePaths'] || '';
+    if (setting) {
+      return setting
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l !== '' && !l.startsWith('#')).length;
+    }
+    return (p.rowSources || []).length;
+  }
+
+  viewSchemas(): void {
+    this.router.navigate(['/schemas']);
   }
 
   /** API returns: callInterval="5" (polling), publishingInterval="1000" (subscription) */

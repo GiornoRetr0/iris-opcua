@@ -14,10 +14,31 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'schemas',
+    loadComponent: () =>
+      import('./pages/schema-library/schema-library.component').then(
+        (m) => m.SchemaLibraryComponent
+      ),
+  },
+  {
+    path: 'schemas/new',
+    loadComponent: () =>
+      import('./pages/schema-builder/schema-builder.component').then(
+        (m) => m.SchemaBuilderComponent
+      ),
+  },
+  {
     path: 'pipelines',
     loadComponent: () =>
       import('./pages/pipelines-dashboard/pipelines-dashboard.component').then(
         (m) => m.PipelinesDashboardComponent
+      ),
+  },
+  {
+    path: 'pipelines/bind/:schema',
+    loadComponent: () =>
+      import('./pages/device-binding/device-binding.component').then(
+        (m) => m.DeviceBindingComponent
       ),
   },
   {
