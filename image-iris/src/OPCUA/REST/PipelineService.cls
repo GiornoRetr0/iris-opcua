@@ -1,4 +1,4 @@
-Include %occInclude
+Include (%occInclude, Ensemble)
 
 /// Manage deployed OPC UA pipelines: list, toggle, delete.
 /// Reads from the shared production (OPCUA.Pipeline.Production).
@@ -71,6 +71,15 @@ ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %S
 				set tItem.rowCount = 0
 			}
 
+			// Enabled is not the same as collecting: a service whose adapter fails
+			// to connect or resolve stays enabled and keeps retrying while writing
+			// nothing. Surface the adapter's own verdict so the UI can tell the two
+			// apart — this is what "started but silently collecting nothing" looked
+			// like before.
+			do ..GetHealth(tItem.name, tProdRunning, tCfgItem.Enabled, .tHealth, .tLastActivity)
+			set tItem.health = tHealth
+			set tItem.lastActivity = tLastActivity
+
 			set tItem.productionRunning = tProdRunning
 			set tItem.nodes = ..GetNodeNames(tItem.dataSourceClass)
 
@@ -99,6 +108,54 @@ ClassMethod GetSettingValue(pItem As Ens.Config.Item, pName As %String) As %Stri
 		}
 	}
 	Quit tValue
+}
+
+/// Classify a pipeline's real collection health, and report when it last did
+/// any work.
+///
+/// The adapters already publish "OK" or "Error" per poll cycle via
+/// $$$SetHostMonitor; this reads that verdict back rather than inferring health
+/// from config, so a pipeline that is enabled but failing to connect, resolve,
+/// or read is reported as such.
+///
+/// pHealth is one of:
+/// <ul>
+/// <li><tt>stopped</tt> — the production is not running</li>
+/// <li><tt>disabled</tt> — the config item is switched off</li>
+/// <li><tt>error</tt> — running and retrying, but not collecting</li>
+/// <li><tt>ok</tt> — collecting normally</li>
+/// <li><tt>starting</tt> — enabled, but has not reported a cycle yet</li>
+/// </ul>
+ClassMethod GetHealth(pItemName As %String, pProdRunning As %Boolean, pEnabled As %Boolean, Output pHealth As %String, Output pLastActivity As %String) [ Private ]
+{
+	set pHealth = "ok"
+	set pLastActivity = ""
+
+	if 'pProdRunning {
+		set pHealth = "stopped"
+		Quit
+	}
+	if 'pEnabled {
+		set pHealth = "disabled"
+		Quit
+	}
+
+	Try {
+		set tStatus = $$$GetHostMonitor(pItemName, $$$eMonitorStatus)
+		set pLastActivity = $$$GetHostMonitor(pItemName, $$$eMonitorLastActivity)
+
+		// No entry yet means the job exists but hasn't completed a cycle. Calling
+		// that "ok" would claim success that hasn't happened.
+		if tStatus = "" {
+			set pHealth = "starting"
+		} elseif tStatus = "OK" {
+			set pHealth = "ok"
+		} else {
+			set pHealth = "error"
+		}
+	} Catch (e) {
+		// An unreadable monitor is not evidence of failure; leave it as-is.
+	}
 }
 
 /// Get row count for a DataSource table.

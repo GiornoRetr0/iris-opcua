@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { ApiService } from '../../core/services/api.service';
 import { ConfigService } from '../../core/services/config.service';
-import { Pipeline } from '../../core/models/opcua.models';
+import { Pipeline, PipelineHealth } from '../../core/models/opcua.models';
 
 @Component({
   selector: 'app-pipelines-dashboard',
@@ -106,9 +106,11 @@ import { Pipeline } from '../../core/models/opcua.models';
         @for (pipeline of pipelines(); track pipeline.name) {
           <!-- Pipeline Card -->
           <div class="group rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow"
-               [class]="isStopped(pipeline)
-                 ? 'bg-surface-container-low/50 border border-outline-variant/5 hover:border-outline-variant/20 opacity-80 hover:opacity-100'
-                 : 'bg-surface-container-lowest border border-outline-variant/10'">
+               [class]="isFailing(pipeline)
+                 ? 'bg-surface-container-lowest border border-error/30'
+                 : isStopped(pipeline)
+                   ? 'bg-surface-container-low/50 border border-outline-variant/5 hover:border-outline-variant/20 opacity-80 hover:opacity-100'
+                   : 'bg-surface-container-lowest border border-outline-variant/10'">
 
             <!-- Card Header: title + status + actions -->
             <div class="flex items-start justify-between mb-8">
@@ -158,6 +160,18 @@ import { Pipeline } from '../../core/models/opcua.models';
                 </button>
               </div>
             </div>
+
+            <!-- Enabled but not collecting: say so, and say what to do about it.
+                 Without this the card looked identical to a healthy one. -->
+            @if (isFailing(pipeline)) {
+              <div class="flex items-start gap-3 mb-6 bg-error-container/25 border border-error/20 rounded-lg px-4 py-3">
+                <span class="material-symbols-outlined text-error text-xl shrink-0">report</span>
+                <div class="min-w-0">
+                  <p class="text-sm font-bold text-on-error-container">Enabled, but not collecting data</p>
+                  <p class="text-xs text-on-error-container/80 mt-0.5">{{ getFailureHint(pipeline) }}</p>
+                </div>
+              </div>
+            }
 
             <!-- ═══ Flow Visualization (3-box: Nodes → Service → Table) ═══ -->
             <div class="flex justify-center mb-6"
@@ -296,8 +310,10 @@ export class PipelinesDashboardComponent implements OnInit {
     this.api.listPipelines().subscribe({
       next: (pipelines) => {
         this.pipelines.set(pipelines);
-        this.runningCount.set(pipelines.filter((p) => this.isRunning(p)).length);
-        this.errorCount.set(pipelines.filter((p) => p.status === 'error' || p.status === 'warning').length);
+        // "Running" now means collecting, not merely enabled — a failing pipeline
+        // must not be counted in both tiles.
+        this.runningCount.set(pipelines.filter((p) => this.health(p) === 'ok').length);
+        this.errorCount.set(pipelines.filter((p) => this.isFailing(p)).length);
         this.stoppedCount.set(pipelines.filter((p) => this.isStopped(p)).length);
         this.loading.set(false);
       },
@@ -342,38 +358,77 @@ export class PipelinesDashboardComponent implements OnInit {
     return !this.isRunning(p);
   }
 
+  /**
+   * Real collection health, as reported by the adapter.
+   *
+   * Falls back to running/stopped when the field is absent, so an older backend
+   * degrades to the previous behaviour rather than reporting everything as
+   * "starting".
+   */
+  health(p: Pipeline): PipelineHealth {
+    return p.health ?? (this.isRunning(p) ? 'ok' : 'stopped');
+  }
+
+  /** Running but not collecting — the case that used to look healthy. */
+  isFailing(p: Pipeline): boolean {
+    return this.health(p) === 'error';
+  }
+
   getStatusIcon(p: Pipeline): string {
-    if (this.isRunning(p)) return 'sync_alt';
-    if (p.status === 'warning') return 'warning';
-    if (p.status === 'error') return 'error';
-    return 'pause_circle';
+    switch (this.health(p)) {
+      case 'ok': return 'sync_alt';
+      case 'error': return 'error';
+      case 'starting': return 'hourglass_top';
+      default: return 'pause_circle';
+    }
   }
 
   getStatusIconBg(p: Pipeline): string {
-    if (this.isRunning(p)) return 'bg-tertiary-fixed/20 text-tertiary';
-    if (p.status === 'warning' || p.status === 'error') return 'bg-error-container/10 text-error';
-    return 'bg-surface-container-highest text-on-surface-variant';
+    switch (this.health(p)) {
+      case 'ok': return 'bg-tertiary-fixed/20 text-tertiary';
+      case 'error': return 'bg-error-container/20 text-error';
+      case 'starting': return 'bg-amber-100 text-amber-600';
+      default: return 'bg-surface-container-highest text-on-surface-variant';
+    }
   }
 
   getStatusDotClass(p: Pipeline): string {
-    if (this.isRunning(p)) return 'bg-tertiary';
-    if (p.status === 'warning') return 'bg-error animate-pulse';
-    if (p.status === 'error') return 'bg-error';
-    return 'bg-on-surface-variant/40';
+    switch (this.health(p)) {
+      case 'ok': return 'bg-tertiary';
+      case 'error': return 'bg-error animate-pulse';
+      case 'starting': return 'bg-amber-500 animate-pulse';
+      default: return 'bg-on-surface-variant/40';
+    }
   }
 
   getStatusTextClass(p: Pipeline): string {
-    if (this.isRunning(p)) return 'text-tertiary';
-    if (p.status === 'warning' || p.status === 'error') return 'text-error';
-    return 'text-on-surface-variant';
+    switch (this.health(p)) {
+      case 'ok': return 'text-tertiary';
+      case 'error': return 'text-error';
+      case 'starting': return 'text-amber-600';
+      default: return 'text-on-surface-variant';
+    }
   }
 
   getStatusLabel(p: Pipeline): string {
-    if (this.isRunning(p)) return 'Running';
-    if (p.status === 'warning') return 'Warning';
-    if (p.status === 'error') return 'Error';
-    if (this.isStopped(p)) return 'Stopped';
-    return p.status || 'Unknown';
+    switch (this.health(p)) {
+      case 'ok': return 'Running';
+      // "Not collecting" rather than "Error": it names the consequence, which is
+      // what a user scanning the list actually needs to know.
+      case 'error': return 'Not collecting';
+      case 'starting': return 'Starting';
+      case 'disabled': return 'Disabled';
+      default: return 'Stopped';
+    }
+  }
+
+  /** Why a pipeline isn't collecting, when we can tell from config alone. */
+  getFailureHint(p: Pipeline): string {
+    if (!this.isFailing(p)) return '';
+    if (p['strictSchemaMatch']) {
+      return 'Strict schema match is on and some columns did not resolve. Check the event log, then fix the device list or turn strict off.';
+    }
+    return 'The service is retrying but not collecting. Check the event log for the reason.';
   }
 
   /** Derive a source label from pipeline name (e.g. "from-PLC-SA1" → "PLC_SA1") */

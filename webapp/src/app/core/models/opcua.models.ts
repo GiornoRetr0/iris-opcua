@@ -33,6 +33,13 @@ export interface NodeReadResult {
   readError?: string;
 }
 
+/**
+ * Whether a pipeline is actually collecting — which is not the same as being
+ * enabled. A pipeline that can't connect or whose columns don't resolve stays
+ * enabled and keeps retrying while writing nothing.
+ */
+export type PipelineHealth = 'ok' | 'error' | 'starting' | 'disabled' | 'stopped';
+
 export interface Pipeline {
   name: string;
   status?: string;
@@ -42,6 +49,8 @@ export interface Pipeline {
   nodes?: number;
   nodeNames?: string;
   enabled?: boolean;
+  /** Real collection health, from the adapter's own per-cycle verdict. */
+  health?: PipelineHealth;
   lastActivity?: string;
   error?: string;
   rowCount?: number;
