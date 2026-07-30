@@ -342,7 +342,13 @@ export class PipelinesDashboardComponent implements OnInit {
   }
 
   deletePipeline(pipeline: Pipeline): void {
-    if (!confirm(`Delete pipeline "${pipeline.name}"?`)) return;
+    // Say what survives: the schema and its table are kept, so this is not the
+    // data-losing operation the bare prompt implied.
+    const schema = this.getSchemaName(pipeline);
+    const detail = schema
+      ? `\n\nThe "${schema}" schema and its collected data are kept. Delete the schema from the Schemas page if you no longer need it.`
+      : '';
+    if (!confirm(`Delete pipeline "${pipeline.name}"?${detail}`)) return;
     this.api.deletePipeline(pipeline.name).subscribe({
       next: () => this.loadPipelines(),
     });

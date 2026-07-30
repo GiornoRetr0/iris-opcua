@@ -254,7 +254,15 @@ ClassMethod Toggle(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 	Quit tSC
 }
 
-/// Delete a pipeline: remove service item from production, delete DataSource class.
+/// Delete a pipeline: remove its service item from the production.
+///
+/// The schema is deliberately left alone. A schema is a reusable asset that can
+/// back many pipelines, so deleting one pipeline must not destroy it — doing so
+/// would break every sibling still bound to it, and since the schema class owns
+/// the table, it would also discard the collected data.
+///
+/// Deleting a schema is <method>OPCUA.REST.SchemaService.Delete</method>, which
+/// refuses while any pipeline still references it.
 ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As %Status
 {
 	#dim tSC As %Status = $$$OK
@@ -308,14 +316,19 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 			do ##class(Ens.Director).UpdateProduction()
 		}
 
-		// Delete DataSource class and serial subclasses
-		if (tDSClass '= "") && ##class(%Dictionary.ClassDefinition).%ExistsId(tDSClass) {
-			do ..DeleteSerialSubclasses(tDSClass)
-			do $System.OBJ.Delete(tDSClass, "-d")
-		}
-
 		set pResult.deleted = 1
 		set pResult.name = tName
+
+		// Report the schema and whether it is now unused, so a caller that wants
+		// to clean it up knows it can — without this being done behind their back.
+		set pResult.schemaClass = tDSClass
+		set pResult.schemaRetained = 1
+		if tDSClass '= "" {
+			do ##class(OPCUA.REST.SchemaService).MapSchemaUsage(.tUsage)
+			set pResult.schemaStillUsedBy = ##class(OPCUA.REST.SchemaService).UsageArray($Get(tUsage(tDSClass), ""))
+		} else {
+			set pResult.schemaStillUsedBy = []
+		}
 
 	} Catch (e) {
 		set tSC = e.AsStatus()

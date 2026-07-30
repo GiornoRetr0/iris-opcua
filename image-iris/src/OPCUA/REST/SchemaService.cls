@@ -573,7 +573,10 @@ ClassMethod DescribeSchema(pClassName As %String, pWithColumns As %Boolean = 0) 
 }
 
 /// Map schemaClass → $Char(1)-delimited list of config items referencing it.
-ClassMethod MapSchemaUsage(Output pUsage) [ Private ]
+///
+/// Not private: PipelineService reports remaining usage after deleting a
+/// pipeline, and this is the single definition of "which pipelines use what".
+ClassMethod MapSchemaUsage(Output pUsage)
 {
 	kill pUsage
 	Try {
@@ -595,7 +598,7 @@ ClassMethod MapSchemaUsage(Output pUsage) [ Private ]
 }
 
 /// Turn a $Char(1)-delimited usage list into a JSON array.
-ClassMethod UsageArray(pList As %String) As %DynamicArray [ Private ]
+ClassMethod UsageArray(pList As %String) As %DynamicArray
 {
 	set tArr = []
 	Quit:pList="" tArr
