@@ -336,104 +336,16 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 	Quit tSC
 }
 
-/// Edit (update) an existing v2 pipeline: stop service, regenerate DataSource class
-/// with type preservation, update row source metadata, restart service.
-ClassMethod Edit(pBody As %DynamicObject, Output pResult As %DynamicObject) As %Status
-{
-	#dim tSC As %Status = $$$OK
-	set pResult = {}
-	set pResult.updated = 0
-	Try {
-		// --- Validate inputs ---
-		set tClassName = pBody.%Get("existingClassName")
-		if tClassName = "" {
-			set tSC = $$$ERROR($$$GeneralError, "Missing existingClassName")
-			Quit
-		}
-
-		if '##class(%Dictionary.ClassDefinition).%ExistsId(tClassName) {
-			set tSC = $$$ERROR($$$GeneralError, "Class '"_tClassName_"' does not exist")
-			Quit
-		}
-
-		set tColumns = pBody.%Get("columns")
-		set tRowSources = pBody.%Get("rowSources")
-		if '$IsObject($Get(tColumns)) || (tColumns.%Size() = 0) {
-			set tSC = $$$ERROR($$$GeneralError, "No columns defined")
-			Quit
-		}
-		if '$IsObject($Get(tRowSources)) || (tRowSources.%Size() = 0) {
-			set tSC = $$$ERROR($$$GeneralError, "No row sources defined")
-			Quit
-		}
-
-		set tDataSourceName = pBody.%Get("dataSourceName")
-		if tDataSourceName = "" set tDataSourceName = $Piece(tClassName, ".", *)
-
-		set tMode = pBody.%Get("mode")
-		if (tMode '= "polling") && (tMode '= "subscription") set tMode = "polling"
-
-		// --- Step 1: Read existing column types before deleting ---
-		kill tExistingTypes
-		set tClassDef = ##class(%Dictionary.CompiledClass).%OpenId(tClassName)
-		if $IsObject(tClassDef) {
-			for i=1:1:tClassDef.Properties.Count() {
-				set tProp = tClassDef.Properties.GetAt(i)
-				if tProp.Name = "NodePath" continue
-				if tProp.Name = "ServerTimeStamp" continue
-				if tProp.Name = "SourceTimeStamp" continue
-				if $Extract(tProp.Name, 1) = "%" continue
-				set tExistingTypes(tProp.Name) = tProp.Type
-			}
-		}
-
-		// --- Step 2: Stop the service item if running ---
-		do ##class(Ens.Director).GetProductionStatus(.tRunningProd, .tProdState)
-		set tProdRunning = (tRunningProd = ..#ProductionClass) && (tProdState = 1)
-		if tProdRunning {
-			if ##class(Ens.Director).IsItemEnabled(tDataSourceName, .tSCCheck) {
-				do ##class(Ens.Director).EnableConfigItem(tDataSourceName, 0)
-				do ##class(Ens.Director).UpdateProduction()
-			}
-		}
-
-		// --- Step 3: Delete old class, serial subclasses, and spec ---
-		do ..DeleteSerialSubclasses(tClassName)
-		do $System.OBJ.Delete(tClassName, "-d")
-		Kill ^OPCUA.DataSource(tClassName)
-
-		// --- Step 4+5: Regenerate the schema class (serial classes compiled internally) ---
-		set tSC = ##class(OPCUA.REST.DeployService).GenerateDataSourceTextV2(pBody, tColumns, tRowSources, tClassName, tDataSourceName, .tText, .tSerialClasses)
-		Quit:$$$ISERR(tSC)
-
-		// --- Step 6: Update the device list, which is now just a setting ---
-		set tSC = ..UpdateDeviceNodePaths(tDataSourceName, ##class(OPCUA.REST.DeployService).BuildDeviceNodePaths(tRowSources))
-		Quit:$$$ISERR(tSC)
-
-		// --- Step 7: Re-enable and restart ---
-		if tProdRunning {
-			do ##class(Ens.Director).EnableConfigItem(tDataSourceName, 1)
-			do ##class(Ens.Director).UpdateProduction()
-		}
-
-		set pResult.updated = 1
-		set pResult.dataSourceClass = tClassName
-		set pResult.tableName = ##class(OPCUA.REST.SchemaService).TableName(tClassName)
-
-	} Catch (e) {
-		set tSC = e.AsStatus()
-	}
-	Quit tSC
-}
-
 /// Rebind an existing pipeline's devices, and optionally its strictness.
 ///
-/// This is what "editing a pipeline" means once schema creation and device
-/// binding are separate concerns: the schema is fixed at deploy time, so the
-/// only thing a pipeline owns is which devices it reads and how strictly. Both
-/// are config-item settings, so this needs no regeneration and no recompile —
-/// unlike <method>Edit</method>, which rebuilds the class because it also
-/// changes the column set.
+/// This is the whole of "editing a pipeline" once schema creation and device
+/// binding are separate concerns: the schema is fixed at deploy time, so a
+/// pipeline owns only which devices it reads and how strictly. Both are
+/// config-item settings, so this needs no regeneration and no recompile.
+///
+/// Changing a schema's <em>columns</em> is deliberately not possible here, and
+/// currently not possible anywhere — the regenerating edit path was removed with
+/// the wizard that drove it. Recreating the schema is the supported route.
 ///
 /// Body: { name required, devices required, strictSchemaMatch optional }
 ClassMethod Rebind(pBody As %DynamicObject, Output pResult As %DynamicObject) As %Status
