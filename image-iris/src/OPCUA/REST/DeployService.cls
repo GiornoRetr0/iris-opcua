@@ -360,7 +360,9 @@ ClassMethod GenerateDataSourceTextV2(pBody As %DynamicObject, pColumns As %Dynam
 		// Create main class definition
 		set tClassDef = ##class(%Dictionary.ClassDefinition).%New(pClassName)
 		set tClassDef.Description = "Auto-generated OPC UA DataSource class (v2 row-source model)."
-		set tClassDef.Super = "%Persistent,OPCUA.DataSource.Definition"
+		// Extend DeviceSchema (not Definition) so the class is discoverable by the
+		// DataSourceClass dropdown, which filters on this superclass.
+		set tClassDef.Super = "%Persistent,OPCUA.DataSource.DeviceSchema"
 
 		do ..AddParameter(tClassDef, "OPCUADATASOURCE", pDataSourceName)
 		do ..AddParameter(tClassDef, "OPCUDEFAULTANAMESPACE", tDefaultNS)
