@@ -4,21 +4,81 @@ import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute } from '@angular/router';
 import { ApiService } from '../../core/services/api.service';
 import { ConfigService } from '../../core/services/config.service';
-import { Schema, ServerProfile, DeviceBinding, DeviceValidation } from '../../core/models/opcua.models';
+import { OpcuaTreeComponent } from '../../shared/opcua-tree/opcua-tree.component';
+import { Schema, ServerProfile, DeviceBinding, DeviceValidation, TreeNode } from '../../core/models/opcua.models';
+
+/** One line of the device list, decoded for display. */
+interface ParsedDevice {
+  /** The original trimmed line — the handle used to remove it again. */
+  line: string;
+  nodePath: string;
+  label: string;
+  /** False when the nodepath is malformed; the backend would reject the line. */
+  valid: boolean;
+  /** `ns:id`, matching the tree's key format. Empty when invalid. */
+  key: string;
+}
+
+/**
+ * Render a browsed node as a nodepath.
+ *
+ * nodeIdType follows OPCUA.Constants: 0 numeric, 3 string, 4 GUID, 5 ByteString.
+ */
+function nodePathOf(node: TreeNode): string {
+  const kind = node.nodeIdType === 0 ? 'i=' : node.nodeIdType === 4 ? 'g=' : node.nodeIdType === 5 ? 'b=' : 's=';
+  return `ns=${node.nodeNs};${kind}${node.nodeId}`;
+}
+
+/**
+ * Parse a nodepath into its namespace and identifier.
+ *
+ * Deliberately mirrors <code>OPCUA.DataSource.Resolver.ParseNodePath</code>: if
+ * this accepted something the backend rejects, the tree would tick a device the
+ * deploy then refuses. Returns null for anything unparseable, including the
+ * browse-path form the backend doesn't support yet.
+ */
+function parseNodeId(path: string): { ns: number; id: string } | null {
+  let rest = path.trim();
+  if (rest === '') return null;
+
+  let ns = 0;
+  if (rest.slice(0, 3).toLowerCase() === 'ns=') {
+    const semi = rest.indexOf(';');
+    if (semi < 0) return null;
+    const nsVal = rest.slice(3, semi);
+    if (!/^\d+$/.test(nsVal)) return null;
+    ns = Number(nsVal);
+    rest = rest.slice(semi + 1);
+  }
+
+  const kind = rest.slice(0, 2).toLowerCase();
+  const val = rest.slice(2);
+  if (val === '') return null;
+
+  if (kind === 'i=') return /^\d+$/.test(val) ? { ns, id: String(Number(val)) } : null;
+  if (kind === 's=' || kind === 'g=' || kind === 'b=') return { ns, id: val };
+  return null;
+}
 
 /**
  * Bind devices to an existing schema and deploy a pipeline.
  *
  * This is the flow that used to require a full wizard re-run: pick a schema,
- * paste or type device nodepaths, dry-run them against the live server to see
- * exactly which columns resolve per device, then deploy. The dry run is the point
- * — it moves "does this device really have these nodes?" back to before deploy,
- * which is what makes name-based resolution safe to rely on.
+ * choose devices, dry-run them against the live server to see exactly which
+ * columns resolve per device, then deploy. The dry run is the point — it moves
+ * "does this device really have these nodes?" back to before deploy, which is
+ * what makes name-based resolution safe to rely on.
+ *
+ * Devices can be picked off the live address space or typed as text, and the two
+ * are the same list: the tree writes lines into <code>deviceText</code> and reads
+ * its ticks back out of it. Keeping one source of truth means pasting a list
+ * lights up the tree, and a tree click is always something the user could have
+ * typed — no hidden state that survives an edit to the text.
  */
 @Component({
   selector: 'app-device-binding',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, OpcuaTreeComponent],
   template: `
     <div class="p-8 max-w-5xl mx-auto">
       <!-- Header -->
@@ -88,38 +148,103 @@ import { Schema, ServerProfile, DeviceBinding, DeviceValidation } from '../../co
             <span class="text-xs text-on-surface-variant">{{ deviceCount() }} device{{ deviceCount() === 1 ? '' : 's' }}</span>
           </div>
 
-          <label class="block text-xs font-semibold text-on-surface-variant mb-2">
-            OPC UA device roots — one per line
-          </label>
-          <textarea [ngModel]="deviceText()"
-                    (ngModelChange)="onDeviceTextChange($event)"
-                    rows="6"
-                    spellcheck="false"
-                    placeholder="ns=2;s=Plant.AC1|AC1&#10;ns=2;s=Plant.AC2|AC2&#10;ns=0;i=85|Objects"
-                    class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2.5 font-mono text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary/30 resize-y"></textarea>
+          <div class="mb-4">
+            <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Server</label>
+            <select [ngModel]="serverId()" (ngModelChange)="serverId.set($event)"
+                    class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary/30">
+              @for (srv of servers(); track srv.id) {
+                <option [value]="srv.id">{{ srv.name }} — {{ srv.url }}</option>
+              }
+            </select>
+          </div>
 
-          <div class="mt-3 flex items-start gap-2 text-[11px] text-on-surface-variant">
-            <span class="material-symbols-outlined text-sm shrink-0 mt-0.5">info</span>
-            <div class="space-y-0.5">
-              <p><code class="font-mono">ns=2;s=Plant.AC1</code> string NodeId &nbsp;·&nbsp;
-                 <code class="font-mono">ns=2;i=1047</code> numeric &nbsp;·&nbsp;
-                 <code class="font-mono">i=85</code> namespace 0</p>
-              <p>Append <code class="font-mono">|Label</code> to set the NodePath column. Blank lines and
-                 <code class="font-mono">#</code> comments are ignored.</p>
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <!-- Pick devices off the live address space -->
+            <div>
+              <p class="text-xs font-semibold text-on-surface-variant mb-2">
+                Click a node to bind it as a device
+              </p>
+              <div class="border border-outline-variant/15 rounded-lg bg-surface-container-low/30 h-[19rem] overflow-y-auto custom-scrollbar p-1.5">
+                <app-opcua-tree [server]="server()"
+                                [selectedKeys]="selectedKeys()"
+                                (nodeToggled)="toggleDevice($event)" />
+              </div>
+            </div>
+
+            <!-- What's currently bound -->
+            <div class="flex flex-col">
+              <div class="flex items-center justify-between mb-2">
+                <p class="text-xs font-semibold text-on-surface-variant">Bound devices</p>
+                @if (deviceCount()) {
+                  <button (click)="clearDevices()"
+                          class="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant hover:text-error transition-colors">
+                    Clear
+                  </button>
+                }
+              </div>
+
+              <div class="border border-outline-variant/15 rounded-lg bg-surface-container-low/30 h-[19rem] overflow-y-auto custom-scrollbar p-1.5">
+                @if (!parsedDevices().length) {
+                  <div class="h-full flex flex-col items-center justify-center text-on-surface-variant px-4 text-center">
+                    <span class="material-symbols-outlined text-5xl opacity-10 mb-2">lan</span>
+                    <p class="text-xs opacity-70">No devices bound yet</p>
+                    <p class="text-[11px] opacity-50 mt-1">Pick nodes from the tree, or paste a list below.</p>
+                  </div>
+                } @else {
+                  <div class="space-y-1.5">
+                    @for (dev of parsedDevices(); track dev.line) {
+                      <div class="flex items-center gap-2 bg-surface-container-lowest border border-outline-variant/10 rounded-lg px-2.5 py-2 group">
+                        <span class="material-symbols-outlined text-sm shrink-0"
+                              [class]="dev.valid ? 'text-tertiary' : 'text-error'">
+                          {{ dev.valid ? 'lan' : 'error' }}
+                        </span>
+                        <div class="min-w-0 flex-1">
+                          <p class="text-xs font-semibold text-on-surface truncate">{{ dev.label }}</p>
+                          <p class="text-[10px] font-mono text-on-surface-variant truncate">{{ dev.nodePath }}</p>
+                        </div>
+                        <button (click)="removeDeviceLine(dev.line)"
+                                class="p-1 rounded text-on-surface-variant/40 hover:text-error hover:bg-error-container/20 opacity-0 group-hover:opacity-100 transition-all shrink-0">
+                          <span class="material-symbols-outlined text-base">close</span>
+                        </button>
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
             </div>
           </div>
 
-          <!-- Server + dry run -->
-          <div class="mt-5 pt-5 border-t border-outline-variant/10 flex flex-wrap items-end gap-3">
-            <div class="flex-1 min-w-[220px]">
-              <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Server</label>
-              <select [ngModel]="serverId()" (ngModelChange)="serverId.set($event)"
-                      class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary/30">
-                @for (srv of servers(); track srv.id) {
-                  <option [value]="srv.id">{{ srv.name }} — {{ srv.url }}</option>
-                }
-              </select>
+          <!-- Advanced: the raw list stays fully editable and paste-friendly -->
+          <details class="mt-4 group/adv" [open]="advancedOpen()">
+            <summary (click)="toggleAdvanced($event)"
+                     class="flex items-center gap-1.5 cursor-pointer text-xs font-bold uppercase tracking-wider text-on-surface-variant hover:text-primary transition-colors w-fit select-none">
+              <span class="material-symbols-outlined text-base transition-transform"
+                    [class.rotate-90]="advancedOpen()">chevron_right</span>
+              Edit as text
+            </summary>
+
+            <div class="mt-3">
+              <textarea [ngModel]="deviceText()"
+                        (ngModelChange)="onDeviceTextChange($event)"
+                        rows="6"
+                        spellcheck="false"
+                        placeholder="ns=2;s=Plant.AC1|AC1&#10;ns=2;s=Plant.AC2|AC2&#10;ns=0;i=85|Objects"
+                        class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2.5 font-mono text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary/30 resize-y"></textarea>
+
+              <div class="mt-2 flex items-start gap-2 text-[11px] text-on-surface-variant">
+                <span class="material-symbols-outlined text-sm shrink-0 mt-0.5">info</span>
+                <div class="space-y-0.5">
+                  <p><code class="font-mono">ns=2;s=Plant.AC1</code> string NodeId &nbsp;·&nbsp;
+                     <code class="font-mono">ns=2;i=1047</code> numeric &nbsp;·&nbsp;
+                     <code class="font-mono">i=85</code> namespace 0</p>
+                  <p>Append <code class="font-mono">|Label</code> to set the NodePath column. Blank lines and
+                     <code class="font-mono">#</code> comments are ignored.</p>
+                </div>
+              </div>
             </div>
+          </details>
+
+          <div class="mt-5 pt-5 border-t border-outline-variant/10 flex justify-end">
             <button (click)="validate()"
                     [disabled]="validating() || deviceCount() === 0 || !serverId()"
                     class="px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all"
@@ -295,8 +420,39 @@ export class DeviceBindingComponent implements OnInit {
   strictSchemaMatch = signal(false);
   deploying = signal(false);
 
+  advancedOpen = signal(false);
+
   /** Usable device lines: blank and #-commented lines don't count. */
   deviceCount = computed(() => this.parseLines(this.deviceText()).length);
+
+  /**
+   * The device list decoded for display, and the bridge between the textarea and
+   * the tree. Both views render from this, so a hand-typed line and a
+   * tree-clicked line are indistinguishable downstream — there is only ever one
+   * device list, held in `deviceText`.
+   */
+  parsedDevices = computed<ParsedDevice[]>(() =>
+    this.parseLines(this.deviceText()).map((line) => {
+      const bar = line.indexOf('|');
+      const nodePath = (bar >= 0 ? line.slice(0, bar) : line).trim();
+      const label = bar >= 0 ? line.slice(bar + 1).trim() : '';
+      const id = parseNodeId(nodePath);
+      return {
+        line,
+        nodePath,
+        // An unlabelled device falls back to its NodeId, which is what the
+        // backend uses for the NodePath column too.
+        label: label || nodePath,
+        valid: id !== null,
+        key: id ? `${id.ns}:${id.id}` : '',
+      };
+    })
+  );
+
+  /** Which tree rows to tick. Derived, so pasted text lights the tree up too. */
+  selectedKeys = computed(
+    () => new Set(this.parsedDevices().filter((d) => d.key).map((d) => d.key))
+  );
 
   canDeploy = computed(
     () =>
@@ -337,6 +493,49 @@ export class DeviceBindingComponent implements OnInit {
   onDeviceTextChange(value: string): void {
     this.deviceText.set(value);
     if (this.validation()) this.validation.set(null);
+  }
+
+  toggleAdvanced(event: Event): void {
+    // Drive <details> from the signal rather than letting it manage itself, so
+    // the chevron rotation and the open state can't disagree.
+    event.preventDefault();
+    this.advancedOpen.update((v) => !v);
+  }
+
+  /**
+   * Bind or unbind the clicked node.
+   *
+   * Writes through to `deviceText`, which stays the single source of truth — so
+   * everything the tree does is something the user could equally have typed, and
+   * is reviewable in the text view.
+   */
+  toggleDevice(node: TreeNode): void {
+    const key = `${node.nodeNs}:${node.nodeId}`;
+    const existing = this.parsedDevices().find((d) => d.key === key);
+    if (existing) {
+      this.removeDeviceLine(existing.line);
+      return;
+    }
+    this.appendLines([`${nodePathOf(node)}|${node.displayName}`]);
+  }
+
+  removeDeviceLine(line: string): void {
+    // Match on the raw line so a comment or oddly-spaced duplicate elsewhere in
+    // the text is left untouched.
+    const kept = this.deviceText()
+      .split(/\r?\n/)
+      .filter((l) => l.trim() !== line);
+    this.onDeviceTextChange(kept.join('\n'));
+  }
+
+  clearDevices(): void {
+    this.onDeviceTextChange('');
+  }
+
+  private appendLines(lines: string[]): void {
+    const current = this.deviceText().replace(/\s+$/, '');
+    const next = current === '' ? lines.join('\n') : [current, ...lines].join('\n');
+    this.onDeviceTextChange(next);
   }
 
   validate(): void {
@@ -393,7 +592,7 @@ export class DeviceBindingComponent implements OnInit {
     this.router.navigate(['/schemas']);
   }
 
-  private server(): ServerProfile | undefined {
+  server(): ServerProfile | undefined {
     return this.servers().find((s) => s.id === this.serverId());
   }
 
