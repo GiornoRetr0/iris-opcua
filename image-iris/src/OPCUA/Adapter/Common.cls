@@ -244,13 +244,18 @@ Method ResolveRowSourceSpec(Output pSpec As %List, Output pMasks As %List, Outpu
 		Quit:$$$ISERR(tSC)
 
 		// Report every unresolved column, naming the device and the column.
+		//
+		// The consequence differs by mode, so say which one applies rather than
+		// promising NULL storage that the strict check below then overrides.
+		set tStrict = (..StrictSchemaMatch && ($LL(tDiagnostics) > 0))
+		set tConsequence = $Select(tStrict:"This pipeline will not collect data while StrictSchemaMatch is enabled.", 1:"It will be stored as NULL.")
 		for i=1:1:$LL(tDiagnostics) {
 			set tD = $LI(tDiagnostics, i)
-			$$$LOGWARNING("Device '"_$LI(tD, 1)_"': column '"_$LI(tD, 2)_"' did not resolve — "_$LI(tD, 3)_". It will be stored as NULL.")
+			$$$LOGWARNING("Device '"_$LI(tD, 1)_"': column '"_$LI(tD, 2)_"' did not resolve — "_$LI(tD, 3)_". "_tConsequence)
 		}
 
-		if ..StrictSchemaMatch && ($LL(tDiagnostics) > 0) {
-			set tSC = $$$ERROR($$$GeneralError, "StrictSchemaMatch is enabled and "_$LL(tDiagnostics)_" column(s) did not resolve — see the warnings above")
+		if tStrict {
+			set tSC = $$$ERROR($$$GeneralError, "StrictSchemaMatch is enabled and "_$LL(tDiagnostics)_" column(s) did not resolve — see the warnings above. No data will be collected until every column resolves on every device, or StrictSchemaMatch is turned off.")
 			Quit
 		}
 
