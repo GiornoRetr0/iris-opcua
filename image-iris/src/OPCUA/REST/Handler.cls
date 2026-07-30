@@ -41,6 +41,11 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/pipelines/toggle" Method="POST" Call="PipelinesToggle" />
   <Route Url="/pipelines/delete" Method="POST" Call="PipelinesDelete" />
   <Route Url="/pipelines/edit" Method="POST" Call="PipelinesEdit" />
+  <Route Url="/schemas" Method="GET" Call="SchemasList" />
+  <Route Url="/schemas" Method="POST" Call="SchemasCreate" />
+  <Route Url="/schemas/:name/validate" Method="POST" Call="SchemasValidate" />
+  <Route Url="/schemas/:name" Method="GET" Call="SchemasGet" />
+  <Route Url="/schemas/:name" Method="DELETE" Call="SchemasDelete" />
   <Route Url="/metrics" Method="GET" Call="Metrics" />
   <Route Url="/metrics" Method="POST" Call="Metrics" />
 </Routes>
@@ -213,6 +218,108 @@ ClassMethod PipelinesEdit() As %Status
 		set tSC = ..GetRequestParams(.tBody)
 		Quit:$$$ISERR(tSC)
 		set tSC = ##class(OPCUA.REST.PipelineService).Edit(tBody, .tResult)
+		Quit:$$$ISERR(tSC)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	if $$$ISERR(tSC) {
+		Quit ..SendError($System.Status.GetErrorText(tSC))
+	}
+	Quit ..SendOK(tResult)
+}
+
+/// Create a device schema, with no production side effects.
+ClassMethod SchemasCreate() As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+		set tSC = ##class(OPCUA.REST.SchemaService).Create(tBody, .tResult)
+		Quit:$$$ISERR(tSC)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	if $$$ISERR(tSC) {
+		Quit ..SendError($System.Status.GetErrorText(tSC))
+	}
+	Quit ..SendOK(tResult)
+}
+
+/// List all device schemas.
+ClassMethod SchemasList() As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+		set tSC = ##class(OPCUA.REST.SchemaService).List(tBody, .tResult)
+		Quit:$$$ISERR(tSC)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	if $$$ISERR(tSC) {
+		Quit ..SendError($System.Status.GetErrorText(tSC))
+	}
+	Quit ..SendOK(tResult)
+}
+
+/// Column detail for one schema.
+ClassMethod SchemasGet(pName As %String) As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+		// The URL path is authoritative for these routes — clear any body
+		// className that would otherwise shadow it.
+		do tBody.%Set("className", "")
+		do tBody.%Set("name", $ZConvert(pName, "I", "URL"))
+		set tSC = ##class(OPCUA.REST.SchemaService).Get(tBody, .tResult)
+		Quit:$$$ISERR(tSC)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	if $$$ISERR(tSC) {
+		Quit ..SendError($System.Status.GetErrorText(tSC))
+	}
+	Quit ..SendOK(tResult)
+}
+
+/// Delete a schema. Refused while a pipeline still references it.
+ClassMethod SchemasDelete(pName As %String) As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+		// The URL path is authoritative for these routes — clear any body
+		// className that would otherwise shadow it.
+		do tBody.%Set("className", "")
+		do tBody.%Set("name", $ZConvert(pName, "I", "URL"))
+		set tSC = ##class(OPCUA.REST.SchemaService).Delete(tBody, .tResult)
+		Quit:$$$ISERR(tSC)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	if $$$ISERR(tSC) {
+		Quit ..SendError($System.Status.GetErrorText(tSC))
+	}
+	Quit ..SendOK(tResult)
+}
+
+/// Dry run a device binding: report which columns resolve per device.
+ClassMethod SchemasValidate(pName As %String) As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+		// The URL path is authoritative for these routes — clear any body
+		// className that would otherwise shadow it.
+		do tBody.%Set("className", "")
+		do tBody.%Set("name", $ZConvert(pName, "I", "URL"))
+		set tSC = ##class(OPCUA.REST.SchemaService).Validate(tBody, .tResult)
 		Quit:$$$ISERR(tSC)
 	} Catch (e) {
 		set tSC = e.AsStatus()
