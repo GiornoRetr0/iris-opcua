@@ -50,6 +50,11 @@ ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %S
 			set tItem.serverUrl = ..GetSettingValue(tCfgItem, "URL")
 			set tItem.callInterval = ..GetSettingValue(tCfgItem, "CallInterval")
 			set tItem.publishingInterval = ..GetSettingValue(tCfgItem, "RequestedPublishingInterval")
+			// The device list is now a plain setting, so surface it directly —
+			// editing a pipeline's devices is editing this string.
+			set tDeviceNodePaths = ..GetSettingValue(tCfgItem, "DeviceNodePaths")
+			set tItem.deviceNodePaths = tDeviceNodePaths
+			set tItem.strictSchemaMatch = +..GetSettingValue(tCfgItem, "StrictSchemaMatch")
 
 			// Derive table name from DataSource class
 			if tItem.dataSourceClass '= "" {
@@ -70,7 +75,7 @@ ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %S
 			set tItem.nodes = ..GetNodeNames(tItem.dataSourceClass)
 
 			if tItem.pipelineVersion = 2 {
-				set tItem.rowSources = ..GetRowSourceInfo(tItem.dataSourceClass)
+				set tItem.rowSources = ..GetRowSourceInfo(tItem.dataSourceClass, tDeviceNodePaths)
 			}
 
 			do pResult.%Push(tItem)
@@ -252,11 +257,6 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 			do $System.OBJ.Delete(tDSClass, "-d")
 		}
 
-		// Clean up v2 row source metadata
-		if tDSClass '= "" {
-			Kill ^OPCUA.RowSource(tDSClass)
-		}
-
 		set pResult.deleted = 1
 		set pResult.name = tName
 
@@ -327,18 +327,17 @@ ClassMethod Edit(pBody As %DynamicObject, Output pResult As %DynamicObject) As %
 			}
 		}
 
-		// --- Step 3: Delete old class, serial subclasses, and metadata ---
+		// --- Step 3: Delete old class, serial subclasses, and spec ---
 		do ..DeleteSerialSubclasses(tClassName)
 		do $System.OBJ.Delete(tClassName, "-d")
-		Kill ^OPCUA.RowSource(tClassName)
 		Kill ^OPCUA.DataSource(tClassName)
 
-		// --- Step 4+5: Generate and compile new DataSource class (serial classes compiled internally) ---
+		// --- Step 4+5: Regenerate the schema class (serial classes compiled internally) ---
 		set tSC = ##class(OPCUA.REST.DeployService).GenerateDataSourceTextV2(pBody, tColumns, tRowSources, tClassName, tDataSourceName, .tText, .tSerialClasses)
 		Quit:$$$ISERR(tSC)
 
-		// --- Step 6: Update row source metadata ---
-		set tSC = ##class(OPCUA.REST.DeployService).StoreRowSourceMetadata(tClassName, tRowSources, tColumns)
+		// --- Step 6: Update the device list, which is now just a setting ---
+		set tSC = ..UpdateDeviceNodePaths(tDataSourceName, ##class(OPCUA.REST.DeployService).BuildDeviceNodePaths(tRowSources))
 		Quit:$$$ISERR(tSC)
 
 		// --- Step 7: Re-enable and restart ---
@@ -349,9 +348,7 @@ ClassMethod Edit(pBody As %DynamicObject, Output pResult As %DynamicObject) As %
 
 		set pResult.updated = 1
 		set pResult.dataSourceClass = tClassName
-		set tPackage = $Piece(tClassName, ".", 1, *-1)
-		set tShort = $Piece(tClassName, ".", *)
-		set pResult.tableName = $Select(tPackage="":tShort, 1:$Replace(tPackage, ".", "_")_"."_tShort)
+		set pResult.tableName = ##class(OPCUA.REST.SchemaService).TableName(tClassName)
 
 	} Catch (e) {
 		set tSC = e.AsStatus()
@@ -359,90 +356,104 @@ ClassMethod Edit(pBody As %DynamicObject, Output pResult As %DynamicObject) As %
 	Quit tSC
 }
 
-/// Get row source information for a v2 pipeline from ^OPCUA.RowSource global.
-/// Returns path, nodeNs, nodeId, nodeIdType, and childNodes per row source.
-/// childNodes are resolved by cross-referencing column masks with column names from the compiled class.
-ClassMethod GetRowSourceInfo(pClassName As %String) As %DynamicArray [ Private ]
+/// Write a config item's DeviceNodePaths setting, adding it if absent.
+///
+/// Rebinding a pipeline's devices is now a settings update rather than a class
+/// regeneration — which is why editing a device list no longer needs a recompile.
+ClassMethod UpdateDeviceNodePaths(pItemName As %String, pValue As %String) As %Status [ Private ]
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
+		if '$IsObject(tProd) {
+			set tSC = $$$ERROR($$$GeneralError, "Cannot open production: "_..#ProductionClass)
+			Quit
+		}
+
+		set tFound = 0
+		for i=1:1:tProd.Items.Count() {
+			set tItem = tProd.Items.GetAt(i)
+			continue:tItem.Name'=pItemName
+
+			set tSet = 0
+			for j=1:1:tItem.Settings.Count() {
+				set tSetting = tItem.Settings.GetAt(j)
+				continue:tSetting.Name'="DeviceNodePaths"
+				set tSetting.Value = pValue
+				set tSet = 1
+			}
+			if 'tSet {
+				set tSetting = ##class(Ens.Config.Setting).%New()
+				set tSetting.Target = "Adapter"
+				set tSetting.Name = "DeviceNodePaths"
+				set tSetting.Value = pValue
+				do tItem.Settings.Insert(tSetting)
+			}
+			set tFound = 1
+		}
+
+		if 'tFound {
+			set tSC = $$$ERROR($$$GeneralError, "Pipeline '"_pItemName_"' not found in production")
+			Quit
+		}
+
+		set tSC = tProd.%Save()
+		$$$ThrowOnError(tSC)
+		set tSC = tProd.SaveToClass()
+		$$$ThrowOnError(tSC)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit tSC
+}
+
+/// Describe a v2 pipeline's devices, from the DeviceNodePaths setting plus the
+/// schema class — the two places that now hold the truth.
+///
+/// Every device is reported with the schema's full column list, because a
+/// device's actual coverage is only known once it has been browsed at connect
+/// time; use POST /schemas/:name/validate for real per-device coverage.
+ClassMethod GetRowSourceInfo(pClassName As %String, pDeviceNodePaths As %String = "") As %DynamicArray [ Private ]
 {
 	set tResult = []
 	Try {
-		set tRSData = $Get(^OPCUA.RowSource(pClassName))
-		if tRSData = "" Quit
+		Quit:pDeviceNodePaths=""
 
-		set tRSCount = $LI(tRSData, 1)
-		set tColCount = $LI(tRSData, 2)
-		set tRSList = $LI(tRSData, 3)
+		do ##class(OPCUA.DataSource.Resolver).ParseDeviceNodePaths(pDeviceNodePaths, .tDevices, .tErrors)
+		Quit:$LL($Get(tDevices))=0
 
-		// Get stored column paths if available (position 4)
-		set tHasColumnPaths = ($LL(tRSData) >= 4) && ($LI(tRSData, 4) '= "")
-		if tHasColumnPaths {
-			set tColumnPaths = $LI(tRSData, 4)
-		}
+		// Schema columns, in the same storage order the runtime uses.
+		set tSC = ##class(OPCUA.DataSource.Resolver).GetSchemaColumns(pClassName, .tColumns, .tFolders)
+		if $$$ISERR(tSC) set tColumns = 0
 
-		// Get column names from compiled class (OPCUANODENAME params, in storage order)
-		// These correspond to the column mask positions
-		kill tColNames
-		set tColIdx = 0
-		set tClassDef = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
-		if $IsObject(tClassDef) {
-			set tStorage = tClassDef.Storages.GetAt(1)
-			if $IsObject(tStorage) {
-				set tDataDef = tStorage.Data.GetAt(1)
-				if $IsObject(tDataDef) {
-					for iS=1:1:tDataDef.Values.Count() {
-						set tPropName = tDataDef.Values.GetAt(iS).Value
-						if $Extract(tPropName,1)="%" continue
-						if tPropName="NodePath" continue
-						if tPropName="ServerTimeStamp" continue
-						if tPropName="SourceTimeStamp" continue
-						set tColIdx = tColIdx + 1
-						for iP=1:1:tClassDef.Properties.Count() {
-							set tProp = tClassDef.Properties.GetAt(iP)
-							if tProp.Name = tPropName {
-								set tColNames(tColIdx) = tProp.Parameters.GetAt("OPCUANODENAME")
-								Quit
-							}
-						}
-						if '$Data(tColNames(tColIdx)) set tColNames(tColIdx) = tPropName
-					}
-				}
-			}
-		}
-
-		for i=1:1:tRSCount {
-			set tRS = $LI(tRSList, i)
+		for i=1:1:$LL(tDevices) {
+			set tDev = $LI(tDevices, i)
 			set tInfo = {}
-			set tInfo.path = $LI(tRS, 1)
-			set tInfo.nodeNs = $LI(tRS, 2)
-			set tInfo.nodeId = $LI(tRS, 3)
-			set tInfo.nodeIdType = $LI(tRS, 4)
+			set tInfo.path = $LI(tDev, 4)
+			set tInfo.nodeNs = $LI(tDev, 1)
+			set tInfo.nodeId = $LI(tDev, 2)
+			set tInfo.nodeIdType = $LI(tDev, 3)
 
 			set tChildren = []
-			if $LL(tRS) >= 6 {
-				set tMask = $LI(tRS, 5)
-				set tAbsRefs = $LI(tRS, 6)
-				set tRefIdx = 0
-				for c=1:1:tColCount {
-					if +$LI(tMask, c) {
-						set tRefIdx = tRefIdx + 1
-						set tRef = $LI(tAbsRefs, tRefIdx)
-						set tChild = {}
-						set tChild.displayName = $Get(tColNames(c), "Column"_c)
-						set tChild.nodeNs = $LI(tRef, 1)
-						set tChild.nodeId = $LI(tRef, 2)
-						set tChild.nodeIdType = $LI(tRef, 3)
-						// Include relativePath from stored column paths
-						if tHasColumnPaths && ($LL(tColumnPaths) >= c) {
-							set tPathStr = $LI(tColumnPaths, c)
-							set tRelPath = ##class(%DynamicArray).%New()
-							for seg=1:1:$Length(tPathStr, "/") {
-								do tRelPath.%Push($Piece(tPathStr, "/", seg))
-							}
-							set tChild.relativePath = tRelPath
-						}
-						do tChildren.%Push(tChild)
-					}
-				}
+			for c=1:1:tColumns {
+				set tCol = tColumns(c)
+				set tFolderName = $LI(tCol, 5)
+				set tNodeName = $LI(tCol, 3)
+
+				set tChild = {}
+				set tChild.displayName = tNodeName
+				set tChild.nodeNs = $LI(tCol, 2)
+				// Nodes are resolved by name at connect time, so there is no
+				// stored absolute node id to report here.
+				set tChild.nodeId = ""
+				set tChild.nodeIdType = ""
+
+				set tRelPath = ##class(%DynamicArray).%New()
+				if tFolderName '= "" do tRelPath.%Push(tFolderName)
+				do tRelPath.%Push(tNodeName)
+				set tChild.relativePath = tRelPath
+
+				do tChildren.%Push(tChild)
 			}
 			set tInfo.childNodes = tChildren
 

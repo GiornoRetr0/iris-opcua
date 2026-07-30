@@ -38,13 +38,16 @@ Method GetSensors() As %Status
 
 					set tDSClass = ..GetSettingValue(tCfgItem, "DataSourceClass")
 
+					// Device count comes from the DeviceNodePaths setting and the
+					// column count from the compiled schema — both cheap, and
+					// neither needs a live OPC UA session.
 					set tRSCount = 0, tColCount = 0
 					if tDSClass '= "" {
-						set tRSData = $Get(^OPCUA.RowSource(tDSClass))
-						if tRSData '= "" {
-							set tRSCount = +$LI(tRSData, 1)
-							set tColCount = +$LI(tRSData, 2)
-						}
+						set tRSCount = ..CountDevices(..GetSettingValue(tCfgItem, "DeviceNodePaths"))
+						Try {
+							set tColSC = ##class(OPCUA.DataSource.Resolver).GetSchemaColumns(tDSClass, .tColumns, .tFolders)
+							if $$$ISOK(tColSC) set tColCount = +$Get(tColumns)
+						} Catch (eCols) {}
 					}
 					do ..SetSensor("pipeline_rowsources", tRSCount, tName)
 					do ..SetSensor("pipeline_columns", tColCount, tName)
@@ -77,6 +80,24 @@ Method GetSensors() As %Status
 		set tSC = e.AsStatus()
 	}
 	Quit tSC
+}
+
+/// Count usable device entries in a DeviceNodePaths setting, ignoring blank and
+/// commented lines. Counts lines rather than parsing, to keep a metrics scrape cheap.
+ClassMethod CountDevices(pSetting As %String) As %Integer [ Private ]
+{
+	set tCount = 0
+	Quit:pSetting="" tCount
+
+	set tText = $Replace(pSetting, $Char(13, 10), $Char(10))
+	set tText = $Replace(tText, $Char(13), $Char(10))
+	for i=1:1:$Length(tText, $Char(10)) {
+		set tLine = $ZStrip($Piece(tText, $Char(10), i), "<>W")
+		continue:tLine=""
+		continue:$Extract(tLine)="#"
+		set tCount = tCount + 1
+	}
+	Quit tCount
 }
 
 /// Get a setting value from a config item by name.

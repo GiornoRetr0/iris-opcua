@@ -244,7 +244,6 @@ ClassMethod RemoveProjection(cls As %String, ByRef params, recompile As %Boolean
     Try
     {
         Kill ^OPCUA.DataSource(cls)
-        Kill ^OPCUA.RowSource(cls)
     } 
     Catch (oException)
     {

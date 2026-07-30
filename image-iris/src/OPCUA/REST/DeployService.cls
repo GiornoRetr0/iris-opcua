@@ -144,8 +144,7 @@ ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDS
 /// Render the wizard's row sources as a DeviceNodePaths setting value.
 ///
 /// One line per device in OPC UA NodeId form, labelled with the row source's
-/// path so the NodePath column keeps reading exactly as it did when the device
-/// list was stored in ^OPCUA.RowSource.
+/// path so the NodePath column reads as the user's tree selection did.
 ClassMethod BuildDeviceNodePaths(pRowSources As %DynamicArray) As %String
 {
 	set tOut = ""
@@ -338,13 +337,13 @@ ClassMethod CreateSchema(pBody As %DynamicObject, pColumns As %DynamicArray, pRo
 }
 
 /// Step 2 of a deploy: bind devices to an existing schema and add the service item.
+///
+/// The binding is entirely a config-item setting — AddServiceItem writes
+/// DeviceNodePaths — so there is no metadata global to maintain.
 ClassMethod BindDevices(pBody As %DynamicObject, pClassName As %String, pDataSourceName As %String, pMode As %String, pColumns As %DynamicArray, pRowSources As %DynamicArray) As %Status [ Private ]
 {
 	#dim tSC As %Status = $$$OK
 	Try {
-		set tSC = ..StoreRowSourceMetadata(pClassName, pRowSources, pColumns)
-		Quit:$$$ISERR(tSC)
-
 		set tSC = ..EnsureProductionExists()
 		Quit:$$$ISERR(tSC)
 
@@ -386,130 +385,6 @@ ClassMethod GenerateDataSourceTextV2(pBody As %DynamicObject, pColumns As %Dynam
 		}
 
 		set tSC = ##class(OPCUA.REST.SchemaService).GenerateSchemaClass(pClassName, pDataSourceName, pColumns, tDefaultNS, .tColNS, .pSerialClasses)
-
-	} Catch (e) {
-		set tSC = e.AsStatus()
-	}
-	Quit tSC
-}
-
-/// Store row source metadata in ^OPCUA.RowSource global for runtime use by row-source services.
-/// Computes a column mask per row source: which union columns each RS has (by matching childNode relativePath keys).
-/// Missing columns will be NULL at runtime.
-/// Stores: $LB(rsCount, colCount, rsList, columnPaths, nestingSpec)
-///   columnPaths = $LB("Temperature", "Humidity", "SubFolder/TargetNode") — leaf column path keys
-///   nestingSpec = $LB($LB("leaf",1), $LB("leaf",2), $LB("serial",3,$LB($LB("leaf",1)))) — storage layout
-ClassMethod StoreRowSourceMetadata(pClassName As %String, pRowSources As %DynamicArray, pColumns As %DynamicArray) As %Status
-{
-	#dim tSC As %Status = $$$OK
-	Try {
-		set tRSCount = pRowSources.%Size()
-		set tColCount = pColumns.%Size()
-
-		// Build ordered column path key list for matching (uses relativePath if available)
-		set tColumnPaths = ""
-		for c=0:1:tColCount-1 {
-			set tCol = pColumns.%Get(c)
-			set tRelPath = tCol.%Get("relativePath")
-			if $IsObject($Get(tRelPath)) && (tRelPath.%Size() > 0) {
-				// Build path key from relativePath array: "SubFolder/TargetNode"
-				set tPathKey = ""
-				for rp=0:1:tRelPath.%Size()-1 {
-					set:tPathKey'="" tPathKey = tPathKey_"/"
-					set tPathKey = tPathKey_tRelPath.%Get(rp)
-				}
-			} else {
-				set tPathKey = tCol.%Get("displayName")
-			}
-			set tColNames(c) = tPathKey
-			set tColumnPaths = tColumnPaths _ $LB(tPathKey)
-		}
-
-		// Build row source list with column masks
-		set tRSList = ""
-		for i=0:1:tRSCount-1 {
-			set tRS = pRowSources.%Get(i)
-			set tPath = tRS.%Get("path")
-			set tNodeNs = +tRS.%Get("nodeNs")
-			set tNodeId = tRS.%Get("nodeId")
-			set tNodeIdType = +tRS.%Get("nodeIdType")
-
-			// Build a lookup: childNode relativePath key → child object
-			set tChildren = tRS.%Get("childNodes")
-			kill tChildMap
-			for j=0:1:tChildren.%Size()-1 {
-				set tChild = tChildren.%Get(j)
-				set tChildRelPath = tChild.%Get("relativePath")
-				if $IsObject($Get(tChildRelPath)) && (tChildRelPath.%Size() > 0) {
-					set tChildKey = ""
-					for rp=0:1:tChildRelPath.%Size()-1 {
-						set:tChildKey'="" tChildKey = tChildKey_"/"
-						set tChildKey = tChildKey_tChildRelPath.%Get(rp)
-					}
-				} else {
-					set tChildKey = tChild.%Get("displayName")
-				}
-				set tChildMap(tChildKey) = tChild
-			}
-
-			// Build column mask and abs node refs by iterating union columns in order
-			set tMask = ""
-			set tAbsNodeRefs = ""
-			for c=0:1:tColCount-1 {
-				if $Data(tChildMap(tColNames(c))) {
-					set tChild = tChildMap(tColNames(c))
-					set tMask = tMask _ $LB(1)
-					set tAbsNodeRefs = tAbsNodeRefs _ $LB($LB(+tChild.%Get("nodeNs"), tChild.%Get("nodeId"), +tChild.%Get("nodeIdType")))
-				} else {
-					set tMask = tMask _ $LB(0)
-				}
-			}
-
-			set tRSList = tRSList _ $LB($LB(tPath, tNodeNs, tNodeId, tNodeIdType, tMask, tAbsNodeRefs))
-		}
-
-		// Build nesting spec: describes how flat leaf values map to the nested $LB storage layout
-		// Each entry is either $LB("leaf", leafIndex) for flat columns,
-		// or $LB("serial", storageSlot, innerSpec) for serial object groups
-		set tNestingSpec = ""
-		set tLeafIdx = 0
-		kill tProcessedFolders
-		set tHasNesting = 0
-		for c=0:1:tColCount-1 {
-			set tPath = tColNames(c)
-			if tPath [ "/" {
-				// Nested column
-				set tFolderName = $Piece(tPath, "/", 1)
-				set tHasNesting = 1
-				if '$Data(tProcessedFolders(tFolderName)) {
-					// Gather all leaf columns under this folder
-					set tProcessedFolders(tFolderName) = 1
-					set tInnerSpec = ""
-					set tInnerIdx = 0
-					for c2=0:1:tColCount-1 {
-						set tPath2 = tColNames(c2)
-						if $Piece(tPath2, "/", 1) = tFolderName {
-							set tLeafIdx = tLeafIdx + 1
-							set tInnerIdx = tInnerIdx + 1
-							set tInnerSpec = tInnerSpec _ $LB($LB("leaf", tLeafIdx))
-						}
-					}
-					set tNestingSpec = tNestingSpec _ $LB($LB("serial", tFolderName, tInnerSpec))
-				}
-			} else {
-				// Flat column
-				set tLeafIdx = tLeafIdx + 1
-				set tNestingSpec = tNestingSpec _ $LB($LB("leaf", tLeafIdx))
-			}
-		}
-
-		// Store: $LB(rowSourceCount, columnCount, rowSourceList, columnPaths, nestingSpec)
-		if tHasNesting {
-			set ^OPCUA.RowSource(pClassName) = $LB(tRSCount, tColCount, tRSList, tColumnPaths, tNestingSpec)
-		} else {
-			// Backward compatible: no extra elements for flat pipelines
-			set ^OPCUA.RowSource(pClassName) = $LB(tRSCount, tColCount, tRSList)
-		}
 
 	} Catch (e) {
 		set tSC = e.AsStatus()
