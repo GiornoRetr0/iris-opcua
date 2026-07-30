@@ -51,8 +51,12 @@ ClassMethod Browse(pBody As %DynamicObject, Output pResult As %DynamicArray) As 
 	Quit tSC
 }
 
-/// Parse raw browse results from C++ layer into a %DynamicArray of node objects.
-/// Uses the 3-axis classification model: referenceType + typeDefinition + nodeClass(inferred).
+/// Walk the raw browse result list from the C++ layer and return one entry per
+/// child reference. This is the single shared decoding of the C++ browse wire
+/// format: <method>ParseBrowseResults</method> renders it as JSON for the REST
+/// API, and <class>OPCUA.DataSource.Resolver</class> uses it to match children
+/// by name at runtime. Keeping one walk means the REST and runtime views of a
+/// server cannot drift apart.
 ///
 /// C++ browse reference list positions:
 ///   [1] referenceTypeId (NodeId: ns, id, idType)
@@ -62,16 +66,20 @@ ClassMethod Browse(pBody As %DynamicObject, Output pResult As %DynamicArray) As 
 ///   [5] displayName (LocalizedText: text, locale)
 ///   [6] nodeClass (empty — not exported by C++)
 ///   [7] typeDefinition (ExpandedNodeId: ns, id, idType, ...)
-ClassMethod ParseBrowseResults(pResults As %List) As %DynamicArray [ Private ]
+///
+/// Output: pChildren(i) = $LB(browseName, displayName, ns, id, idType, category, refType)
+/// where browseName and displayName are kept SEPARATE (unlike the JSON view, which
+/// collapses them) because name-based resolution prefers the stable BrowseName.
+ClassMethod WalkBrowseResults(pResults As %List, Output pChildren) As %Integer
 {
-	set tArray = []
+	kill pChildren
+	set tCount = 0
 	Try {
 		set tBrowseData = $LI(pResults, 4)
 		set tFirstResult = $LI(tBrowseData, 1)
 		set tRefList = $LI(tFirstResult, 4)
-		set tRefCount = $LL(tRefList)
 
-		for i=1:1:tRefCount {
+		for i=1:1:$LL(tRefList) {
 			set tRef = $LI(tRefList, i)
 
 			// --- Reference type (how child relates to parent) ---
@@ -84,7 +92,6 @@ ClassMethod ParseBrowseResults(pResults As %List) As %DynamicArray [ Private ]
 			// Skip HasSubtype references (ns=0, id=45)
 			if (tRefTypeNS = 0) && (tRefTypeId = 45) continue
 
-			// Classify the reference type
 			set tRefType = ..ClassifyReferenceType(tRefTypeNS, tRefTypeId)
 
 			// --- Node identity ---
@@ -93,17 +100,19 @@ ClassMethod ParseBrowseResults(pResults As %List) As %DynamicArray [ Private ]
 			set tChildId = $LI(tNodeInfo, 2)
 			set tChildIdType = $LI(tNodeInfo, 3)
 
-			// --- Display name: prefer displayName [5], fall back to browseName [4] ---
-			set tDisplayText = ""
+			// --- BrowseName [4]: the stable, non-localized identifier ---
+			set tBrowseName = ""
+			Try {
+				set tBrowseInfo = $LI(tRef, 4)
+				if $ListValid($Get(tBrowseInfo)) set tBrowseName = $LI(tBrowseInfo, 1)
+			} Catch (ex) {}
+
+			// --- DisplayName [5]: localized presentation text ---
+			set tDisplayName = ""
 			Try {
 				set tDisplayInfo = $LI(tRef, 5)
-				if $ListValid($Get(tDisplayInfo)) set tDisplayText = $LI(tDisplayInfo, 1)
+				if $ListValid($Get(tDisplayInfo)) set tDisplayName = $LI(tDisplayInfo, 1)
 			} Catch (ex) {}
-			if tDisplayText = "" {
-				set tBrowseInfo = $LI(tRef, 4)
-				set tDisplayText = $LI(tBrowseInfo, 1)
-			}
-			if tDisplayText = "" set tDisplayText = "Node"_tChildId
 
 			// --- Type definition (what kind of Object/Variable) ---
 			set tTypeDefNS = ""
@@ -116,18 +125,50 @@ ClassMethod ParseBrowseResults(pResults As %List) As %DynamicArray [ Private ]
 				}
 			} Catch (ex) {}
 
-			// --- 3-axis classification ---
 			set tCategory = ..ClassifyNode(tRefType, tTypeDefNS, tTypeDefId)
+
+			set tCount = tCount + 1
+			set pChildren(tCount) = $LB(tBrowseName, tDisplayName, tChildNS, tChildId, tChildIdType, tCategory, tRefType)
+			set pChildren(tCount, "typeDefNs") = tTypeDefNS
+			set pChildren(tCount, "typeDefId") = tTypeDefId
+		}
+	} Catch (e) {
+		// Return whatever we have so far
+	}
+	Quit tCount
+}
+
+/// Parse raw browse results from C++ layer into a %DynamicArray of node objects.
+/// Uses the 3-axis classification model: referenceType + typeDefinition + nodeClass(inferred).
+/// Decoding is delegated to <method>WalkBrowseResults</method>; this method only
+/// shapes the result as JSON for the REST API.
+ClassMethod ParseBrowseResults(pResults As %List) As %DynamicArray [ Private ]
+{
+	set tArray = []
+	Try {
+		set tCount = ..WalkBrowseResults(pResults, .tChildren)
+
+		for i=1:1:tCount {
+			set tChild = tChildren(i)
+			set tChildNS = $LI(tChild, 3)
+			set tChildId = $LI(tChild, 4)
+
+			// Display name: prefer displayName, fall back to browseName (unchanged behaviour)
+			set tDisplayText = $LI(tChild, 2)
+			if tDisplayText = "" set tDisplayText = $LI(tChild, 1)
+			if tDisplayText = "" set tDisplayText = "Node"_tChildId
+
+			set tCategory = $LI(tChild, 6)
 
 			set tNode = {}
 			set tNode.displayName = tDisplayText
 			set tNode.nodeNs = tChildNS
 			set tNode.nodeId = tChildId
-			set tNode.nodeIdType = tChildIdType
+			set tNode.nodeIdType = $LI(tChild, 5)
 			set tNode.nodeCategory = tCategory
-			set tNode.referenceType = tRefType
-			set tNode.typeDefNs = tTypeDefNS
-			set tNode.typeDefId = tTypeDefId
+			set tNode.referenceType = $LI(tChild, 7)
+			set tNode.typeDefNs = tChildren(i, "typeDefNs")
+			set tNode.typeDefId = tChildren(i, "typeDefId")
 			set tNode.hasChildren = ..CategoryHasChildren(tCategory)
 
 			do tArray.%Push(tNode)
