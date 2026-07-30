@@ -56,17 +56,17 @@ export const routes: Routes = [
     redirectTo: 'schemas',
   },
   {
-    path: 'monitoring',
-    loadComponent: () =>
-      import('./pages/monitoring/monitoring.component').then(
-        (m) => m.MonitoringComponent
-      ),
-  },
-  {
     path: 'docs',
     loadComponent: () =>
       import('./pages/documentation/documentation.component').then(
         (m) => m.DocumentationComponent
       ),
+  },
+  {
+    // Unknown paths land somewhere useful instead of a blank page — notably
+    // /monitoring, which existed until the Monitoring tab was removed and may
+    // still be bookmarked.
+    path: '**',
+    redirectTo: 'explorer',
   },
 ];

@@ -9,7 +9,6 @@ import {
   Pipeline,
   DeployResult,
   ServerProfile,
-  MetricsSnapshot,
   Schema,
   CreateSchemaRequest,
   CreateSchemaResult,
@@ -163,10 +162,6 @@ export class ApiService {
     const params: Record<string, any> = { name, devices };
     if (strictSchemaMatch !== undefined) params['strictSchemaMatch'] = strictSchemaMatch ? 1 : 0;
     return this.post('/pipelines/rebind', params, 30000);
-  }
-
-  getMetrics(): Observable<MetricsSnapshot> {
-    return this.post<MetricsSnapshot>('/metrics', {}, 10000);
   }
 
   // ── Schemas: reusable device types, independent of any pipeline ──
