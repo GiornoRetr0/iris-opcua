@@ -92,6 +92,15 @@ Property Specification As %List [ Private ];
 
 Property QueryHandle As %Integer [ Private ];
 
+/// $LB($LB(1,0,1,...), ...) — per-device column coverage, discovered by browsing
+/// at connect time. Read by the row-source service to unpack notifications.
+/// Empty for the declarative path, which monitors a single fixed node set.
+Property RowSourceMasks As %List;
+
+/// $LB(path1, path2, ...) — NodePath value per device, in the same order as
+/// <property>RowSourceMasks</property>.
+Property RowSourcePaths As %List;
+
 Property QtySequentialEmptyResults As %Integer [ InitialExpression = 0, Private ];
 
 Property MaxInternalQueueSize As %Integer [ InitialExpression = 0, Private ];
@@ -117,7 +126,34 @@ Method Configure(pSpecification As %List) As %Status
 	Quit tSC
 }
 
-/// Used internally to setup of the OPC-UA client, connect to the 
+/// Resolve the specification by browsing the configured devices, for row-source
+/// pipelines.
+///
+/// Keyed on DeviceNodePaths being set, which only row-source pipelines do: the
+/// declarative Examples/Tests path leaves it empty and keeps its OnInit()-supplied
+/// Specification untouched.
+///
+/// Runs on every (re)connect, so the subscription's monitored items are rebuilt
+/// whenever the session is.
+Method ResolveSpecification() As %Status
+{
+	Quit:..DeviceNodePaths="" ##super()
+
+	#dim tSC as %Status = $$$OK
+	try {
+		set tSC = ..ResolveRowSourceSpec(.tSpec, .tMasks, .tPaths)
+		Quit:$$$ISERR(tSC)
+
+		set ..Specification = tSpec
+		set ..RowSourceMasks = tMasks
+		set ..RowSourcePaths = tPaths
+	} catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit tSC
+}
+
+/// Used internally to setup of the OPC-UA client, connect to the
 /// server, and intialize the query that will be used to poll for
 /// results.
 Method Connect() As %Status

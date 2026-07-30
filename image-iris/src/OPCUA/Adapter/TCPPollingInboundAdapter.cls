@@ -7,6 +7,15 @@ Property Specification As %List [ Private ];
 
 Property QueryHandle As %Integer [ Private ];
 
+/// $LB($LB(1,0,1,...), ...) — per-device column coverage, discovered by browsing
+/// at connect time. Read by the row-source service to unpack poll results.
+/// Empty for the declarative path, which reads a single fixed node set.
+Property RowSourceMasks As %List;
+
+/// $LB(path1, path2, ...) — NodePath value per device, in the same order as
+/// <property>RowSourceMasks</property>.
+Property RowSourcePaths As %List;
+
 /// Must be called before connecting. 
 /// (OPCUA.Service.TCPPollingService calls this function in its OnInit() event.)
 Method Configure(pSpecification As %List) As %Status
@@ -21,6 +30,33 @@ Method Configure(pSpecification As %List) As %Status
 		set tSC = e.AsStatus()
 	}
 
+	Quit tSC
+}
+
+/// Resolve the specification by browsing the configured devices, for row-source
+/// pipelines.
+///
+/// Keyed on DeviceNodePaths being set, which only row-source pipelines do: the
+/// declarative Examples/Tests path leaves it empty and keeps its OnInit()-supplied
+/// Specification untouched.
+///
+/// Runs on every (re)connect, so the query is rebuilt whenever the session is —
+/// which is also what makes a newly-reachable device start reporting on its own.
+Method ResolveSpecification() As %Status
+{
+	Quit:..DeviceNodePaths="" ##super()
+
+	#dim tSC as %Status = $$$OK
+	try {
+		set tSC = ..ResolveRowSourceSpec(.tSpec, .tMasks, .tPaths)
+		Quit:$$$ISERR(tSC)
+
+		set ..Specification = tSpec
+		set ..RowSourceMasks = tMasks
+		set ..RowSourcePaths = tPaths
+	} catch (e) {
+		set tSC = e.AsStatus()
+	}
 	Quit tSC
 }
 

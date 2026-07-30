@@ -245,6 +245,97 @@ ClassMethod MapSerialFolders(pSchemaClass As %String, Output pFolderMap) As %Sta
 	Quit tSC
 }
 
+/// Derive the nesting layout for a schema from its compiled class.
+///
+/// The row-source services need to know how flat leaf values map onto the
+/// %SerialObject structure of a storage row. That layout used to be precomputed
+/// at deploy time and stored in ^OPCUA.RowSource; it is instead derived here from
+/// the class itself, which cannot go stale.
+///
+/// Walks the class's storage order (the same order the column masks use) and
+/// emits one entry per storage slot:
+///   $LB("leaf", leafIndex)                  — a direct value
+///   $LB("serial", folderName, innerSpec)     — an embedded serial object
+/// where innerSpec is a list of $LB("leaf", leafIndex) for the folder's own
+/// properties, in the serial class's storage order.
+///
+/// leafIndex numbering matches the order GetSchemaColumns() reports columns in,
+/// so the services can index resolved values directly.
+///
+/// Returns "" when the schema has no nested folders (flat layout).
+ClassMethod DeriveNestingSpec(pSchemaClass As %String, Output pNestingSpec As %List) As %Status
+{
+	#dim tSC As %Status = $$$OK
+	set pNestingSpec = ""
+	Try {
+		set tClassDef = ##class(%Dictionary.CompiledClass).%OpenId(pSchemaClass)
+		if '$IsObject(tClassDef) {
+			set tSC = $$$ERROR($$$GeneralError, "Cannot open compiled class: "_pSchemaClass)
+			Quit
+		}
+
+		// Index the class's properties by name so storage entries can be typed.
+		kill tPropType, tPropNode
+		for i=1:1:tClassDef.Properties.Count() {
+			set tProp = tClassDef.Properties.GetAt(i)
+			set tPropType(tProp.Name) = tProp.Type
+			set tNodeName = tProp.Parameters.GetAt("OPCUANODENAME")
+			set tPropNode(tProp.Name) = $Select(tNodeName="":tProp.Name, 1:tNodeName)
+		}
+
+		set tEntries = tClassDef.Storages.GetAt(1).Data.GetAt(1).Values
+		set tLeafIdx = 0
+		set tHasNesting = 0
+
+		for i=1:1:tEntries.Count() {
+			set tName = tEntries.GetAt(i).Value
+			continue:$Extract(tName,1)="%"
+			continue:tName="NodePath"
+			continue:tName="ServerTimeStamp"
+			continue:tName="SourceTimeStamp"
+
+			set tType = $Get(tPropType(tName))
+			set tIsSerial = 0
+			if (tType '= "") && ($Extract(tType,1)'="%") && ($Extract(tType,1,12)'="OPCUA.Types.") {
+				Try {
+					set tIsSerial = $classmethod(tType, "%Extends", "%SerialObject")
+				} Catch (eInner) {
+					set tIsSerial = 0
+				}
+			}
+
+			if 'tIsSerial {
+				set tLeafIdx = tLeafIdx + 1
+				set pNestingSpec = pNestingSpec _ $LB($LB("leaf", tLeafIdx))
+				continue
+			}
+
+			// A nested folder: one inner leaf per property of the serial class,
+			// in the serial class's own storage order.
+			set tHasNesting = 1
+			set tInnerSpec = ""
+			set tSerialDef = ##class(%Dictionary.CompiledClass).%OpenId(tType)
+			if $IsObject(tSerialDef) {
+				set tSerialEntries = tSerialDef.Storages.GetAt(1).Data.GetAt(1).Values
+				for j=1:1:tSerialEntries.Count() {
+					set tInnerName = tSerialEntries.GetAt(j).Value
+					continue:$Extract(tInnerName,1)="%"
+					set tLeafIdx = tLeafIdx + 1
+					set tInnerSpec = tInnerSpec _ $LB($LB("leaf", tLeafIdx))
+				}
+			}
+			set pNestingSpec = pNestingSpec _ $LB($LB("serial", $Get(tPropNode(tName), tName), tInnerSpec))
+		}
+
+		// A flat schema needs no nesting spec at all — the services treat "" as flat.
+		if 'tHasNesting set pNestingSpec = ""
+
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit tSC
+}
+
 /// Resolve a schema and a device list into a concrete adapter specification by
 /// browsing each device and matching children by name against OPCUANODENAME.
 ///

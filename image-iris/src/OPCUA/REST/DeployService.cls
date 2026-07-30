@@ -92,6 +92,10 @@ ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDS
 		do ..AddSetting(tItem, "Adapter", "DataSourceClass", pDSClassName)
 		do ..AddSetting(tItem, "Adapter", "URL", pBody.%Get("url"))
 
+		// The device list lives in the config item, so it is visible and editable
+		// in the Management Portal — adding a device is a one-line edit here.
+		do ..AddSetting(tItem, "Adapter", "DeviceNodePaths", ..BuildDeviceNodePaths(pBody.%Get("rowSources")))
+
 		if pMode = "polling" {
 			set tInterval = +pBody.%Get("callInterval")
 			if tInterval < 1 set tInterval = 5
@@ -135,6 +139,36 @@ ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDS
 		set tSC = e.AsStatus()
 	}
 	Quit tSC
+}
+
+/// Render the wizard's row sources as a DeviceNodePaths setting value.
+///
+/// One line per device in OPC UA NodeId form, labelled with the row source's
+/// path so the NodePath column keeps reading exactly as it did when the device
+/// list was stored in ^OPCUA.RowSource.
+ClassMethod BuildDeviceNodePaths(pRowSources As %DynamicArray) As %String
+{
+	set tOut = ""
+	Quit:'$IsObject($Get(pRowSources)) tOut
+
+	for i=0:1:pRowSources.%Size()-1 {
+		set tRS = pRowSources.%Get(i)
+		set tNodeId = tRS.%Get("nodeId")
+		continue:tNodeId=""
+
+		// nodeIdType 0 = numeric, 3 = string (see OPCUA.Constants)
+		set tIdType = +tRS.%Get("nodeIdType")
+		set tKind = $Select(tIdType=0:"i=", 1:"s=")
+
+		set tLine = "ns="_(+tRS.%Get("nodeNs"))_";"_tKind_tNodeId
+
+		// Label keeps the NodePath column value stable across this change.
+		set tPath = tRS.%Get("path")
+		set:tPath'="" tLine = tLine_"|"_tPath
+
+		set tOut = tOut_$Select(tOut="":"", 1:$Char(10))_tLine
+	}
+	Quit tOut
 }
 
 /// Add a setting to a config item.

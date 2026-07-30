@@ -3,8 +3,14 @@ Include (%callout, OPCUA.Constants)
 Class OPCUA.Adapter.Common Extends Ens.InboundAdapter
 {
 
-/// Configurable settings
-Parameter SETTINGS = "URL:Connection,ConnectionRetryTimeout:Connection,AlwaysConnect:Connection,DataSourceClass:Data,Username:User,Password:User,SecurityMode:Security,ClientURI:Security,PublicCertificate:Security,PrivateKey:Security,TrustListDir:Security,RevocationListDir:Security,LogFileTag:Logging";
+/// Configurable settings.
+///
+/// DataSourceClass renders as a dropdown of available device schemas, populated
+/// from the common superclass OPCUA.DataSource.DeviceSchema. Note that
+/// Ens.ContextSearch.SubclassOf takes the superclass in a parameter named
+/// "class" (not "super"), and already excludes abstract classes, so the abstract
+/// DeviceSchema base never appears in the list.
+Parameter SETTINGS = "URL:Connection,ConnectionRetryTimeout:Connection,AlwaysConnect:Connection,DataSourceClass:Data:selector?context={Ens.ContextSearch/SubclassOf?class=OPCUA.DataSource.DeviceSchema},DeviceNodePaths:Data,StrictSchemaMatch:Data,Username:User,Password:User,SecurityMode:Security,ClientURI:Security,PublicCertificate:Security,PrivateKey:Security,TrustListDir:Security,RevocationListDir:Security,LogFileTag:Logging";
 
 // *** PROPERTIES INFLUENCED BY SETTINGS ***
 
@@ -26,10 +32,34 @@ Property ConnectionRetryTimeout As %Integer [ InitialExpression = 600 ];
 /// in ConnectionRetryTimeout
 Property AlwaysConnect As %Boolean [ InitialExpression = 0 ];
 
-/// The name of the DataSource class specifying the 
+/// The name of the DataSource class specifying the
 /// data types and nodes from which to obtain data
 /// as well as the fields in which to deposit the results.
 Property DataSourceClass As %String;
+
+/// The OPC UA device root nodes to read, one per line. Each line produces one
+/// table row per poll cycle, tagged with its NodePath.
+/// <p>Accepted forms per line:
+/// <ul>
+/// <li><tt>ns=2;s=Plant.AC1</tt> — string NodeId</li>
+/// <li><tt>ns=2;i=1047</tt> — numeric NodeId</li>
+/// <li><tt>i=85</tt> — NodeId in namespace 0</li>
+/// </ul>
+/// An optional label may follow a pipe, and becomes the NodePath value:
+/// <tt>ns=2;s=Plant.AC1|AC1</tt>. Blank lines and lines starting with # are
+/// ignored, so the list can be commented.
+/// <p>Each device is browsed at connect time and its children matched by name
+/// against the schema's columns, so adding a device is a one-line edit here —
+/// no regeneration and no recompile. Only used by the row-source services; the
+/// declarative Examples/Tests path ignores it.
+Property DeviceNodePaths As %String(MAXLEN = 32000);
+
+/// If set, refuse to start when any schema column fails to resolve on any
+/// configured device. The default (0) stores NULL for unresolved columns and
+/// logs a warning naming the device and column, which matches the behaviour of
+/// the precomputed column masks this replaced. Turn it on in production when a
+/// silently NULL column would be worse than a service that refuses to start.
+Property StrictSchemaMatch As %Boolean [ InitialExpression = 0 ];
 
 /// The username with which to log on to the OPC UA server.
 Property Username As %String;
@@ -177,6 +207,72 @@ Method Connect() As %Status [ Private ]
 Method ResolveSpecification() As %Status
 {
 	Quit $$$OK
+}
+
+/// Resolve DataSourceClass + DeviceNodePaths into a concrete specification and
+/// per-device coverage masks, by browsing each device over the live session.
+///
+/// Shared by both row-source adapters' ResolveSpecification() overrides, so the
+/// polling and subscription paths cannot drift apart. Unresolved columns are
+/// logged once per (device, column) and stored as NULL, unless StrictSchemaMatch
+/// is set, in which case resolution fails instead.
+Method ResolveRowSourceSpec(Output pSpec As %List, Output pMasks As %List, Output pPaths As %List) As %Status
+{
+	#dim tSC as %Status = $$$OK
+	set pSpec = ""
+	set pMasks = ""
+	set pPaths = ""
+
+	try {
+		if ..DataSourceClass = "" {
+			set tSC = $$$ERROR($$$GeneralError, "DataSourceClass is not configured")
+			Quit
+		}
+
+		if ..DeviceNodePaths = "" {
+			set tSC = $$$ERROR($$$GeneralError, "DeviceNodePaths is empty — list at least one OPC UA device root, e.g. ns=2;s=Plant.AC1")
+			Quit
+		}
+
+		set tSC = ##class(OPCUA.DataSource.Resolver).ParseDeviceNodePaths(..DeviceNodePaths, .tDevices, .tParseErrors)
+		for i=1:1:$LL($Get(tParseErrors)) {
+			$$$LOGWARNING("Ignoring unusable DeviceNodePaths entry — "_$LI(tParseErrors, i))
+		}
+		Quit:$$$ISERR(tSC)
+
+		set tSC = ##class(OPCUA.DataSource.Resolver).ResolveSpecification(..Client, ..DataSourceClass, tDevices, .pSpec, .pMasks, .tDiagnostics)
+		Quit:$$$ISERR(tSC)
+
+		// Report every unresolved column, naming the device and the column.
+		for i=1:1:$LL(tDiagnostics) {
+			set tD = $LI(tDiagnostics, i)
+			$$$LOGWARNING("Device '"_$LI(tD, 1)_"': column '"_$LI(tD, 2)_"' did not resolve — "_$LI(tD, 3)_". It will be stored as NULL.")
+		}
+
+		if ..StrictSchemaMatch && ($LL(tDiagnostics) > 0) {
+			set tSC = $$$ERROR($$$GeneralError, "StrictSchemaMatch is enabled and "_$LL(tDiagnostics)_" column(s) did not resolve — see the warnings above")
+			Quit
+		}
+
+		// NodePath values, in device order, for the service to tag rows with.
+		for i=1:1:$LL(tDevices) {
+			set pPaths = pPaths _ $LB($LI($LI(tDevices, i), 4))
+		}
+
+		set tTotal = 0
+		for i=1:1:$LL(pMasks) {
+			set tMask = $LI(pMasks, i)
+			for c=1:1:$LL(tMask) {
+				if +$LI(tMask, c) set tTotal = tTotal + 1
+			}
+		}
+		$$$LOGINFO("Resolved "_..DataSourceClass_" against "_$LL(tDevices)_" device(s): "_tTotal_" node(s) to read")
+
+	} catch (e) {
+		set tSC = e.AsStatus()
+	}
+
+	Quit tSC
 }
 
 Method Disconnect() As %Status [ Private ]
