@@ -41,6 +41,7 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/pipelines/toggle" Method="POST" Call="PipelinesToggle" />
   <Route Url="/pipelines/delete" Method="POST" Call="PipelinesDelete" />
   <Route Url="/pipelines/edit" Method="POST" Call="PipelinesEdit" />
+  <Route Url="/pipelines/rebind" Method="POST" Call="PipelinesRebind" />
   <Route Url="/schemas" Method="GET" Call="SchemasList" />
   <Route Url="/schemas" Method="POST" Call="SchemasCreate" />
   <Route Url="/schemas/:name/validate" Method="POST" Call="SchemasValidate" />
@@ -218,6 +219,24 @@ ClassMethod PipelinesEdit() As %Status
 		set tSC = ..GetRequestParams(.tBody)
 		Quit:$$$ISERR(tSC)
 		set tSC = ##class(OPCUA.REST.PipelineService).Edit(tBody, .tResult)
+		Quit:$$$ISERR(tSC)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	if $$$ISERR(tSC) {
+		Quit ..SendError($System.Status.GetErrorText(tSC))
+	}
+	Quit ..SendOK(tResult)
+}
+
+/// Rebind an existing pipeline's device list, without regenerating its schema.
+ClassMethod PipelinesRebind() As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+		set tSC = ##class(OPCUA.REST.PipelineService).Rebind(tBody, .tResult)
 		Quit:$$$ISERR(tSC)
 	} Catch (e) {
 		set tSC = e.AsStatus()

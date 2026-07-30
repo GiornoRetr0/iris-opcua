@@ -148,8 +148,21 @@ export class ApiService {
     return this.post('/pipelines/delete', { name });
   }
 
-  editPipeline(params: Record<string, any>, server?: ServerProfile): Observable<any> {
-    return this.post('/pipelines/edit', params, 60000, server);
+  /**
+   * Rebind a pipeline's device list, and optionally its strictness.
+   *
+   * The schema is fixed once a pipeline is deployed, so this is what editing a
+   * pipeline means: a settings-only update, no regeneration and no recompile.
+   * Omit strictSchemaMatch to leave the existing setting alone.
+   */
+  rebindPipeline(
+    name: string,
+    devices: string,
+    strictSchemaMatch?: boolean
+  ): Observable<{ updated: number; name: string; deviceCount: number; restarted?: number }> {
+    const params: Record<string, any> = { name, devices };
+    if (strictSchemaMatch !== undefined) params['strictSchemaMatch'] = strictSchemaMatch ? 1 : 0;
+    return this.post('/pipelines/rebind', params, 30000);
   }
 
   getMetrics(): Observable<MetricsSnapshot> {

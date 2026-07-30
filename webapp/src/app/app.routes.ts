@@ -42,18 +42,18 @@ export const routes: Routes = [
       ),
   },
   {
-    path: 'pipelines/new',
+    // Editing a pipeline means changing its device binding — the schema is fixed
+    // at deploy time — so it is the binding screen, not a separate wizard.
+    path: 'pipelines/edit/:name',
     loadComponent: () =>
-      import('./pages/pipeline-wizard/pipeline-wizard.component').then(
-        (m) => m.PipelineWizardComponent
+      import('./pages/device-binding/device-binding.component').then(
+        (m) => m.DeviceBindingComponent
       ),
   },
   {
-    path: 'pipelines/edit/:name',
-    loadComponent: () =>
-      import('./pages/pipeline-wizard/pipeline-wizard.component').then(
-        (m) => m.PipelineWizardComponent
-      ),
+    // Creating a pipeline starts from a schema, so send people to pick one.
+    path: 'pipelines/new',
+    redirectTo: 'schemas',
   },
   {
     path: 'monitoring',

@@ -94,11 +94,13 @@ import { Pipeline, PipelineHealth } from '../../core/models/opcua.models';
           <div class="flex flex-col items-center justify-center py-20 text-on-surface-variant">
             <span class="material-symbols-outlined text-8xl opacity-10 mb-4">account_tree</span>
             <h2 class="text-xl font-semibold mb-2">No Pipelines Yet</h2>
-            <p class="text-sm opacity-60 mb-6">Deploy your first pipeline to start monitoring OPC UA data.</p>
+            <p class="text-sm opacity-60 mb-6">
+              A pipeline is a schema bound to a list of devices. Start by choosing a schema.
+            </p>
             <button (click)="createPipeline()"
                     class="px-6 py-3 bg-primary text-on-primary font-bold rounded-lg shadow-xl shadow-primary/30 flex items-center gap-2 hover:brightness-110 active:scale-95 transition-all">
-              <span class="material-symbols-outlined">add</span>
-              Create Pipeline
+              <span class="material-symbols-outlined">schema</span>
+              Choose a Schema
             </button>
           </div>
         }
@@ -324,8 +326,9 @@ export class PipelinesDashboardComponent implements OnInit {
     });
   }
 
+  /** Creating a pipeline starts by picking the schema to bind devices to. */
   createPipeline(): void {
-    this.router.navigate(['/pipelines/new']);
+    this.router.navigate(['/schemas']);
   }
 
   togglePipeline(pipeline: Pipeline): void {

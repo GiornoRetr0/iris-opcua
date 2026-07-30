@@ -413,6 +413,121 @@ ClassMethod Edit(pBody As %DynamicObject, Output pResult As %DynamicObject) As %
 	Quit tSC
 }
 
+/// Rebind an existing pipeline's devices, and optionally its strictness.
+///
+/// This is what "editing a pipeline" means once schema creation and device
+/// binding are separate concerns: the schema is fixed at deploy time, so the
+/// only thing a pipeline owns is which devices it reads and how strictly. Both
+/// are config-item settings, so this needs no regeneration and no recompile —
+/// unlike <method>Edit</method>, which rebuilds the class because it also
+/// changes the column set.
+///
+/// Body: { name required, devices required, strictSchemaMatch optional }
+ClassMethod Rebind(pBody As %DynamicObject, Output pResult As %DynamicObject) As %Status
+{
+	#dim tSC As %Status = $$$OK
+	set pResult = {}
+	set pResult.updated = 0
+	Try {
+		set tName = pBody.%Get("name")
+		if tName = "" {
+			set tSC = $$$ERROR($$$GeneralError, "Missing pipeline name")
+			Quit
+		}
+
+		set tDevices = pBody.%Get("devices")
+		if tDevices = "" set tDevices = pBody.%Get("deviceNodePaths")
+		if tDevices = "" {
+			set tSC = $$$ERROR($$$GeneralError, "No devices supplied — provide 'devices' as newline-separated nodepaths")
+			Quit
+		}
+
+		// Reject an unusable list here rather than letting the service fail at its
+		// next connect, and report the per-line reasons.
+		set tSC = ##class(OPCUA.DataSource.Resolver).ParseDeviceNodePaths(tDevices, .tParsed, .tParseErrors)
+		if $$$ISERR(tSC) {
+			set tMsg = "No usable device entries in 'devices'"
+			for i=1:1:$LL($Get(tParseErrors)) { set tMsg = tMsg_" — "_$LI(tParseErrors, i) }
+			set tSC = $$$ERROR($$$GeneralError, tMsg)
+			Quit
+		}
+
+		set tSC = ..UpdateDeviceNodePaths(tName, tDevices)
+		Quit:$$$ISERR(tSC)
+
+		// Only touch strictness when the caller actually sent it, so a rebind that
+		// omits the flag leaves the existing setting alone.
+		if pBody.%IsDefined("strictSchemaMatch") {
+			set tSC = ..UpdateSetting(tName, "StrictSchemaMatch", +pBody.%Get("strictSchemaMatch"))
+			Quit:$$$ISERR(tSC)
+		}
+
+		// The adapter re-resolves on every (re)connect, so restarting the item is
+		// all that is needed for the new device list to take effect.
+		do ##class(Ens.Director).GetProductionStatus(.tRunning, .tRunState)
+		if (tRunning = ..#ProductionClass) && (tRunState = 1) {
+			do ##class(Ens.Director).UpdateProduction()
+			set pResult.restarted = 1
+		}
+
+		set pResult.updated = 1
+		set pResult.name = tName
+		set pResult.deviceCount = $LL(tParsed)
+
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit tSC
+}
+
+/// Write an arbitrary adapter setting on a config item, adding it if absent.
+ClassMethod UpdateSetting(pItemName As %String, pName As %String, pValue As %String) As %Status [ Private ]
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
+		if '$IsObject(tProd) {
+			set tSC = $$$ERROR($$$GeneralError, "Cannot open production: "_..#ProductionClass)
+			Quit
+		}
+
+		set tFound = 0
+		for i=1:1:tProd.Items.Count() {
+			set tItem = tProd.Items.GetAt(i)
+			continue:tItem.Name'=pItemName
+
+			set tSet = 0
+			for j=1:1:tItem.Settings.Count() {
+				set tSetting = tItem.Settings.GetAt(j)
+				continue:tSetting.Name'=pName
+				set tSetting.Value = pValue
+				set tSet = 1
+			}
+			if 'tSet {
+				set tSetting = ##class(Ens.Config.Setting).%New()
+				set tSetting.Target = "Adapter"
+				set tSetting.Name = pName
+				set tSetting.Value = pValue
+				do tItem.Settings.Insert(tSetting)
+			}
+			set tFound = 1
+		}
+
+		if 'tFound {
+			set tSC = $$$ERROR($$$GeneralError, "Pipeline '"_pItemName_"' not found in production")
+			Quit
+		}
+
+		set tSC = tProd.%Save()
+		$$$ThrowOnError(tSC)
+		set tSC = tProd.SaveToClass()
+		$$$ThrowOnError(tSC)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit tSC
+}
+
 /// Write a config item's DeviceNodePaths setting, adding it if absent.
 ///
 /// Rebinding a pipeline's devices is now a settings update rather than a class

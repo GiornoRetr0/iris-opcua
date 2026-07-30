@@ -86,11 +86,18 @@ function parseNodeId(path: string): { ns: number; id: string } | null {
         <button (click)="back()"
                 class="text-xs font-bold uppercase tracking-widest text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1 mb-3">
           <span class="material-symbols-outlined text-base">arrow_back</span>
-          Schemas
+          {{ editMode() ? 'Pipelines' : 'Schemas' }}
         </button>
-        <h1 class="text-3xl font-semibold text-primary tracking-tight">Bind Devices</h1>
+        <h1 class="text-3xl font-semibold text-primary tracking-tight">
+          {{ editMode() ? 'Edit Devices' : 'Bind Devices' }}
+        </h1>
         <p class="text-on-surface-variant mt-1">
-          One row per device, per poll cycle. Nodes are matched by name at connect time.
+          @if (editMode()) {
+            Change which devices <span class="font-semibold">{{ pipelineName() }}</span> reads.
+            Takes effect without a recompile.
+          } @else {
+            One row per device, per poll cycle. Nodes are matched by name at connect time.
+          }
         </p>
       </div>
 
@@ -323,41 +330,59 @@ function parseNodeId(path: string): { ns: number; id: string } | null {
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
-            <div>
-              <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Pipeline name</label>
-              <input [ngModel]="pipelineName()" (ngModelChange)="pipelineName.set($event)" spellcheck="false"
-                     class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary/30" />
-              <p class="text-[11px] text-on-surface-variant mt-1">Shown as the production config item.</p>
-            </div>
-
-            <div>
-              <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Mode</label>
-              <div class="flex bg-surface-container p-1 rounded-lg">
-                <button (click)="mode.set('polling')"
-                        class="flex-1 px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider transition-all"
-                        [class]="mode() === 'polling' ? 'bg-surface-container-lowest text-primary shadow-sm' : 'text-on-surface-variant hover:text-primary'">
-                  Polling
-                </button>
-                <button (click)="mode.set('subscription')"
-                        class="flex-1 px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider transition-all"
-                        [class]="mode() === 'subscription' ? 'bg-surface-container-lowest text-primary shadow-sm' : 'text-on-surface-variant hover:text-primary'">
-                  Subscription
-                </button>
-              </div>
-            </div>
-
-            @if (mode() === 'polling') {
-              <div>
-                <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Poll interval (seconds)</label>
-                <input type="number" min="1" [ngModel]="callInterval()" (ngModelChange)="callInterval.set($event)"
-                       class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary/30" />
+            @if (editMode()) {
+              <!-- Name and transport are fixed once deployed: changing them would
+                   mean a different config item, i.e. a different pipeline. -->
+              <div class="sm:col-span-2 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-semibold text-on-surface-variant">Name</span>
+                  <span class="font-semibold text-primary">{{ pipelineName() }}</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-semibold text-on-surface-variant">Mode</span>
+                  <span class="text-on-surface">{{ mode() }}</span>
+                </div>
+                <p class="text-[11px] text-on-surface-variant basis-full">
+                  To change the name or mode, delete this pipeline and bind the schema again.
+                </p>
               </div>
             } @else {
               <div>
-                <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Publishing interval (ms)</label>
-                <input type="number" min="1" [ngModel]="publishingInterval()" (ngModelChange)="publishingInterval.set($event)"
+                <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Pipeline name</label>
+                <input [ngModel]="pipelineName()" (ngModelChange)="pipelineName.set($event)" spellcheck="false"
                        class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary/30" />
+                <p class="text-[11px] text-on-surface-variant mt-1">Shown as the production config item.</p>
               </div>
+
+              <div>
+                <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Mode</label>
+                <div class="flex bg-surface-container p-1 rounded-lg">
+                  <button (click)="mode.set('polling')"
+                          class="flex-1 px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider transition-all"
+                          [class]="mode() === 'polling' ? 'bg-surface-container-lowest text-primary shadow-sm' : 'text-on-surface-variant hover:text-primary'">
+                    Polling
+                  </button>
+                  <button (click)="mode.set('subscription')"
+                          class="flex-1 px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider transition-all"
+                          [class]="mode() === 'subscription' ? 'bg-surface-container-lowest text-primary shadow-sm' : 'text-on-surface-variant hover:text-primary'">
+                    Subscription
+                  </button>
+                </div>
+              </div>
+
+              @if (mode() === 'polling') {
+                <div>
+                  <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Poll interval (seconds)</label>
+                  <input type="number" min="1" [ngModel]="callInterval()" (ngModelChange)="callInterval.set($event)"
+                         class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary/30" />
+                </div>
+              } @else {
+                <div>
+                  <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Publishing interval (ms)</label>
+                  <input type="number" min="1" [ngModel]="publishingInterval()" (ngModelChange)="publishingInterval.set($event)"
+                         class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary/30" />
+                </div>
+              }
             }
 
             <div class="sm:col-span-2 flex items-start gap-3 pt-2">
@@ -387,9 +412,13 @@ function parseNodeId(path: string): { ns: number; id: string } | null {
                     ? 'bg-primary text-on-primary shadow-xl shadow-primary/30 hover:brightness-110 active:scale-95'
                     : 'bg-surface-container-highest text-on-surface-variant/40 cursor-not-allowed'">
             <span class="material-symbols-outlined" [class.animate-spin]="deploying()">
-              {{ deploying() ? 'progress_activity' : 'rocket_launch' }}
+              {{ deploying() ? 'progress_activity' : (editMode() ? 'sync' : 'rocket_launch') }}
             </span>
-            {{ deploying() ? 'Deploying...' : 'Deploy Pipeline' }}
+            @if (editMode()) {
+              {{ deploying() ? 'Saving...' : 'Save Devices' }}
+            } @else {
+              {{ deploying() ? 'Deploying...' : 'Deploy Pipeline' }}
+            }
           </button>
         </div>
       }
@@ -405,6 +434,16 @@ export class DeviceBindingComponent implements OnInit {
   schema = signal<Schema | null>(null);
   loadingSchema = signal(false);
   error = signal('');
+
+  /**
+   * Editing an existing pipeline rather than creating one.
+   *
+   * The same screen serves both because they are the same act: choosing which
+   * devices a schema reads. In edit mode the schema and name are already fixed,
+   * so only the device list and strictness can change — which is a settings
+   * update, not a regeneration.
+   */
+  editMode = signal(false);
 
   servers = signal<ServerProfile[]>([]);
   serverId = signal('');
@@ -468,18 +507,67 @@ export class DeviceBindingComponent implements OnInit {
     const first = this.servers()[0];
     if (first) this.serverId.set(first.id);
 
+    const pipelineName = this.route.snapshot.paramMap.get('name') || '';
+    if (pipelineName) {
+      this.editMode.set(true);
+      this.loadPipeline(pipelineName);
+      return;
+    }
+
     const schemaClass = this.route.snapshot.paramMap.get('schema') || '';
     if (!schemaClass) {
       this.error.set('No schema specified');
       return;
     }
+    this.loadSchema(schemaClass, (s) => {
+      // Default the pipeline name to the schema name, de-duplicated by the server if taken.
+      this.pipelineName.set(s.name);
+    });
+  }
 
+  /** Load an existing pipeline and pre-fill its current binding. */
+  private loadPipeline(name: string): void {
+    this.loadingSchema.set(true);
+    this.api.listPipelines().subscribe({
+      next: (pipelines) => {
+        const p = pipelines.find((x) => x.name === name);
+        if (!p) {
+          this.error.set(`Pipeline '${name}' not found`);
+          this.loadingSchema.set(false);
+          return;
+        }
+
+        this.pipelineName.set(p.name);
+        this.deviceText.set(p['deviceNodePaths'] || '');
+        this.strictSchemaMatch.set(!!p['strictSchemaMatch']);
+        if (p.mode === 'subscription') this.mode.set('subscription');
+
+        // Prefer the pipeline's own server so the tree browses what it reads.
+        const url: string = p['serverUrl'] || '';
+        const match = this.servers().find((s) => s.url === url);
+        if (match) this.serverId.set(match.id);
+
+        const cls: string = p['dataSourceClass'] || '';
+        if (!cls) {
+          this.error.set('This pipeline has no schema class');
+          this.loadingSchema.set(false);
+          return;
+        }
+        this.loadSchema(cls);
+      },
+      error: (err) => {
+        this.error.set(this.message(err));
+        this.loadingSchema.set(false);
+      },
+    });
+  }
+
+  private loadSchema(schemaClass: string, then?: (s: Schema) => void): void {
     this.loadingSchema.set(true);
     this.api.getSchema(schemaClass).subscribe({
       next: (s) => {
         this.schema.set(s);
-        // Default the pipeline name to the schema name, de-duplicated by the server if taken.
-        this.pipelineName.set(s.name);
+        if (then) then(s);
         this.loadingSchema.set(false);
       },
       error: (err) => {
@@ -563,6 +651,23 @@ export class DeviceBindingComponent implements OnInit {
     this.deploying.set(true);
     this.error.set('');
 
+    // Editing changes only the binding, so it never regenerates the schema.
+    if (this.editMode()) {
+      this.api
+        .rebindPipeline(this.pipelineName(), this.deviceText(), this.strictSchemaMatch())
+        .subscribe({
+          next: () => {
+            this.deploying.set(false);
+            this.router.navigate(['/pipelines']);
+          },
+          error: (err) => {
+            this.error.set(this.message(err));
+            this.deploying.set(false);
+          },
+        });
+      return;
+    }
+
     const params: Record<string, any> = {
       schemaClass: s.schemaClass,
       dataSourceName: this.pipelineName().trim(),
@@ -589,7 +694,7 @@ export class DeviceBindingComponent implements OnInit {
   }
 
   back(): void {
-    this.router.navigate(['/schemas']);
+    this.router.navigate([this.editMode() ? '/pipelines' : '/schemas']);
   }
 
   server(): ServerProfile | undefined {
