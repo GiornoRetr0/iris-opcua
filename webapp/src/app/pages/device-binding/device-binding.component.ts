@@ -61,6 +61,16 @@ function parseNodeId(path: string): { ns: number; id: string } | null {
 }
 
 /**
+ * The suggested config-item name for a new pipeline over a schema.
+ *
+ * Takes the schema's short name, so `OPCUA.DS.AirConditioner` suggests
+ * `from-OPCUA-AirConditioner`.
+ */
+function defaultPipelineName(schemaShortName: string): string {
+  return `from-OPCUA-${schemaShortName}`;
+}
+
+/**
  * Bind devices to an existing schema and deploy a pipeline.
  *
  * This is the flow that used to require a full wizard re-run: pick a schema,
@@ -560,8 +570,10 @@ export class DeviceBindingComponent implements OnInit {
       return;
     }
     this.loadSchema(schemaClass, (s) => {
-      // Default the pipeline name to the schema name, de-duplicated by the server if taken.
-      this.pipelineName.set(s.name);
+      // Suggest a name rather than leaving the field empty, so the common case is
+      // one less thing to type. Freely editable, and the server rejects a
+      // duplicate — binding the same schema twice needs a distinct name.
+      this.pipelineName.set(defaultPipelineName(s.name));
     });
   }
 
