@@ -14,12 +14,20 @@ Include (OPCUA.Constants, %occInclude, Ensemble)
 ///   3. adding a device is a one-line setting edit with no recompile
 ///   4. a device missing a column stores NULL and logs a warning naming both
 ///   5. an unresolved column never stops the pipeline
+///   6. POST /deploy creates the pipeline stopped and collects nothing until started
 Class OPCUA.Tests.PortalPipelineTest
 {
 
 Parameter SchemaClass = "OPCUA.Tests.TmpPortalSchema";
 
 Parameter ItemName = "ZZPortalPipelineTest";
+
+/// A second schema + item, used only by TestDeployDoesNotAutostart. Separate from
+/// the pair above because that pipeline is deliberately left collecting by tests
+/// 2-4, and "no rows yet" can only be asserted on a table nothing else writes to.
+Parameter DeploySchemaClass = "OPCUA.Tests.TmpDeploySchema";
+
+Parameter DeployItemName = "ZZPortalDeployTest";
 
 Parameter ProductionClass = "OPCUA.Pipeline.Production";
 
@@ -42,6 +50,9 @@ ClassMethod Run(pURL As %String = "opc.tcp://plc") As %Boolean
 
         write !, "=== 4. an unresolved column does not stop collection ===", !
         do ..TestPartialDeviceKeepsCollecting(.tPass, .tFail)
+
+        write !, "=== 5. deploy creates the pipeline stopped ===", !
+        do ..TestDeployDoesNotAutostart(pURL, .tPass, .tFail)
 
     } Catch (e) {
         set tFail = tFail + 1
@@ -183,21 +194,67 @@ ClassMethod TestPartialDeviceKeepsCollecting(ByRef pPass, ByRef pFail) [ Private
     do ..Check("no error logged for an unresolved column", ..LoggedErrorMatching("did not resolve"), 0, .pPass, .pFail)
 }
 
+/// Deploying must not start collecting.
+///
+/// A deploy is a configuration write: the operator may want to look the pipeline
+/// over, check the device list, or wait for a maintenance window before it touches
+/// a live server. So POST /deploy adds the item switched off and starts nothing,
+/// and going live is a separate explicit act (POST /pipelines/toggle).
+///
+/// Order-independent: it asserts only what deploy itself did, and reads row counts
+/// from its own table, so it does not care whether a production is running.
+ClassMethod TestDeployDoesNotAutostart(pURL As %String, ByRef pPass, ByRef pFail) [ Private ]
+{
+    set tSC = ..BuildSchema(..#DeploySchemaClass, "TmpDeploySchema")
+    do ..Check("second schema compiles", $$$ISOK(tSC), 1, .pPass, .pFail)
+    Quit:$$$ISERR(tSC)
+
+    set tBody = {}
+    do tBody.%Set("schemaClass", ..#DeploySchemaClass)
+    do tBody.%Set("dataSourceName", ..#DeployItemName)
+    do tBody.%Set("devices", "i=85|Objects")
+    do tBody.%Set("mode", "polling")
+    do tBody.%Set("callInterval", 2)
+    do tBody.%Set("url", pURL)
+
+    set tSC = ##class(OPCUA.REST.DeployService).Deploy(tBody, .tRes)
+    do ..Check("deploy succeeds", $$$ISOK(tSC), 1, .pPass, .pFail)
+    if $$$ISERR(tSC) {
+        write "       ", $System.Status.GetOneErrorText(tSC), !
+        quit
+    }
+
+    do ..Check("deploy reports it did not start", +tRes.%Get("started"), 0, .pPass, .pFail)
+    do ..Check("config item was created disabled", ..ItemEnabled(..#DeployItemName), 0, .pPass, .pFail)
+
+    // The substantive assertion: leave it alone for several poll intervals and
+    // nothing should have been read or written. `started: 0` alone would not prove
+    // that — it is a field in a response, not evidence about the server.
+    //
+    // This deliberately stops here. That an *enabled* item collects is what tests
+    // 2-4 already establish; asserting the start half again would only re-test them,
+    // and doing it in-process depends on production run state this test does not
+    // own. Starting via POST /pipelines/toggle is verified against the running
+    // instance instead.
+    do ..Settle(8)
+    do ..Check("no rows collected before it is started", ..RowCountFor(..#DeploySchemaClass), 0, .pPass, .pFail)
+}
+
 // ==================== fixtures ====================
 
 /// A schema whose columns match nodes the plc mock server exposes, written the
 /// way a developer would by hand rather than via the wizard.
-ClassMethod BuildSchema() As %Status [ Private ]
+ClassMethod BuildSchema(pClassName As %String = {..#SchemaClass}, pDSName As %String = "TmpPortalSchema") As %Status [ Private ]
 {
     #dim tSC As %Status = $$$OK
     Try {
-        set tDef = ##class(%Dictionary.ClassDefinition).%New(..#SchemaClass)
+        set tDef = ##class(%Dictionary.ClassDefinition).%New(pClassName)
         set tDef.Description = "Throwaway hand-authored schema for OPCUA.Tests.PortalPipelineTest."
         set tDef.Super = "%Persistent,OPCUA.DataSource.DeviceSchema"
 
         set tParam = ##class(%Dictionary.ParameterDefinition).%New()
         set tParam.Name = "OPCUADATASOURCE"
-        set tParam.Default = "TmpPortalSchema"
+        set tParam.Default = pDSName
         do tDef.Parameters.Insert(tParam)
         set tParam = ##class(%Dictionary.ParameterDefinition).%New()
         set tParam.Name = "OPCUDEFAULTANAMESPACE"
@@ -225,8 +282,13 @@ ClassMethod BuildSchema() As %Status [ Private ]
 
         set tSC = tDef.%Save()
         $$$ThrowOnError(tSC)
-        set tSC = $System.OBJ.Compile(..#SchemaClass, "ck-d")
+        set tSC = $System.OBJ.Compile(pClassName, "ck-d")
         $$$ThrowOnError(tSC)
+
+        // Start from an empty table. Cleanup kills the extent, but a global orphaned
+        // by an interrupted run would otherwise make row-count assertions read the
+        // previous run's data.
+        Try { do $classmethod(pClassName, "%KillExtent") } Catch (eKill) {}
     } Catch (e) {
         set tSC = e.AsStatus()
     }
@@ -366,12 +428,33 @@ ClassMethod Settle(pSeconds As %Integer) [ Private ]
 
 ClassMethod RowCount() As %Integer [ Private ]
 {
+    Quit ..RowCountFor(..#SchemaClass)
+}
+
+ClassMethod RowCountFor(pSchemaClass As %String) As %Integer [ Private ]
+{
     set tCount = 0
     Try {
-        set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT COUNT(*) FROM "_..TableName())
+        set tTable = ##class(OPCUA.REST.SchemaService).TableName(pSchemaClass)
+        set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT COUNT(*) FROM "_tTable)
         if $IsObject(tRS) && tRS.%Next() set tCount = tRS.%GetData(1)
     } Catch (e) {}
     Quit tCount
+}
+
+/// The Enabled flag on a config item, or "" if there is no such item.
+ClassMethod ItemEnabled(pItemName As %String) As %String [ Private ]
+{
+    set tEnabled = ""
+    Try {
+        set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
+        Quit:'$IsObject(tProd)
+        for i=1:1:tProd.Items.Count() {
+            set tItem = tProd.Items.GetAt(i)
+            if tItem.Name = pItemName set tEnabled = +tItem.Enabled  quit
+        }
+    } Catch (e) {}
+    Quit tEnabled
 }
 
 ClassMethod HasNodePath(pPath As %String) As %Boolean [ Private ]
@@ -449,26 +532,34 @@ ClassMethod TableName() As %String [ CodeMode = expression, Private ]
 /// Drop this item's log entries so the assertions see only fresh ones.
 ClassMethod ClearLog() [ Private ]
 {
+    do ..ClearLogFor(..#ItemName)
+}
+
+ClassMethod ClearLogFor(pItemName As %String) [ Private ]
+{
     Try {
-        do ##class(%SQL.Statement).%ExecDirect(, "DELETE FROM Ens_Util.Log WHERE ConfigName = ?", ..#ItemName)
+        do ##class(%SQL.Statement).%ExecDirect(, "DELETE FROM Ens_Util.Log WHERE ConfigName = ?", pItemName)
     } Catch (e) {}
 }
 
 // ==================== teardown ====================
 
-/// Remove the config item and the schema, leaving the instance as found.
+/// Remove both config items and both schemas, leaving the instance as found.
 ClassMethod Cleanup() [ Private ]
 {
     Try {
         if ##class(%Dictionary.ClassDefinition).%ExistsId(..#ProductionClass) {
             set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
             if $IsObject(tProd) {
-                set tIdx = 0
-                for i=1:1:tProd.Items.Count() {
-                    if tProd.Items.GetAt(i).Name = ..#ItemName set tIdx = i
+                // Descending, so removing one index does not shift the next.
+                set tRemoved = 0
+                for i=tProd.Items.Count():-1:1 {
+                    set tNm = tProd.Items.GetAt(i).Name
+                    continue:(tNm'=..#ItemName)&&(tNm'=..#DeployItemName)
+                    do tProd.Items.RemoveAt(i)
+                    set tRemoved = 1
                 }
-                if tIdx > 0 {
-                    do tProd.Items.RemoveAt(tIdx)
+                if tRemoved {
                     do tProd.%Save()
                     do tProd.SaveToClass()
                     do ##class(Ens.Director).GetProductionStatus(.tRunning, .tState)
@@ -482,10 +573,22 @@ ClassMethod Cleanup() [ Private ]
 
     Try {
         do ..ClearLog()
-        if ##class(%Dictionary.ClassDefinition).%ExistsId(..#SchemaClass) {
-            do $System.OBJ.Delete(..#SchemaClass, "-d")
+        do ..ClearLogFor(..#DeployItemName)
+        for tCls = ..#SchemaClass, ..#DeploySchemaClass {
+            // Drop the rows before the class. Deleting a %Persistent class leaves
+            // its data global behind, and a stale table would let "no rows
+            // collected" pass or fail on the previous run's leftovers rather than
+            // on this one.
+            Try {
+                if ##class(%Dictionary.CompiledClass).%ExistsId(tCls) {
+                    do $classmethod(tCls, "%KillExtent")
+                }
+            } Catch (eKill) {}
+            if ##class(%Dictionary.ClassDefinition).%ExistsId(tCls) {
+                do $System.OBJ.Delete(tCls, "-d")
+            }
+            kill ^OPCUA.DataSource(tCls)
         }
-        kill ^OPCUA.DataSource(..#SchemaClass)
     } Catch (e) {}
 }
 

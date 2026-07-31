@@ -40,7 +40,7 @@ flowchart TB
         C1["Device binding screen<br/>POST /deploy {schemaClass, devices}"]
         C2["Handler.Deploy()"]
         C3["DeployService.BindExistingSchema()<br/>generates NOTHING"]
-        C4["AddServiceItem() +<br/>StartOrUpdateProduction()"]
+        C4["AddServiceItem()<br/>Enabled = 0 — nothing starts"]
         C1 --> C2 --> C3 --> C4
     end
 
@@ -49,6 +49,7 @@ flowchart TB
 
     subgraph ACT3["🔄 ACT 3 — Runtime (background job, forever)"]
         direction TB
+        B0["User presses play<br/>POST /pipelines/toggle"]
         B1["Ensemble scheduler<br/>spawns business service"]
         B2["TCP*RowSourceService.OnInit()<br/>column layout + nesting spec"]
         B3["Adapter.Connect()<br/>1. session  2. Resolver browses devices<br/>3. ReadBulkSetupC(spec)"]
@@ -56,7 +57,7 @@ flowchart TB
         B5["OPCUA.Client → $ZF(-5) → C++ → server"]
         B6["OnProcessInput() builds $LB rows"]
         B7["SaveSourcedData() → one row per device"]
-        B1 --> B2 --> B3 --> B4 --> B5 --> B6 --> B7
+        B0 --> B1 --> B2 --> B3 --> B4 --> B5 --> B6 --> B7
         B4 -. loop .-> B4
     end
 
@@ -74,7 +75,7 @@ flowchart TB
     classDef eng fill:#fce4ec,stroke:#c2185b,stroke-width:2px;
     class A1,A2,A3,A4,A5 act1;
     class C1,C2,C3,C4 act2;
-    class B1,B2,B3,B4,B5,B6,B7 act3;
+    class B0,B1,B2,B3,B4,B5,B6,B7 act3;
     class G1,S1 glob;
     class ENGINE eng;
 ```
@@ -82,6 +83,10 @@ flowchart TB
 Because ACT 3's resolution step re-runs on **every** connect, editing `DeviceNodePaths`
 in ACT 2's settings takes effect with no recompile, and a device that was unreachable at
 startup begins reporting on its own.
+
+ACT 2 ends at a config item, not at a running job. A pipeline is created **stopped**, so
+ACT 3 begins only when the operator presses play — deploying and collecting are separate
+decisions.
 
 ---
 
@@ -153,16 +158,22 @@ sequenceDiagram
     Note over DS: refuse a duplicate config-item name
     DS->>DS: EnsureProductionExists()
     DS->>DS: AddServiceItem(pBody, schemaClass, itemName, mode, devices)
-    Note over DS,ENS: Ens.Config.Item ClassName = TCPPollingRowSourceService<br/>(or TCPSubscriptionRowSourceService) — AddSetting<br/>DataSourceClass / DeviceNodePaths / URL /<br/>CallInterval
+    Note over DS,ENS: Ens.Config.Item ClassName = TCPPollingRowSourceService<br/>(or TCPSubscriptionRowSourceService) — Enabled = 0 — AddSetting<br/>DataSourceClass / DeviceNodePaths / URL /<br/>CallInterval
     DS->>ENS: tProd.Items.Insert() + %Save() + SaveToClass()
-    DS->>DS: StartOrUpdateProduction()
-    DS->>ENS: Ens.Director.UpdateProduction() / StartProduction()
+    Note over DS,ENS: the production is NOT started and the item stays off:<br/>a deploy is a pure configuration write
     deactivate DS
-    DS-->>H: {deployed, compiled, started, tableName, deviceCount}
+    DS-->>H: {deployed, compiled, started: 0, tableName, deviceCount}
     deactivate DS
     H->>H: SendOK(tResult)  → {"status":"ok","data":{...}}
     H-->>UI: 200 JSON
     deactivate H
+    end
+
+    rect rgb(232, 245, 233)
+    Note over UI,ENS: ACT 2b — start it, when the operator decides to
+    UI->>H: POST /pipelines/toggle {name}
+    H->>ENS: PipelineService.Toggle() → Enabled = 1<br/>+ UpdateProduction() / StartProduction()
+    H-->>UI: {name, enabled: 1}
     end
 
     Note over UI,ENS: HTTP requests END here. REST connection gone.<br/>Pipeline now lives as a background job → ACT 3.

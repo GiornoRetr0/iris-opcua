@@ -2,12 +2,18 @@ Include %occInclude
 
 /// Bind devices to an existing device schema: add a business service item to the
 /// shared production (OPCUA.Pipeline.Production), where each pipeline is a
-/// separate service item, then start or update it.
+/// separate service item.
 ///
 /// This class generates nothing. Schemas are created by
 /// <class>OPCUA.REST.SchemaService</class>, and a deploy binds devices to one
 /// that already exists — which is what lets a schema outlive any single pipeline
 /// and back several at once.
+///
+/// A deploy is a pure configuration write: the new item is created
+/// <b>disabled</b> and the production is not started. Collecting real data into a
+/// real table is a decision of its own, so it is left to an explicit start
+/// (<method>OPCUA.REST.PipelineService.Toggle</method>, or the Portal) once the
+/// operator has looked the pipeline over.
 Class OPCUA.REST.DeployService
 {
 
@@ -120,9 +126,9 @@ ClassMethod BindExistingSchema(pBody As %DynamicObject, Output pResult As %Dynam
 		set pResult.serviceItemName = tItemName
 		set pResult.deviceCount = $LL(tParsed)
 
-		set tSC = ..StartOrUpdateProduction()
-		Quit:$$$ISERR(tSC)
-		set pResult.started = 1
+		// Deliberately not started. `started` stays 0 so a caller can see that
+		// the pipeline exists but is not yet collecting.
+		set pResult.enabled = 0
 
 	} Catch (e) {
 		set tSC = e.AsStatus()
@@ -187,7 +193,10 @@ ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDS
 		set tItem.Name = pDSName
 		set tItem.ClassName = tServiceClass
 		set tItem.PoolSize = 1
-		set tItem.Enabled = 1
+		// Created switched off. Deploying is configuring; polling a live server and
+		// writing rows is a separate, explicit act — so the operator gets a chance
+		// to review the pipeline before it touches anything.
+		set tItem.Enabled = 0
 		set tItem.LogTraceEvents = 1
 
 		// Add adapter settings

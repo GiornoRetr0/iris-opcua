@@ -172,16 +172,17 @@ import { CommonModule } from '@angular/common';
             </div>
             <p class="text-on-surface-variant mb-6 leading-relaxed">
               Pipelines continuously collect data from OPC UA nodes and store it in IRIS tables.
-              Use the 4-step wizard to select nodes, review the schema, configure settings, and deploy.
+              A pipeline is a <em>schema</em> — a reusable device type — bound to a list of devices.
+              The two halves are created separately, so one schema can back several pipelines.
             </p>
             <div class="bg-[#1e1e1e] rounded-xl p-6 shadow-2xl relative group overflow-hidden mb-8">
               <div class="flex justify-between items-center mb-4">
-                <span class="text-[10px] text-slate-500 font-mono tracking-widest uppercase">Wizard Steps</span>
+                <span class="text-[10px] text-slate-500 font-mono tracking-widest uppercase">Steps</span>
               </div>
-              <pre class="font-mono text-sm leading-6 text-slate-300"><code><span class="text-blue-400">Step 1: Select</span>    Browse the tree, check devices or sensors
-<span class="text-blue-400">Step 2: Review</span>    See how nodes are grouped into pipelines
-<span class="text-blue-400">Step 3: Configure</span>  Set class name, mode (polling/subscription)
-<span class="text-blue-400">Step 4: Deploy</span>    Pipeline starts collecting data immediately</code></pre>
+              <pre class="font-mono text-sm leading-6 text-slate-300"><code><span class="text-blue-400">1. Build a schema</span>   Pick columns off one template device
+<span class="text-blue-400">2. Bind devices</span>     Each is checked against the schema as you add it
+<span class="text-blue-400">3. Create</span>           The pipeline is created <span class="text-amber-400">stopped</span> — nothing is polled yet
+<span class="text-blue-400">4. Press play</span>       Start it from Pipelines when you're ready</code></pre>
               <div class="absolute top-0 right-0 w-32 h-full bg-gradient-to-l from-primary/10 to-transparent pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"></div>
             </div>
 
@@ -244,7 +245,7 @@ import { CommonModule } from '@angular/common';
                   <tr class="border-b border-outline-variant/10">
                     <td class="py-4 font-mono text-primary font-semibold">Start / Stop</td>
                     <td class="py-4"><span class="material-symbols-outlined text-tertiary text-base">play_circle</span> / <span class="material-symbols-outlined text-error text-base">stop_circle</span></td>
-                    <td class="py-4 text-on-surface-variant">Toggle the pipeline on or off without deleting it</td>
+                    <td class="py-4 text-on-surface-variant">Begin or halt collection. A newly created pipeline is stopped, so this is what puts it to work</td>
                   </tr>
                   <tr class="border-b border-outline-variant/10">
                     <td class="py-4 font-mono text-primary font-semibold">Edit</td>
@@ -254,7 +255,7 @@ import { CommonModule } from '@angular/common';
                   <tr class="border-b border-outline-variant/10">
                     <td class="py-4 font-mono text-primary font-semibold">Delete</td>
                     <td class="py-4"><span class="material-symbols-outlined text-error text-base">delete</span></td>
-                    <td class="py-4 text-on-surface-variant">Remove the pipeline and its DataSource class (only when stopped)</td>
+                    <td class="py-4 text-on-surface-variant">Remove the pipeline (only when stopped). Its schema and collected data are kept</td>
                   </tr>
                 </tbody>
               </table>

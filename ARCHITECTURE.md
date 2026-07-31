@@ -275,10 +275,10 @@ The Angular web app (the OPC UA console) communicates with IRIS through a REST A
 | `/schemas/:name` | GET | One schema, including its column list |
 | `/schemas/:name` | DELETE | Delete a schema — refuses while a pipeline uses it |
 | `/schemas/:name/validate` | POST | Dry-run a device list against a schema |
-| `/deploy` | POST | Bind devices to an existing schema → a pipeline |
+| `/deploy` | POST | Bind devices to an existing schema → a pipeline, **created stopped** |
 | `/pipelines` | GET/POST | List all deployed pipelines |
-| `/pipelines/rebind` | POST | Change a pipeline's device list / strictness |
-| `/pipelines/toggle` | POST | Enable/disable a pipeline |
+| `/pipelines/rebind` | POST | Change a pipeline's device list |
+| `/pipelines/toggle` | POST | Start/stop a pipeline — the only route that starts collection |
 | `/pipelines/delete` | POST | Delete a pipeline (keeps its schema) |
 
 The two halves are deliberately separate: `/schemas` creates a reusable device *type*, and `/deploy` binds concrete devices to one. A schema can exist with no pipeline, and several pipelines can share one schema.
@@ -362,9 +362,13 @@ That is why adding a second pipeline over an existing schema costs one config it
 4. **Add a service item** (`AddServiceItem()`):
    - Create an `Ens.Config.Item`, set its class to `OPCUA.Service.TCPPollingRowSourceService` or `OPCUA.Service.TCPSubscriptionRowSourceService` (chosen by `mode`)
    - Configure settings: `DataSourceClass`, **`DeviceNodePaths`**, `URL`, poll/subscription intervals, security parameters
-   - Add it, save the production, call `SaveToClass()`
+   - Add it with **`Enabled = 0`**, save the production, call `SaveToClass()`
 
-5. **Start or update the production:** `Ens.Director.UpdateProduction()` if already running, else `StartProduction()`
+5. **Stop.** The production is deliberately **not** started, and the item is created switched off.
+
+**A deploy is a pure configuration write.** Nothing connects to the server and no rows are written until the pipeline is explicitly started — `PipelineService.Toggle()` from the dashboard's play button, or the Enabled checkbox in the Portal. Deploying and collecting are separate decisions: the operator gets to look the pipeline over first, and a mistaken bind costs nothing but a delete.
+
+`BindExistingSchema()` therefore returns `started: 0` and `enabled: 0` always. `Toggle()` is the only path that starts a production from the API, and it starts the production if it isn't running.
 
 **The device list is an ordinary production setting.** It lives in the config item, which means it is visible and editable in the Management Portal — adding a device is a one-line edit there, needing no regeneration and no recompile. There is no metadata global to keep in sync.
 
@@ -834,8 +838,11 @@ Here's the complete journey of a data point from an OPC UA server to a SQL query
    - Settings: DataSourceClass=OPCUA.DS.MyData, URL=opc.tcp://plc:4840,
                DeviceNodePaths="ns=2;s=Unit1|Unit1<newline>ns=2;s=Unit2|Unit2",
                CallInterval=5
+   The item is created with Enabled=0 and the production is NOT started.
 
-10. Production starts (or updates if already running)
+10. User reviews the pipeline on the dashboard and presses play
+    (POST /pipelines/toggle) -> Ens.Director starts it. Only now does anything
+    connect to the server or write a row.
 ```
 
 ### Runtime phase (repeats continuously)

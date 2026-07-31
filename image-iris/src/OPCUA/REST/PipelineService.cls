@@ -64,11 +64,13 @@ ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %S
 
 			if tProdRunning {
 				set tItem.running = ##class(Ens.Director).IsItemEnabled(tItem.name, .tSCStatus)
-				set tItem.rowCount = ..GetRowCount(tItem.dataSourceClass)
 			} else {
 				set tItem.running = 0
-				set tItem.rowCount = 0
 			}
+			// Rows are a property of the table, not of the run state. Reporting 0
+			// for a stopped pipeline claimed its collected data was gone — and since
+			// a pipeline is now deployed stopped, that is the common case.
+			set tItem.rowCount = ..GetRowCount(tItem.dataSourceClass)
 
 			// Enabled is not the same as collecting: a service whose adapter fails
 			// to connect or resolve stays enabled and keeps retrying while writing

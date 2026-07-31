@@ -74,7 +74,13 @@ export interface DeployResult {
   tableName: string;
   deployed: boolean;
   compiled: boolean;
+  /**
+   * Always false: a deploy creates the pipeline stopped, so that starting to
+   * poll a live server is a separate, explicit act.
+   */
   started: boolean;
+  /** Always false, for the same reason. Start it from the Pipelines dashboard. */
+  enabled?: boolean;
   error?: string;
 }
 

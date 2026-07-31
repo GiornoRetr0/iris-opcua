@@ -425,6 +425,13 @@ function defaultPipelineName(schemaShortName: string): string {
               </span>
             } @else if (deviceCount() === 0) {
               <span class="text-on-surface-variant">Pick at least one device above.</span>
+            } @else if (!editMode()) {
+              <!-- Say up front that nothing starts collecting yet, so the button is
+                   not read as "go live now". -->
+              <span class="text-on-surface-variant flex items-center gap-1.5">
+                <span class="material-symbols-outlined text-sm">pause_circle</span>
+                Created stopped — review it, then press play on Pipelines.
+              </span>
             }
           </p>
           <button (click)="deploy()"
@@ -434,12 +441,12 @@ function defaultPipelineName(schemaShortName: string): string {
                     ? 'bg-primary text-on-primary shadow-xl shadow-primary/30 hover:brightness-110 active:scale-95'
                     : 'bg-surface-container-highest text-on-surface-variant/40 cursor-not-allowed'">
             <span class="material-symbols-outlined" [class.animate-spin]="deploying()">
-              {{ deploying() ? 'progress_activity' : (editMode() ? 'sync' : 'rocket_launch') }}
+              {{ deploying() ? 'progress_activity' : (editMode() ? 'sync' : 'add_circle') }}
             </span>
             @if (editMode()) {
               {{ deploying() ? 'Saving...' : 'Save Devices' }}
             } @else {
-              {{ deploying() ? 'Deploying...' : 'Deploy Pipeline' }}
+              {{ deploying() ? 'Creating...' : 'Create Pipeline' }}
             }
           </button>
         </div>
