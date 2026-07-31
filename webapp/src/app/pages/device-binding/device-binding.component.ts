@@ -386,9 +386,19 @@ function defaultPipelineName(schemaShortName: string): string {
             } @else {
               <div>
                 <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Pipeline name</label>
+                <!-- The suggestion is a placeholder, not a value: it stays grey and
+                     out of the way until the user types over it. Leaving the field
+                     empty deploys under it. -->
                 <input [ngModel]="pipelineName()" (ngModelChange)="pipelineName.set($event)" spellcheck="false"
-                       class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary/30" />
-                <p class="text-[11px] text-on-surface-variant mt-1">Shown as the production config item.</p>
+                       [placeholder]="suggestedName()"
+                       class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:border-primary focus:ring-1 focus:ring-primary/30" />
+                <p class="text-[11px] text-on-surface-variant mt-1">
+                  @if (pipelineName().trim()) {
+                    Shown as the production config item.
+                  } @else {
+                    Leave empty to use <code class="font-mono text-primary">{{ suggestedName() }}</code>.
+                  }
+                </p>
               </div>
 
               <div>
@@ -542,12 +552,27 @@ export class DeviceBindingComponent implements OnInit {
     return `${labels.slice(0, 3).join(', ')} and ${labels.length - 3} more`;
   });
 
+  /** Placeholder name, shown until the user types their own. */
+  suggestedName = computed(() => {
+    const s = this.schema();
+    return s ? defaultPipelineName(s.name) : '';
+  });
+
+  /**
+   * The name the pipeline will actually be deployed under.
+   *
+   * An untouched field means "use the suggestion" — it is a placeholder, so an
+   * empty box is a valid choice rather than a missing answer.
+   */
+  effectiveName = computed(() => this.pipelineName().trim() || this.suggestedName());
+
   canDeploy = computed(
     () =>
       !this.deploying() &&
       !!this.schema() &&
       this.deviceCount() > 0 &&
-      !!this.pipelineName().trim() &&
+      // effectiveName, not the raw field: an empty box means "use the suggestion".
+      !!this.effectiveName() &&
       !!this.serverId() &&
       this.unusableDevices().length === 0
   );
@@ -569,12 +594,7 @@ export class DeviceBindingComponent implements OnInit {
       this.error.set('No schema specified');
       return;
     }
-    this.loadSchema(schemaClass, (s) => {
-      // Suggest a name rather than leaving the field empty, so the common case is
-      // one less thing to type. Freely editable, and the server rejects a
-      // duplicate — binding the same schema twice needs a distinct name.
-      this.pipelineName.set(defaultPipelineName(s.name));
-    });
+    this.loadSchema(schemaClass);
   }
 
   /** Load an existing pipeline and pre-fill its current binding. */
@@ -721,7 +741,7 @@ export class DeviceBindingComponent implements OnInit {
 
     const params: Record<string, any> = {
       schemaClass: s.schemaClass,
-      dataSourceName: this.pipelineName().trim(),
+      dataSourceName: this.effectiveName(),
       devices: this.deviceText(),
       mode: this.mode(),
     };
