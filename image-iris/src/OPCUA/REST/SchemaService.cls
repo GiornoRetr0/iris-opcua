@@ -196,7 +196,7 @@ ClassMethod Validate(pBody As %DynamicObject, Output pResult As %DynamicObject) 
 		set tSC = ##class(OPCUA.REST.ClientManager).Connect(.tClient, tURL, tSecMode, tUser, tPass, tCert, tKey, tTrust, tCrl, tClientURI)
 		Quit:$$$ISERR(tSC)
 
-		set tSC = ##class(OPCUA.DataSource.Resolver).ResolveSpecification(tClient, tClassName, tDevices, .tSpec, .tMasks, .tDiag)
+		set tSC = ##class(OPCUA.DataSource.Resolver).ResolveSpecification(tClient, tClassName, tDevices, .tSpec, .tMasks, .tDiag, .tBrowseOK)
 		Quit:$$$ISERR(tSC)
 
 		// Column names in the same order the masks use.
@@ -234,6 +234,16 @@ ClassMethod Validate(pBody As %DynamicObject, Output pResult As %DynamicObject) 
 			set tEntry.matchedCount = tMatched.%Size()
 			set tEntry.missingCount = tMissing.%Size()
 			set tEntry.complete = (tMissing.%Size() = 0)
+
+			// Zero matches means different things depending on whether the server
+			// answered, and only one of them is a binding worth making.
+			set tBrowsed = +$LI(tBrowseOK, iDev)
+			set tUsable = (tBrowsed && (tMatched.%Size() > 0))
+			set tEntry.browsed = tBrowsed
+			set tEntry.usable = tUsable
+			if 'tUsable {
+				set tEntry.unusableReason = $Select('tBrowsed:"could not be browsed — the device is unreachable, or this NodeId does not exist on the server", 1:"browsed successfully but matched none of the schema's columns — every row would be entirely NULL")
+			}
 			do tDevArray.%Push(tEntry)
 		}
 
@@ -256,6 +266,66 @@ ClassMethod Validate(pBody As %DynamicObject, Output pResult As %DynamicObject) 
 		set tSC = e.AsStatus()
 	}
 	do ##class(OPCUA.REST.ClientManager).Disconnect($Get(tClient))
+	Quit tSC
+}
+
+/// Refuse a device list containing any device that would contribute nothing.
+///
+/// A device only earns a place in a pipeline if the server answered its browse
+/// <em>and</em> at least one schema column matched. Both failures are rejected,
+/// for different reasons:
+/// <ul>
+/// <li><b>browsed, zero matches</b> — the wrong node, or a leaf. Every row it
+///     produced would be entirely NULL, forever.</li>
+/// <li><b>could not be browsed</b> — unreachable, or the NodeId does not exist.
+///     Nothing can be verified, so the binding cannot be shown to be good.</li>
+/// </ul>
+///
+/// This is a <em>deploy-time</em> gate only, and deliberately not enforced at
+/// runtime: a device that drops offline mid-session must keep storing NULL and
+/// warning, not take the pipeline down. Enforcing it on every connect would
+/// recreate StrictSchemaMatch, which was removed for exactly that reason.
+///
+/// The cost is that a device cannot be bound before it exists. Adding it later is
+/// a rebind — one settings edit, no recompile.
+///
+/// pSchemaClass is passed explicitly rather than read from pBody: on a deploy body
+/// `name` is the <em>pipeline</em> name, so resolving the schema from it would
+/// check the wrong class (or fail outright).
+///
+/// Devices and connection parameters come from pBody. This reuses
+/// <method>Validate</method> so there is one definition of coverage.
+ClassMethod RequireUsableDevices(pBody As %DynamicObject, pSchemaClass As %String) As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		// Copy the caller's body, overriding only how the schema is identified, so
+		// url/securityMode/certificates still reach the browse.
+		set tReq = {}.%FromJSON(pBody.%ToJSON())
+		do tReq.%Set("className", pSchemaClass)
+		do tReq.%Set("name", "")
+
+		set tSC = ..Validate(tReq, .tVal)
+		Quit:$$$ISERR(tSC)
+
+		set tDevices = tVal.%Get("devices")
+		if '$IsObject($Get(tDevices)) Quit
+
+		set tMsg = ""
+		set tBad = 0
+		for i=0:1:tDevices.%Size()-1 {
+			set tD = tDevices.%Get(i)
+			continue:+tD.%Get("usable")
+			set tBad = tBad + 1
+			set tMsg = tMsg_$Select(tMsg="":"", 1:"; ")_"'"_tD.%Get("label")_"' "_tD.%Get("unusableReason")
+		}
+
+		if tBad > 0 {
+			set tSC = $$$ERROR($$$GeneralError, "Cannot bind "_tBad_" device(s) — "_tMsg_". Remove the device, or point it at the node that actually holds the schema's values.")
+		}
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
 	Quit tSC
 }
 

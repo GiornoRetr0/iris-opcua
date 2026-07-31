@@ -191,5 +191,14 @@ export interface DeviceValidation {
   matchedCount: number;
   missingCount: number;
   complete: boolean;
+  /** Did the server answer the browse? False means unreachable or bad NodeId. */
+  browsed: boolean;
+  /**
+   * Browsed successfully AND matched at least one column. A device that fails
+   * this cannot be bound: it would only ever contribute all-NULL rows.
+   */
+  usable: boolean;
+  /** Present when `usable` is false — why, in a form fit to show the user. */
+  unusableReason?: string;
 }
 

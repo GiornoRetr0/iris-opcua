@@ -272,18 +272,36 @@ function parseNodeId(path: string): { ns: number; id: string } | null {
             <div class="flex items-center justify-between mb-4">
               <div class="flex items-center gap-3">
                 <span class="h-7 w-7 rounded-full text-xs font-black flex items-center justify-center"
-                      [class]="v.allResolved ? 'bg-tertiary text-on-primary' : 'bg-amber-500 text-white'">
-                  <span class="material-symbols-outlined text-base">{{ v.allResolved ? 'check' : 'warning' }}</span>
+                      [class]="unusableDevices().length ? 'bg-error text-on-primary' : v.allResolved ? 'bg-tertiary text-on-primary' : 'bg-amber-500 text-white'">
+                  <span class="material-symbols-outlined text-base">
+                    {{ unusableDevices().length ? 'block' : v.allResolved ? 'check' : 'warning' }}
+                  </span>
                 </span>
                 <h2 class="text-sm font-bold uppercase tracking-widest text-on-surface-variant">Coverage</h2>
               </div>
               <span class="text-xs font-bold uppercase tracking-wider"
-                    [class]="v.allResolved ? 'text-tertiary' : 'text-amber-600'">
-                {{ v.allResolved ? 'All columns resolved' : 'Some columns missing' }}
+                    [class]="unusableDevices().length ? 'text-error' : v.allResolved ? 'text-tertiary' : 'text-amber-600'">
+                @if (unusableDevices().length) {
+                  {{ unusableDevices().length }} device{{ unusableDevices().length === 1 ? '' : 's' }} can't be bound
+                } @else {
+                  {{ v.allResolved ? 'All columns resolved' : 'Some columns missing' }}
+                }
               </span>
             </div>
 
-            @if (!v.allResolved) {
+            <!-- A device matching nothing is a different problem from one matching
+                 some: the first can only ever produce empty rows, so it is refused
+                 rather than merely warned about. -->
+            @if (unusableDevices().length) {
+              <p class="text-xs mb-4 flex items-start gap-2 bg-error-container/30 border border-error/20 rounded-lg px-3 py-2">
+                <span class="material-symbols-outlined text-sm text-error shrink-0 mt-px">report</span>
+                <span class="text-on-surface">
+                  Remove {{ unusableDevices().length === 1 ? 'it' : 'them' }} to continue. A device that
+                  matches none of the schema's columns would add one entirely empty row per cycle,
+                  forever.
+                </span>
+              </p>
+            } @else if (!v.allResolved) {
               <p class="text-xs text-on-surface-variant mb-4 flex items-start gap-2">
                 <span class="material-symbols-outlined text-sm shrink-0 mt-0.5">info</span>
                 Missing columns are stored as NULL, and each is logged as a warning on every
@@ -293,22 +311,31 @@ function parseNodeId(path: string): { ns: number; id: string } | null {
 
             <div class="space-y-2">
               @for (dev of v.devices; track dev.label) {
+                <!-- Three states, not two: fully covered, partially covered (fine,
+                     just NULLs), and unusable (blocks the deploy). -->
                 <div class="border rounded-lg overflow-hidden"
-                     [class]="dev.complete ? 'border-tertiary/20' : 'border-amber-400/30'">
+                     [class]="!dev.usable ? 'border-error/40' : dev.complete ? 'border-tertiary/20' : 'border-amber-400/30'">
                   <div class="flex items-center gap-3 px-4 py-2.5"
-                       [class]="dev.complete ? 'bg-tertiary-fixed/10' : 'bg-amber-50'">
+                       [class]="!dev.usable ? 'bg-error-container/30' : dev.complete ? 'bg-tertiary-fixed/10' : 'bg-amber-50'">
                     <span class="material-symbols-outlined text-lg"
-                          [class]="dev.complete ? 'text-tertiary' : 'text-amber-600'">
-                      {{ dev.complete ? 'check_circle' : 'error' }}
+                          [class]="!dev.usable ? 'text-error' : dev.complete ? 'text-tertiary' : 'text-amber-600'">
+                      {{ !dev.usable ? 'block' : dev.complete ? 'check_circle' : 'error' }}
                     </span>
                     <span class="text-sm font-semibold text-on-surface flex-1 truncate">{{ dev.label }}</span>
                     <span class="text-xs font-mono text-on-surface-variant">ns={{ dev.nodeNs }};{{ dev.nodeId }}</span>
                     <span class="text-xs font-bold tabular-nums"
-                          [class]="dev.complete ? 'text-tertiary' : 'text-amber-700'">
+                          [class]="!dev.usable ? 'text-error' : dev.complete ? 'text-tertiary' : 'text-amber-700'">
                       {{ dev.matchedCount }}/{{ v.columnCount }}
                     </span>
                   </div>
-                  @if (dev.missing.length) {
+                  @if (!dev.usable) {
+                    <div class="px-4 py-2.5 bg-surface-container-lowest flex items-start gap-2">
+                      <span class="material-symbols-outlined text-sm text-error shrink-0 mt-px">report</span>
+                      <p class="text-[11px] text-on-surface leading-snug">
+                        <span class="font-bold">Can't be bound —</span> {{ dev.unusableReason }}
+                      </p>
+                    </div>
+                  } @else if (dev.missing.length) {
                     <div class="px-4 py-2.5 bg-surface-container-lowest flex flex-wrap items-center gap-1.5">
                       <span class="text-[0.6rem] font-bold text-on-surface-variant uppercase tracking-widest mr-1">Missing</span>
                       @for (m of dev.missing; track m) {
@@ -390,9 +417,16 @@ function parseNodeId(path: string): { ns: number; id: string } | null {
 
         <!-- Deploy -->
         <div class="flex items-center justify-between gap-4">
-          <p class="text-xs text-on-surface-variant">
-            @if (!validation()) {
-              Tip: check coverage first to see what each device will actually report.
+          <p class="text-xs">
+            @if (unusableDevices().length) {
+              <span class="text-error font-semibold flex items-center gap-1.5">
+                <span class="material-symbols-outlined text-sm">block</span>
+                Remove {{ unusableLabels() }} to continue
+              </span>
+            } @else if (!validation()) {
+              <span class="text-on-surface-variant">
+                Tip: check coverage first to see what each device will actually report.
+              </span>
             }
           </p>
           <button (click)="deploy()"
@@ -482,13 +516,30 @@ export class DeviceBindingComponent implements OnInit {
     () => new Set(this.parsedDevices().filter((d) => d.key).map((d) => d.key))
   );
 
+  /**
+   * Devices the backend has confirmed it will refuse.
+   *
+   * Only known after a coverage check, so this is empty until one runs — the
+   * button stays enabled and the backend remains the authority. This just avoids
+   * a round trip that was always going to fail.
+   */
+  unusableDevices = computed(() => (this.validation()?.devices || []).filter((d) => !d.usable));
+
+  /** The offending device labels, for the blocked-deploy hint. */
+  unusableLabels = computed(() => {
+    const labels = this.unusableDevices().map((d) => d.label);
+    if (labels.length <= 3) return labels.join(', ');
+    return `${labels.slice(0, 3).join(', ')} and ${labels.length - 3} more`;
+  });
+
   canDeploy = computed(
     () =>
       !this.deploying() &&
       !!this.schema() &&
       this.deviceCount() > 0 &&
       !!this.pipelineName().trim() &&
-      !!this.serverId()
+      !!this.serverId() &&
+      this.unusableDevices().length === 0
   );
 
   ngOnInit(): void {

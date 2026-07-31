@@ -35,6 +35,10 @@ recompiling the class.
     device's own name and browse path never become part of a column name.
   - A device missing some columns stores NULL for them and keeps collecting the rest.
     Coverage is reported before deploy, so there is no refuse-to-collect toggle.
+  - `POST /deploy` and `POST /pipelines/rebind` refuse a device that would contribute
+    nothing: it must browse successfully **and** match at least one schema column.
+    A device matching none would only ever add all-NULL rows. Runtime is unaffected —
+    a device that fails later still stores NULL rather than stopping the pipeline.
 
 ### Removed
   - `^OPCUA.RowSource`. Device metadata, column masks and the nesting spec are now

@@ -82,6 +82,15 @@ ClassMethod BindExistingSchema(pBody As %DynamicObject, Output pResult As %Dynam
 			Quit
 		}
 
+		// Every device must actually contribute a column. A device that browses to
+		// zero matches writes nothing but NULLs for the life of the pipeline, so
+		// catch it here rather than letting it quietly pad the table.
+		set tSCUsable = ##class(OPCUA.REST.SchemaService).RequireUsableDevices(pBody, tSchemaClass)
+		if $$$ISERR(tSCUsable) {
+			set tSC = tSCUsable
+			Quit
+		}
+
 		set tItemName = pBody.%Get("dataSourceName")
 		if tItemName = "" set tItemName = $Piece(tSchemaClass, ".", *)
 

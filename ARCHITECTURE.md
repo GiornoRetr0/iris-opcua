@@ -586,11 +586,37 @@ This is why:
 - A device that is offline at startup begins reporting on its own once it becomes reachable, because resolution re-runs on every reconnect
 - Nothing needs to be stored: masks are *derived*, not remembered
 
+Note the asymmetry with the deploy-time gate below: `/deploy` refuses a device it
+cannot browse, but a device that *becomes* unreachable later is kept and simply
+stores NULL. The gate proves a binding is worth making; it is not a liveness check.
+
 Unresolved columns store NULL and log a warning naming the device and column, and
 the pipeline keeps collecting everything that did resolve. There is deliberately no
 refuse-to-collect mode: coverage is reported *before* deploy by
 `POST /schemas/:name/validate`, so a partially matching device is bound knowingly,
 and one missing node must not cost the operator the columns that work.
+
+#### The deploy-time usability gate
+
+`SchemaService.RequireUsableDevices()` is called by **both** `POST /deploy` and
+`POST /pipelines/rebind`. A device is bindable only when the server answered its
+browse **and** at least one schema column matched:
+
+| Browse | Matches | Verdict |
+|--------|---------|---------|
+| error | — | **refused** — unreachable, or the NodeId does not exist |
+| `Good` | 0 | **refused** — every row would be entirely NULL, forever |
+| `Good` | ≥1 | accepted (missing columns store NULL) |
+
+Distinguishing the first two rows is why `Resolver.ResolveSpecification()` reports a
+per-device `pBrowseOK` list: a zero-match device means something quite different
+depending on whether the server was reachable, and the two have different fixes.
+
+This is a **deploy-time gate only**, and deliberately not enforced on connect. A
+device that drops offline mid-session must keep storing NULL and warning, not take
+the pipeline down — enforcing it at runtime would recreate `StrictSchemaMatch`,
+which was removed for exactly that reason. The cost is that a device cannot be bound
+before it exists; adding it afterwards is a rebind, which is one settings edit.
 
 ### v2 Service startup (OnInit / Connect)
 
@@ -688,8 +714,12 @@ Deleting a schema is `SchemaService.Delete()`, which refuses while any pipeline 
 
 `PipelineService.Rebind()` (`POST /pipelines/rebind`):
 1. Parses and validates the new device list
-2. Writes the `DeviceNodePaths` setting
-3. Calls `UpdateProduction()` — the service re-resolves on its next connect
+2. Applies the same usability gate as deploy, using the pipeline's own schema and
+   connection settings (read back by `DescribeItem()`, including the security
+   settings — a secured pipeline's coverage check would otherwise fail to connect
+   and reject every device)
+3. Writes the `DeviceNodePaths` setting
+4. Calls `UpdateProduction()` — the service re-resolves on its next connect
 
 That is the whole of editing a pipeline. Because devices are resolved by name at connect time, changing the list is a **settings update**: no regeneration, no recompile, no metadata to migrate.
 

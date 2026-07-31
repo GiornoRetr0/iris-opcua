@@ -352,12 +352,13 @@ ClassMethod DeriveNestingSpec(pSchemaClass As %String, Output pNestingSpec As %L
 ///                in schema column order; bit 0 means "no such node on this device"
 ///   pDiagnostics $LB($LB(deviceLabel, columnNodeName, reason), ...) — unresolved
 ///                columns, for the caller to log
-ClassMethod ResolveSpecification(pClient As OPCUA.Client, pSchemaClass As %String, pDevices As %List, Output pSpec As %List, Output pMasks As %List, Output pDiagnostics As %List) As %Status
+ClassMethod ResolveSpecification(pClient As OPCUA.Client, pSchemaClass As %String, pDevices As %List, Output pSpec As %List, Output pMasks As %List, Output pDiagnostics As %List, Output pBrowseOK As %List) As %Status
 {
 	#dim tSC As %Status = $$$OK
 	set pSpec = ""
 	set pMasks = ""
 	set pDiagnostics = ""
+	set pBrowseOK = ""
 	Try {
 		if '$IsObject($Get(pClient)) {
 			set tSC = $$$ERROR($$$GeneralError, "ResolveSpecification requires a connected OPCUA.Client")
@@ -388,6 +389,12 @@ ClassMethod ResolveSpecification(pClient As OPCUA.Client, pSchemaClass As %Strin
 				// its columns store NULL rather than failing the whole pipeline.
 				set pDiagnostics = pDiagnostics _ $LB($LB(tDevLabel, "*", "device root could not be browsed: "_$System.Status.GetOneErrorText(tSCBrowse)))
 			}
+
+			// Whether the server answered the browse at all. Zero matches means
+			// something quite different depending on this: a browsed device with no
+			// matches is the wrong node, an unbrowsable one is simply unreachable.
+			// Callers that gate on coverage need to tell those apart.
+			set pBrowseOK = pBrowseOK _ $LB($$$ISOK(tSCBrowse))
 
 			// Descend into each %SerialObject folder the schema declares.
 			set tFolder = ""

@@ -376,6 +376,16 @@ ClassMethod Rebind(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 			Quit
 		}
 
+		// Same gate as deploy: a device that resolves no columns would only add
+		// all-NULL rows. The schema and endpoint come from the pipeline itself, so a
+		// rebind body needs to carry nothing but the device list.
+		set tSC = ..DescribeItem(tName, .tSchemaClass, .tItemURL, .tConn)
+		Quit:$$$ISERR(tSC)
+
+		do tConn.%Set("devices", tDevices)
+		set tSC = ##class(OPCUA.REST.SchemaService).RequireUsableDevices(tConn, tSchemaClass)
+		Quit:$$$ISERR(tSC)
+
 		set tSC = ..UpdateDeviceNodePaths(tName, tDevices)
 		Quit:$$$ISERR(tSC)
 
@@ -395,6 +405,50 @@ ClassMethod Rebind(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		set tSC = e.AsStatus()
 	}
 	Quit tSC
+}
+
+/// Read the connection settings a pipeline was deployed with, so an operation on
+/// an existing pipeline can browse the same endpoint the same way.
+///
+/// Without the security settings a secured pipeline's coverage check would fail to
+/// connect and reject every device, so they are carried across rather than
+/// defaulted.
+ClassMethod DescribeItem(pItemName As %String, Output pSchemaClass As %String, Output pURL As %String, Output pConn As %DynamicObject) As %Status [ Private ]
+{
+	set pSchemaClass = ""
+	set pURL = ""
+	set pConn = {}
+
+	set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
+	if '$IsObject(tProd) {
+		Quit $$$ERROR($$$GeneralError, "Cannot open production: "_..#ProductionClass)
+	}
+
+	set tItem = tProd.FindItemByConfigName(pItemName, .tSCFind)
+	if '$IsObject(tItem) {
+		Quit $$$ERROR($$$GeneralError, "Pipeline '"_pItemName_"' not found in production")
+	}
+
+	set pSchemaClass = ..GetSettingValue(tItem, "DataSourceClass")
+	set pURL = ..GetSettingValue(tItem, "URL")
+	if pSchemaClass = "" {
+		Quit $$$ERROR($$$GeneralError, "Pipeline '"_pItemName_"' has no DataSourceClass setting")
+	}
+
+	do pConn.%Set("url", pURL)
+	// Setting name → the JSON key ExtractConnectionParams expects.
+	set tMap("SecurityMode") = "securityMode", tMap("ClientURI") = "clientURI"
+	set tMap("PublicCertificate") = "certPath", tMap("PrivateKey") = "keyPath"
+	set tMap("TrustListDir") = "trustDir", tMap("RevocationListDir") = "crlDir"
+	set tMap("Username") = "username", tMap("Password") = "password"
+	set tSetting = ""
+	for {
+		set tSetting = $Order(tMap(tSetting))
+		quit:tSetting=""
+		set tVal = ..GetSettingValue(tItem, tSetting)
+		do:tVal'="" pConn.%Set(tMap(tSetting), tVal)
+	}
+	Quit $$$OK
 }
 
 /// Write a config item's DeviceNodePaths setting, adding it if absent.
