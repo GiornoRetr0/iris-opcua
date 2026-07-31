@@ -740,12 +740,16 @@ decisions, made at different times and often by different people.
    a production.
 3. **Bind Devices** (`/pipelines/bind/:schema`) — pick device roots from the live
    address space, or paste nodepaths as text. Both views read and write the same
-   list, so pasting lights up the tree. **Check Coverage** dry-runs the list and
-   reports exactly which columns resolve per device, moving "does this device
-   really have these nodes?" to before deploy.
+   list, so pasting lights up the tree. Each device is dry-run against the schema
+   **as it is added** (`/schemas/:name/validate`) and carries its own verdict in the
+   list: `3/3` green, a `2/3` amber row naming the columns that will be NULL, or a
+   red row that blocks deploy. There is no separate coverage step — a manual button
+   could be skipped, and skipping it meant Deploy looked ready and then failed on
+   the backend gate. Results are cached per device, so adding a device never
+   re-browses the ones already checked.
 4. **Pipelines** (`/pipelines`) — the dashboard. Shows real collection health, not
    just enabled/disabled. Editing a pipeline reopens the binding screen: the schema
-   and name are fixed, only devices and strictness change.
+   and name are fixed, only the device list changes.
 
 Reusing a schema across more devices therefore costs one visit to step 3.
 
@@ -820,8 +824,9 @@ Here's the complete journey of a data point from an OPC UA server to a SQL query
 
 --- Step B: bind devices (once per PIPELINE; repeatable per schema) ---
 
-8. User opens Bind Devices, picks device roots from the tree (or pastes nodepaths),
-   optionally runs Check Coverage (/schemas/:name/validate) as a dry run
+8. User opens Bind Devices and picks device roots from the tree (or pastes
+   nodepaths). Each new device is validated as it lands (/schemas/:name/validate);
+   an unusable one is flagged in place and Deploy stays locked until it is removed
 
 9. POST /deploy {schemaClass, devices} -> DeployService.BindExistingSchema()
    adds an item to OPCUA.Pipeline.Production. It GENERATES NOTHING:

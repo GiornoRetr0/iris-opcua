@@ -167,7 +167,7 @@ function defaultPipelineName(schemaShortName: string): string {
 
           <div class="mb-4">
             <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Server</label>
-            <select [ngModel]="serverId()" (ngModelChange)="serverId.set($event)"
+            <select [ngModel]="serverId()" (ngModelChange)="onServerChange($event)"
                     class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary/30">
               @for (srv of servers(); track srv.id) {
                 <option [value]="srv.id">{{ srv.name }} — {{ srv.url }}</option>
@@ -208,21 +208,61 @@ function defaultPipelineName(schemaShortName: string): string {
                     <p class="text-[11px] opacity-50 mt-1">Pick nodes from the tree, or paste a list below.</p>
                   </div>
                 } @else {
+                  <!-- Each device carries its own coverage: it is checked against
+                       the schema the moment it is added, so the list is the answer
+                       rather than a request for one. -->
                   <div class="space-y-1.5">
                     @for (dev of parsedDevices(); track dev.line) {
-                      <div class="flex items-center gap-2 bg-surface-container-lowest border border-outline-variant/10 rounded-lg px-2.5 py-2 group">
-                        <span class="material-symbols-outlined text-sm shrink-0"
-                              [class]="dev.valid ? 'text-tertiary' : 'text-error'">
-                          {{ dev.valid ? 'lan' : 'error' }}
-                        </span>
-                        <div class="min-w-0 flex-1">
-                          <p class="text-xs font-semibold text-on-surface truncate">{{ dev.label }}</p>
-                          <p class="text-[10px] font-mono text-on-surface-variant truncate">{{ dev.nodePath }}</p>
+                      @let cov = coverageOf(dev.key);
+                      @let busy = isChecking(dev.key);
+                      @let bad = !dev.valid || (cov && !cov.usable);
+                      <div class="rounded-lg border overflow-hidden group"
+                           [class]="bad ? 'border-error/40 bg-error-container/20'
+                                    : cov ? (cov.complete ? 'border-tertiary/25 bg-tertiary-fixed/10' : 'border-amber-400/30 bg-amber-50/60')
+                                    : 'border-outline-variant/10 bg-surface-container-lowest'">
+                        <div class="flex items-center gap-2 px-2.5 py-2">
+                          @if (busy) {
+                            <span class="material-symbols-outlined text-sm shrink-0 text-primary animate-spin">progress_activity</span>
+                          } @else {
+                            <span class="material-symbols-outlined text-sm shrink-0"
+                                  [class]="bad ? 'text-error' : cov ? (cov.complete ? 'text-tertiary' : 'text-amber-600') : 'text-on-surface-variant/50'">
+                              {{ bad ? 'block' : cov ? (cov.complete ? 'check_circle' : 'error') : 'lan' }}
+                            </span>
+                          }
+                          <div class="min-w-0 flex-1">
+                            <p class="text-xs font-semibold text-on-surface truncate">{{ dev.label }}</p>
+                            <p class="text-[10px] font-mono text-on-surface-variant truncate">{{ dev.nodePath }}</p>
+                          </div>
+                          @if (cov && dev.valid) {
+                            <span class="text-[11px] font-bold tabular-nums shrink-0"
+                                  [class]="bad ? 'text-error' : cov.complete ? 'text-tertiary' : 'text-amber-700'">
+                              {{ cov.matchedCount }}/{{ columnCount() }}
+                            </span>
+                          }
+                          <button (click)="removeDeviceLine(dev.line)"
+                                  class="p-1 rounded text-on-surface-variant/40 hover:text-error hover:bg-error-container/20 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all shrink-0">
+                            <span class="material-symbols-outlined text-base">close</span>
+                          </button>
                         </div>
-                        <button (click)="removeDeviceLine(dev.line)"
-                                class="p-1 rounded text-on-surface-variant/40 hover:text-error hover:bg-error-container/20 opacity-0 group-hover:opacity-100 transition-all shrink-0">
-                          <span class="material-symbols-outlined text-base">close</span>
-                        </button>
+
+                        @if (!dev.valid) {
+                          <p class="px-2.5 pb-2 text-[10.5px] leading-snug text-on-surface">
+                            <span class="font-bold text-error">Malformed —</span>
+                            expected <code class="font-mono">ns=2;s=Name</code> or <code class="font-mono">i=85</code>.
+                          </p>
+                        } @else if (cov && !cov.usable) {
+                          <p class="px-2.5 pb-2 text-[10.5px] leading-snug text-on-surface">
+                            <span class="font-bold text-error">Can't be bound —</span> {{ cov.unusableReason }}
+                          </p>
+                        } @else if (cov && cov.missing.length) {
+                          <div class="px-2.5 pb-2 flex flex-wrap items-center gap-1">
+                            <span class="text-[9px] font-bold text-on-surface-variant uppercase tracking-widest mr-0.5">Missing</span>
+                            @for (m of cov.missing; track m) {
+                              <span class="px-1.5 py-px rounded bg-amber-100 text-[10px] font-medium text-amber-800">{{ m }}</span>
+                            }
+                            <span class="text-[10px] text-on-surface-variant">— stored as NULL</span>
+                          </div>
+                        }
                       </div>
                     }
                   </div>
@@ -261,104 +301,39 @@ function defaultPipelineName(schemaShortName: string): string {
             </div>
           </details>
 
-          <div class="mt-5 pt-5 border-t border-outline-variant/10 flex justify-end">
-            <button (click)="validate()"
-                    [disabled]="validating() || deviceCount() === 0 || !serverId()"
-                    class="px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all"
-                    [class]="validating() || deviceCount() === 0 || !serverId()
-                      ? 'bg-surface-container-highest text-on-surface-variant/40 cursor-not-allowed'
-                      : 'bg-tertiary-container text-on-primary hover:brightness-110 active:scale-95'">
-              <span class="material-symbols-outlined text-lg" [class.animate-spin]="validating()">
-                {{ validating() ? 'progress_activity' : 'fact_check' }}
-              </span>
-              {{ validating() ? 'Checking...' : 'Check Coverage' }}
-            </button>
-          </div>
-        </section>
-
-        <!-- Step 3: coverage -->
-        @if (validation(); as v) {
-          <section class="bg-surface-container-lowest border border-outline-variant/10 rounded-xl p-6 mb-6 shadow-sm">
-            <div class="flex items-center justify-between mb-4">
-              <div class="flex items-center gap-3">
-                <span class="h-7 w-7 rounded-full text-xs font-black flex items-center justify-center"
-                      [class]="unusableDevices().length ? 'bg-error text-on-primary' : v.allResolved ? 'bg-tertiary text-on-primary' : 'bg-amber-500 text-white'">
-                  <span class="material-symbols-outlined text-base">
-                    {{ unusableDevices().length ? 'block' : v.allResolved ? 'check' : 'warning' }}
-                  </span>
-                </span>
-                <h2 class="text-sm font-bold uppercase tracking-widest text-on-surface-variant">Coverage</h2>
-              </div>
-              <span class="text-xs font-bold uppercase tracking-wider"
-                    [class]="unusableDevices().length ? 'text-error' : v.allResolved ? 'text-tertiary' : 'text-amber-600'">
-                @if (unusableDevices().length) {
-                  {{ unusableDevices().length }} device{{ unusableDevices().length === 1 ? '' : 's' }} can't be bound
-                } @else {
-                  {{ v.allResolved ? 'All columns resolved' : 'Some columns missing' }}
-                }
-              </span>
-            </div>
-
-            <!-- A device matching nothing is a different problem from one matching
-                 some: the first can only ever produce empty rows, so it is refused
-                 rather than merely warned about. -->
-            @if (unusableDevices().length) {
-              <p class="text-xs mb-4 flex items-start gap-2 bg-error-container/30 border border-error/20 rounded-lg px-3 py-2">
-                <span class="material-symbols-outlined text-sm text-error shrink-0 mt-px">report</span>
+          <!-- A one-line summary; the per-device detail lives in the rows above,
+               so there is nothing to duplicate here. -->
+          @if (deviceCount()) {
+            <div class="mt-5 pt-4 border-t border-outline-variant/10 flex items-center gap-2 text-xs">
+              @if (anyChecking()) {
+                <span class="material-symbols-outlined text-sm text-primary animate-spin">progress_activity</span>
+                <span class="text-on-surface-variant">Checking coverage against the schema...</span>
+              } @else if (unusableDevices().length) {
+                <span class="material-symbols-outlined text-sm text-error">block</span>
                 <span class="text-on-surface">
-                  Remove {{ unusableDevices().length === 1 ? 'it' : 'them' }} to continue. A device that
-                  matches none of the schema's columns would add one entirely empty row per cycle,
-                  forever.
+                  <span class="font-bold text-error">{{ unusableDevices().length }}</span>
+                  device{{ unusableDevices().length === 1 ? '' : 's' }} can't be bound — remove
+                  {{ unusableDevices().length === 1 ? 'it' : 'them' }} to continue.
                 </span>
-              </p>
-            } @else if (!v.allResolved) {
-              <p class="text-xs text-on-surface-variant mb-4 flex items-start gap-2">
-                <span class="material-symbols-outlined text-sm shrink-0 mt-0.5">info</span>
-                Missing columns are stored as NULL, and each is logged as a warning on every
-                connect. The rest of the device still collects normally.
-              </p>
-            }
-
-            <div class="space-y-2">
-              @for (dev of v.devices; track dev.label) {
-                <!-- Three states, not two: fully covered, partially covered (fine,
-                     just NULLs), and unusable (blocks the deploy). -->
-                <div class="border rounded-lg overflow-hidden"
-                     [class]="!dev.usable ? 'border-error/40' : dev.complete ? 'border-tertiary/20' : 'border-amber-400/30'">
-                  <div class="flex items-center gap-3 px-4 py-2.5"
-                       [class]="!dev.usable ? 'bg-error-container/30' : dev.complete ? 'bg-tertiary-fixed/10' : 'bg-amber-50'">
-                    <span class="material-symbols-outlined text-lg"
-                          [class]="!dev.usable ? 'text-error' : dev.complete ? 'text-tertiary' : 'text-amber-600'">
-                      {{ !dev.usable ? 'block' : dev.complete ? 'check_circle' : 'error' }}
-                    </span>
-                    <span class="text-sm font-semibold text-on-surface flex-1 truncate">{{ dev.label }}</span>
-                    <span class="text-xs font-mono text-on-surface-variant">ns={{ dev.nodeNs }};{{ dev.nodeId }}</span>
-                    <span class="text-xs font-bold tabular-nums"
-                          [class]="!dev.usable ? 'text-error' : dev.complete ? 'text-tertiary' : 'text-amber-700'">
-                      {{ dev.matchedCount }}/{{ v.columnCount }}
-                    </span>
-                  </div>
-                  @if (!dev.usable) {
-                    <div class="px-4 py-2.5 bg-surface-container-lowest flex items-start gap-2">
-                      <span class="material-symbols-outlined text-sm text-error shrink-0 mt-px">report</span>
-                      <p class="text-[11px] text-on-surface leading-snug">
-                        <span class="font-bold">Can't be bound —</span> {{ dev.unusableReason }}
-                      </p>
-                    </div>
-                  } @else if (dev.missing.length) {
-                    <div class="px-4 py-2.5 bg-surface-container-lowest flex flex-wrap items-center gap-1.5">
-                      <span class="text-[0.6rem] font-bold text-on-surface-variant uppercase tracking-widest mr-1">Missing</span>
-                      @for (m of dev.missing; track m) {
-                        <span class="px-2 py-0.5 rounded-md bg-amber-100 text-[11px] font-medium text-amber-800">{{ m }}</span>
-                      }
-                    </div>
-                  }
-                </div>
+              } @else if (uncheckedDevices().length) {
+                <span class="material-symbols-outlined text-sm text-on-surface-variant">help</span>
+                <span class="text-on-surface-variant">
+                  Coverage unknown for {{ uncheckedDevices().length }} device(s) — is the server reachable?
+                </span>
+              } @else if (allComplete()) {
+                <span class="material-symbols-outlined text-sm text-tertiary">check_circle</span>
+                <span class="text-on-surface-variant">
+                  Every device reports all {{ columnCount() }} column{{ columnCount() === 1 ? '' : 's' }}.
+                </span>
+              } @else {
+                <span class="material-symbols-outlined text-sm text-amber-600">error</span>
+                <span class="text-on-surface-variant">
+                  Some columns are missing on some devices — they will be stored as NULL.
+                </span>
               }
             </div>
-          </section>
-        }
-
+          }
+        </section>
         <!-- Step 4: pipeline settings -->
         <section class="bg-surface-container-lowest border border-outline-variant/10 rounded-xl p-6 mb-6 shadow-sm">
           <div class="flex items-center gap-3 mb-5">
@@ -443,10 +418,13 @@ function defaultPipelineName(schemaShortName: string): string {
                 <span class="material-symbols-outlined text-sm">block</span>
                 Remove {{ unusableLabels() }} to continue
               </span>
-            } @else if (!validation()) {
-              <span class="text-on-surface-variant">
-                Tip: check coverage first to see what each device will actually report.
+            } @else if (anyChecking()) {
+              <span class="text-on-surface-variant flex items-center gap-1.5">
+                <span class="material-symbols-outlined text-sm animate-spin">progress_activity</span>
+                Checking devices...
               </span>
+            } @else if (deviceCount() === 0) {
+              <span class="text-on-surface-variant">Pick at least one device above.</span>
             }
           </p>
           <button (click)="deploy()"
@@ -493,8 +471,20 @@ export class DeviceBindingComponent implements OnInit {
   serverId = signal('');
 
   deviceText = signal('');
-  validation = signal<{ columnCount: number; devices: DeviceValidation[]; allResolved: boolean } | null>(null);
-  validating = signal(false);
+  /**
+   * Coverage per device, keyed by `ns:id`, filled in as devices are added.
+   *
+   * Keyed rather than a single result blob so each device is checked exactly once:
+   * coverage is a property of a device, not of a submission, so adding a device
+   * must not invalidate what is already known about the others.
+   */
+  coverage = signal<Map<string, DeviceValidation>>(new Map());
+
+  /** Device keys with a check in flight. */
+  checking = signal<Set<string>>(new Set());
+
+  /** The schema's column count, learned from the first coverage response. */
+  columnCount = signal(0);
 
   pipelineName = signal('');
   mode = signal<'polling' | 'subscription'>('polling');
@@ -543,7 +533,29 @@ export class DeviceBindingComponent implements OnInit {
    * button stays enabled and the backend remains the authority. This just avoids
    * a round trip that was always going to fail.
    */
-  unusableDevices = computed(() => (this.validation()?.devices || []).filter((d) => !d.usable));
+  unusableDevices = computed(() =>
+    this.parsedDevices()
+      .map((d) => this.coverage().get(d.key))
+      .filter((c): c is DeviceValidation => !!c && !c.usable)
+  );
+
+  /** True while any device in the current list is still being checked. */
+  anyChecking = computed(() => this.parsedDevices().some((d) => this.checking().has(d.key)));
+
+  /**
+   * Devices whose coverage is not yet known — unchecked, or a check that failed.
+   *
+   * Deploy waits on these rather than assuming they're fine: an unchecked device
+   * is exactly the case that used to slip through to a backend rejection.
+   */
+  uncheckedDevices = computed(() =>
+    this.parsedDevices().filter((d) => d.valid && !this.coverage().has(d.key))
+  );
+
+  /** Every device resolves every column. */
+  allComplete = computed(() =>
+    this.parsedDevices().every((d) => this.coverage().get(d.key)?.complete)
+  );
 
   /** The offending device labels, for the blocked-deploy hint. */
   unusableLabels = computed(() => {
@@ -574,7 +586,11 @@ export class DeviceBindingComponent implements OnInit {
       // effectiveName, not the raw field: an empty box means "use the suggestion".
       !!this.effectiveName() &&
       !!this.serverId() &&
-      this.unusableDevices().length === 0
+      // Every device must be known good. Waiting on in-flight checks is what stops
+      // a device slipping through unverified to a backend rejection.
+      !this.anyChecking() &&
+      this.unusableDevices().length === 0 &&
+      this.uncheckedDevices().length === 0
   );
 
   ngOnInit(): void {
@@ -640,6 +656,9 @@ export class DeviceBindingComponent implements OnInit {
         this.schema.set(s);
         if (then) then(s);
         this.loadingSchema.set(false);
+        // Edit mode arrives with devices already listed, and coverage needs the
+        // schema, so this is the earliest point they can be checked.
+        this.checkPending();
       },
       error: (err) => {
         this.error.set(this.message(err));
@@ -648,10 +667,31 @@ export class DeviceBindingComponent implements OnInit {
     });
   }
 
-  /** Editing the device list invalidates any previous coverage result. */
+  /**
+   * The device list changed — check whatever is newly in it.
+   *
+   * Cached results are kept: coverage belongs to a device, so editing the list
+   * cannot change what was already learned about a device still in it. Only the
+   * additions are checked.
+   */
   onDeviceTextChange(value: string): void {
     this.deviceText.set(value);
-    if (this.validation()) this.validation.set(null);
+    this.checkPending();
+  }
+
+  /**
+   * Switching server invalidates every cached result.
+   *
+   * A NodeId means nothing without the server it came from — the same `ns=2;s=AC1`
+   * can exist on one endpoint and not another. Keeping the old verdicts would show
+   * coverage measured against a server the pipeline no longer reads.
+   */
+  onServerChange(id: string): void {
+    if (id === this.serverId()) return;
+    this.serverId.set(id);
+    this.coverage.set(new Map());
+    this.checking.set(new Set());
+    this.checkPending();
   }
 
   toggleAdvanced(event: Event): void {
@@ -697,22 +737,64 @@ export class DeviceBindingComponent implements OnInit {
     this.onDeviceTextChange(next);
   }
 
-  validate(): void {
+  /**
+   * Check coverage for any device that doesn't have it yet.
+   *
+   * Only unchecked devices are sent, so adding a fifth device doesn't re-browse
+   * the first four — their rows stay put instead of flickering back to a spinner.
+   * Results are cached by device key, which is also why removing and re-adding a
+   * device is instant.
+   *
+   * A failed request is deliberately not surfaced as a page error: it usually
+   * means the server is briefly unreachable, and the affected rows simply stay
+   * unchecked, which already blocks deploy.
+   */
+  private checkPending(): void {
     const s = this.schema();
-    if (!s || !this.deviceCount()) return;
+    if (!s) return;
 
-    this.validating.set(true);
-    this.error.set('');
-    this.api.validateSchema(s.schemaClass, this.deviceText(), this.server()).subscribe({
+    const pending = this.parsedDevices().filter(
+      (d) => d.valid && !this.coverage().has(d.key) && !this.checking().has(d.key)
+    );
+    if (!pending.length) return;
+
+    const keys = pending.map((d) => d.key);
+    this.checking.update((set) => new Set([...set, ...keys]));
+
+    const lines = pending.map((d) => d.line).join('\n');
+    this.api.validateSchema(s.schemaClass, lines, this.server()).subscribe({
       next: (v) => {
-        this.validation.set(v);
-        this.validating.set(false);
+        this.columnCount.set(v.columnCount);
+        this.coverage.update((map) => {
+          const next = new Map(map);
+          // Match on the device's own key, not array position: the backend drops
+          // unparseable lines, so index i in the response need not be pending[i].
+          for (const dev of v.devices || []) {
+            next.set(`${dev.nodeNs}:${dev.nodeId}`, dev);
+          }
+          return next;
+        });
+        this.clearChecking(keys);
       },
-      error: (err) => {
-        this.error.set(this.message(err));
-        this.validating.set(false);
-      },
+      error: () => this.clearChecking(keys),
     });
+  }
+
+  private clearChecking(keys: string[]): void {
+    this.checking.update((set) => {
+      const next = new Set(set);
+      for (const k of keys) next.delete(k);
+      return next;
+    });
+  }
+
+  /** Coverage for one device row, once known. */
+  coverageOf(key: string): DeviceValidation | undefined {
+    return this.coverage().get(key);
+  }
+
+  isChecking(key: string): boolean {
+    return this.checking().has(key);
   }
 
   deploy(): void {

@@ -19,7 +19,8 @@ recompiling the class.
   - Pipeline health reporting: a pipeline that is enabled but failing to connect or
     resolve is reported as `error` rather than looking healthy.
   - Webapp: Schemas library, schema builder, device binding screen with a live
-    address-space picker and a Check Coverage dry run.
+    address-space picker. Each device is dry-run against the schema as it is added,
+    so coverage is a property of the device list rather than a separate step.
   - `OPCUA.Tests.ResolverTest`, `OPCUA.Tests.PortalPipelineTest`.
 
 ### Changed

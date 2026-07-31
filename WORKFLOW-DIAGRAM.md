@@ -135,9 +135,10 @@ sequenceDiagram
 
     rect rgb(237, 231, 246)
     Note over UI,ENS: ACT 2 — bind devices. Generates nothing.
-    opt dry run first
+    loop per device, as it is added
         UI->>H: POST /schemas/:name/validate  {devices, url}
-        H-->>UI: per-device matched / missing columns
+        H-->>UI: matched / missing columns, browsed, usable
+        Note over UI: unusable → flagged in the list, Deploy stays locked
     end
     UI->>H: POST /deploy  {schemaClass, devices, mode, url, callInterval}
     activate H
