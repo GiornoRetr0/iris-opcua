@@ -340,7 +340,7 @@ ClassMethod GenerateSchemaClass(pClassName As %String, pDataSourceName As %Strin
 				if $Data(tEmittedFolders(tFolderName)) continue
 				set tEmittedFolders(tFolderName) = 1
 
-				set tSerialClassName = pClassName_"."_tFolderName_"Type"
+				set tSerialClassName = ..SerialClassName(pClassName, tFolderName)
 				set tPropName = ##class(OPCUA.DataSource.Generator).SanitizePropertyName(tFolderName, .tUsedNames)
 				set tProp = ##class(%Dictionary.PropertyDefinition).%New()
 				set tProp.Name = tPropName
@@ -389,8 +389,17 @@ ClassMethod GenerateSerialClasses(pMainClassName As %String, pDefaultNS As %Inte
 			set tFolderName = $Order(pFolderColumns(tFolderName))
 			if tFolderName = "" Quit
 
-			set tSerialClassName = pMainClassName_"."_tFolderName_"Type"
+			set tSerialClassName = ..SerialClassName(pMainClassName, tFolderName)
 			set tColumns = pFolderColumns(tFolderName)
+
+			// Sanitising is lossy, so two folder names can collapse onto one class
+			// name ("A_B" and "AB"). Silently generating the second over the first
+			// would drop its columns, so refuse instead.
+			if $Data(tTakenNames(tSerialClassName)) {
+				set tSC = $$$ERROR($$$GeneralError, "Folders '"_tTakenNames(tSerialClassName)_"' and '"_tFolderName_"' both map to class '"_tSerialClassName_"'. Rename one, or select their columns from a single folder.")
+				Quit
+			}
+			set tTakenNames(tSerialClassName) = tFolderName
 
 			set tClassDef = ##class(%Dictionary.ClassDefinition).%New(tSerialClassName)
 			set tClassDef.Description = "Auto-generated serial object for nested OPC UA folder: "_tFolderName
@@ -424,6 +433,28 @@ ClassMethod GenerateSerialClasses(pMainClassName As %String, pDefaultNS As %Inte
 		set tSC = e.AsStatus()
 	}
 	Quit tSC
+}
+
+/// Name of the %SerialObject class backing a nested folder.
+///
+/// An OPC UA browse name is free text, but a class name is not: underscores and
+/// most punctuation are rejected by %Dictionary.Classname validation, so the
+/// folder name is sanitised before it becomes an identifier. Without this, a
+/// folder called "State_Condition" fails the schema save with #5794 rather than
+/// producing a usable class.
+///
+/// The folder's real OPC UA name is preserved as the property's OPCUANODENAME,
+/// which is what resolution actually matches on — so sanitising here changes the
+/// class name only, never the name looked up on the device.
+ClassMethod SerialClassName(pMainClassName As %String, pFolderName As %String) As %String
+{
+	kill tUsed
+	set tIdent = ##class(OPCUA.DataSource.Generator).SanitizePropertyName(pFolderName, .tUsed)
+	set tIdent = $Replace(tIdent, "_", "")
+	if tIdent = "" set tIdent = "Folder"
+	// A leading digit survives sanitisation as "N<digits>", so only the empty
+	// case needs guarding above.
+	Quit pMainClassName_"."_tIdent_"Type"
 }
 
 /// Map OPCUA.Types.*DataValue to plain IRIS types for v2 flat columns.

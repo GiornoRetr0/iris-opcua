@@ -12,7 +12,14 @@ import { ServerProfile, TreeNode } from '../../core/models/opcua.models';
 interface DraftColumn {
   /** Leaf node name — this is what gets matched against each device at runtime */
   displayName: string;
-  /** ["Leaf"] or ["Folder", "Leaf"] */
+  /**
+   * Path relative to the template device root: `["Leaf"]`, or
+   * `["Folder", "Leaf"]` for a sub-folder inside the device.
+   *
+   * Nothing above the device root ever appears here — that part of the address
+   * space differs per device, and the whole point of a schema is to be
+   * device-independent.
+   */
   relativePath: string[];
   nodeNs: number;
   nodeId: string | number;
@@ -43,6 +50,9 @@ function typeLabel(inferredType?: string): string {
   }
 }
 
+/** How deep inside a device a column may sit — see `pathFromRoot`. */
+const MAX_DEPTH = 2;
+
 /**
  * Create a reusable device schema by picking nodes off one representative device.
  *
@@ -50,6 +60,12 @@ function typeLabel(inferredType?: string): string {
  * captured. What's saved is the column names, which are matched by name against
  * whichever devices get bound later. That's why this page ends at "Save Schema"
  * and never touches a production.
+ *
+ * Which node *is* the device has to be stated explicitly. It cannot be inferred
+ * from tree depth: browse from `Objects` and a device sits two levels down, browse
+ * from the device's parent folder and it sits one — the same schema would come out
+ * differently. Marking the root is what makes a column's identity relative to the
+ * device, and so device-independent.
  */
 @Component({
   selector: 'app-schema-builder',
@@ -106,10 +122,35 @@ function typeLabel(inferredType?: string): string {
             </button>
           </div>
 
+          <!-- Which node is the device has to be said out loud; it can't be guessed
+               from depth without baking the browse path into the column names. -->
+          @if (roots().length) {
+            <div class="mb-3 flex items-start gap-2 rounded-lg px-3 py-2 text-[11px] leading-snug"
+                 [class]="deviceRoot()
+                   ? 'bg-primary/8 border border-primary/20 text-on-surface'
+                   : 'bg-amber-50 border border-amber-300/50 text-amber-900'">
+              <span class="material-symbols-outlined text-sm shrink-0 mt-px"
+                    [class]="deviceRoot() ? 'text-primary' : 'text-amber-600'">
+                {{ deviceRoot() ? 'memory' : 'info' }}
+              </span>
+              @if (deviceRoot(); as root) {
+                <span>
+                  Template device: <strong class="font-bold">{{ root.displayName }}</strong>.
+                  Columns are named relative to it — its own name never becomes part of a column.
+                </span>
+              } @else {
+                <span>
+                  Hover a node and press <strong class="font-bold">Set device</strong> on the one
+                  representing a single device. Columns can only be picked inside it.
+                </span>
+              }
+            </div>
+          }
+
           <div class="border border-outline-variant/15 rounded-lg bg-surface-container-low/30 max-h-[26rem] overflow-y-auto custom-scrollbar p-2">
             @if (!roots().length && !browsing()) {
               <p class="text-xs text-on-surface-variant text-center py-8">
-                Browse a server, then tick the nodes that make up this device type.
+                Browse a server, mark one device, then tick the nodes that make up its type.
               </p>
             }
             @for (node of roots(); track nodeKey(node)) {
@@ -137,6 +178,9 @@ function typeLabel(inferredType?: string): string {
             <div class="flex-1 flex flex-col items-center justify-center py-12 text-on-surface-variant">
               <span class="material-symbols-outlined text-6xl opacity-10 mb-3">view_column</span>
               <p class="text-xs opacity-70">No columns yet</p>
+              @if (!deviceRoot()) {
+                <p class="text-[11px] opacity-50 mt-1">Mark a template device first</p>
+              }
             </div>
           } @else {
             <div class="space-y-1.5 flex-1 overflow-y-auto custom-scrollbar max-h-[24rem]">
@@ -225,13 +269,16 @@ function typeLabel(inferredType?: string): string {
     <!-- Recursive node tree -->
     <ng-template #treeTpl let-node let-level="level">
       <div [style.padding-left.rem]="level * 1.1">
-        <div class="flex items-center gap-1.5 p-1 rounded cursor-pointer hover:bg-white/60 transition-colors"
+        <div class="flex items-center gap-1.5 p-1 rounded cursor-pointer hover:bg-white/60 transition-colors group/node"
+             [class]="isDeviceRoot(node) ? 'bg-primary/8 ring-1 ring-primary/30' : ''"
              (click)="onNodeClick(node)">
-          @if (isSelectable(node)) {
+          @if (isVariable(node)) {
             <input type="checkbox" [checked]="isSelected(node)"
+                   [disabled]="!isSelectable(node)"
+                   [title]="isSelectable(node) ? '' : depthHint(node)"
                    (click)="$event.stopPropagation()"
                    (change)="toggleColumn(node)"
-                   class="w-3.5 h-3.5 rounded border-slate-300 text-primary focus:ring-primary mr-0.5" />
+                   class="w-3.5 h-3.5 rounded border-slate-300 text-primary focus:ring-primary mr-0.5 disabled:opacity-30 disabled:cursor-not-allowed" />
           }
           @if (node.hasChildren) {
             <span class="material-symbols-outlined text-lg text-slate-400">
@@ -246,6 +293,22 @@ function typeLabel(inferredType?: string): string {
           </span>
           @if (node.loading) {
             <span class="material-symbols-outlined text-xs text-primary animate-spin ml-1">progress_activity</span>
+          }
+
+          <!-- Marking the device root is what makes column names device-independent -->
+          @if (canBeDeviceRoot(node)) {
+            @if (isDeviceRoot(node)) {
+              <button (click)="setDeviceRoot(node, $event)" title="Unmark this template device"
+                      class="ml-1.5 shrink-0 px-1.5 py-px rounded text-[9px] font-black uppercase tracking-wider bg-primary text-on-primary flex items-center gap-0.5">
+                <span class="material-symbols-outlined text-[11px]">memory</span>
+                Device
+              </button>
+            } @else {
+              <button (click)="setDeviceRoot(node, $event)" title="Use this node as the template device"
+                      class="ml-1.5 shrink-0 px-1.5 py-px rounded text-[9px] font-bold uppercase tracking-wider border border-outline-variant/40 text-on-surface-variant hover:border-primary hover:text-primary opacity-0 group-hover/node:opacity-100 focus:opacity-100 transition-all">
+                Set device
+              </button>
+            }
           }
         </div>
         @if (node.expanded && node.children) {
@@ -267,6 +330,12 @@ export class SchemaBuilderComponent implements OnInit {
 
   roots = signal<TreeNode[]>([]);
   browsing = signal(false);
+
+  /**
+   * The node marked as the template device. Columns are paths relative to it, so
+   * until one is marked nothing can be ticked.
+   */
+  deviceRoot = signal<TreeNode | undefined>(undefined);
 
   columns = signal<DraftColumn[]>([]);
   schemaName = signal('');
@@ -307,6 +376,10 @@ export class SchemaBuilderComponent implements OnInit {
     this.browsing.set(true);
     this.error.set('');
     this.roots.set([]);
+    // The old root's node objects are about to be discarded, and columns are
+    // paths measured against it — neither survives a re-browse.
+    this.deviceRoot.set(undefined);
+    this.columns.set([]);
     this.api.browse(srv.rootNodeNs ?? 0, srv.rootNodeId || 85, undefined, srv).subscribe({
       next: (nodes) => {
         this.roots.set(nodes.map((n) => ({ ...n, level: 0 }) as TreeNode));
@@ -348,48 +421,98 @@ export class SchemaBuilderComponent implements OnInit {
     });
   }
 
-  /** Only value-bearing nodes make sense as columns. */
-  isSelectable(node: TreeNode): boolean {
+  /** Only value-bearing nodes can ever be columns. */
+  isVariable(node: TreeNode): boolean {
     return node.nodeCategory === 'variable' || node.nodeCategory === 'property';
   }
 
   /**
-   * Build the column's path relative to its device root.
-   *
-   * A node one level under the browsed root is a flat column; one level deeper
-   * becomes a folder-qualified column, which the backend models as a
-   * %SerialObject. Deeper nesting is flattened to the nearest folder, matching
-   * what the generator supports.
+   * A variable is pickable only once it has a path relative to the device root.
+   * Shown disabled rather than hidden, so it's clear *why* it can't be ticked.
    */
-  private relativePath(node: TreeNode): string[] {
-    const parent = node.parentRef;
-    if (parent && parent.parentRef) {
-      return [parent.displayName, node.displayName];
+  isSelectable(node: TreeNode): boolean {
+    return this.isVariable(node) && this.pathFromRoot(node) !== null;
+  }
+
+  /** Is this node the marked template device? */
+  isDeviceRoot(node: TreeNode): boolean {
+    const root = this.deviceRoot();
+    return !!root && this.nodeKey(root) === this.nodeKey(node);
+  }
+
+  /** Can this node serve as a device root? Anything with children can. */
+  canBeDeviceRoot(node: TreeNode): boolean {
+    return !!node.hasChildren && node.nodeCategory !== 'method';
+  }
+
+  /**
+   * Mark (or unmark) a node as the template device.
+   *
+   * Changing the root invalidates every column, because a column's identity is
+   * its path relative to that root. Clearing them is honest; silently keeping
+   * paths measured against a different root would be the original bug.
+   */
+  setDeviceRoot(node: TreeNode, event?: Event): void {
+    event?.stopPropagation();
+    const wasRoot = this.isDeviceRoot(node);
+    if (this.columns().length) this.columns.set([]);
+    this.deviceRoot.set(wasRoot ? undefined : node);
+    if (!wasRoot && !node.expanded) this.onNodeClick(node);
+  }
+
+  /**
+   * The column's path relative to the marked device root, or null if the node
+   * isn't inside the device (or is too deep to model).
+   *
+   * `["Temperature"]` for a direct child; `["StateCondition", "LastSeverity"]`
+   * for one inside a sub-folder, which the backend models as a %SerialObject.
+   * Everything above the root is discarded — that part of the address space is
+   * the *device's* path, not the column's.
+   */
+  private pathFromRoot(node: TreeNode): string[] | null {
+    const root = this.deviceRoot();
+    if (!root) return null;
+    const rootKey = this.nodeKey(root);
+
+    const segments: string[] = [];
+    for (let n: TreeNode | undefined = node; n; n = n.parentRef) {
+      if (this.nodeKey(n) === rootKey) return segments.reverse();
+      segments.push(n.displayName);
+      // Deeper than the generator can model as a single %SerialObject level.
+      if (segments.length > MAX_DEPTH) return null;
     }
-    return [node.displayName];
+    return null; // Not a descendant of the root at all.
+  }
+
+  /** Why a variable under the device can't be picked, for the tooltip. */
+  depthHint(node: TreeNode): string {
+    if (!this.deviceRoot()) return 'Mark a template device first';
+    return `Too deeply nested — columns may be at most ${MAX_DEPTH} levels inside the device`;
   }
 
   nodeKey(node: TreeNode): string {
     return `${node.nodeNs}:${node.nodeId}`;
   }
 
-  private columnKey(node: TreeNode): string {
-    return this.relativePath(node).join('/');
+  private columnKey(node: TreeNode): string | null {
+    const path = this.pathFromRoot(node);
+    return path ? path.join('/') : null;
   }
 
   isSelected(node: TreeNode): boolean {
     const key = this.columnKey(node);
-    return this.columns().some((c) => c.key === key);
+    return !!key && this.columns().some((c) => c.key === key);
   }
 
   toggleColumn(node: TreeNode): void {
     const key = this.columnKey(node);
+    if (!key) return;
     const existing = this.columns().find((c) => c.key === key);
     if (existing) {
       this.columns.update((cols) => cols.filter((c) => c.key !== key));
       return;
     }
-    const path = this.relativePath(node);
+    const path = this.pathFromRoot(node)!;
     this.columns.update((cols) => [
       ...cols,
       {
