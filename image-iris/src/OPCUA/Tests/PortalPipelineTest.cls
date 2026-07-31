@@ -13,7 +13,7 @@ Include (OPCUA.Constants, %occInclude, Ensemble)
 ///   2. adding a config item + typing device nodepaths yields a running pipeline
 ///   3. adding a device is a one-line setting edit with no recompile
 ///   4. a device missing a column stores NULL and logs a warning naming both
-///   5. StrictSchemaMatch refuses to start instead, when enabled
+///   5. an unresolved column never stops the pipeline
 Class OPCUA.Tests.PortalPipelineTest
 {
 
@@ -40,8 +40,8 @@ ClassMethod Run(pURL As %String = "opc.tcp://plc") As %Boolean
         write !, "=== 3. adding a device needs no recompile ===", !
         do ..TestAddDevice(.tPass, .tFail)
 
-        write !, "=== 4. StrictSchemaMatch refuses unresolved columns ===", !
-        do ..TestStrictMode(.tPass, .tFail)
+        write !, "=== 4. an unresolved column does not stop collection ===", !
+        do ..TestPartialDeviceKeepsCollecting(.tPass, .tFail)
 
     } Catch (e) {
         set tFail = tFail + 1
@@ -101,7 +101,6 @@ ClassMethod TestSchemaDiscoverable(ByRef pPass, ByRef pFail) [ Private ]
     do ..Check("DataSourceClass renders as a selector", (tUrl [ "selector?context="), 1, .pPass, .pFail)
     do ..Check("selector filters on DeviceSchema", (tUrl [ "OPCUA.DataSource.DeviceSchema"), 1, .pPass, .pFail)
     do ..Check("DeviceNodePaths is a registered setting", ''$Data(tSettings(":", "DeviceNodePaths")), 1, .pPass, .pFail)
-    do ..Check("StrictSchemaMatch is a registered setting", ''$Data(tSettings(":", "StrictSchemaMatch")), 1, .pPass, .pFail)
 }
 
 /// Build the pipeline using only the Ens.Config API the Portal drives, then
@@ -154,19 +153,34 @@ ClassMethod TestAddDevice(ByRef pPass, ByRef pFail) [ Private ]
     do ..Check("warning names the device and column", ..LoggedWarningMatching("NoColumns", "SA1"), 1, .pPass, .pFail)
 }
 
-/// With StrictSchemaMatch on, an unresolved column must stop the service rather
-/// than silently storing NULL.
-ClassMethod TestStrictMode(ByRef pPass, ByRef pFail) [ Private ]
+/// An unresolved column must never stop the pipeline.
+///
+/// Coverage is reported before deploy (POST /schemas/:name/validate), so binding
+/// a partially matching device is a deliberate choice. Store NULL, warn, and keep
+/// collecting everything that did resolve — a device with one missing node must
+/// not cost the operator the other nine.
+ClassMethod TestPartialDeviceKeepsCollecting(ByRef pPass, ByRef pFail) [ Private ]
 {
     do ..ClearLog()
-    set tSC = ..SetSetting("StrictSchemaMatch", 1)
-    do ..Check("StrictSchemaMatch enabled", $$$ISOK(tSC), 1, .pPass, .pFail)
+    set tBaseline = ..RowCount()
+
+    // Resolution diagnostics are emitted on connect, not per poll cycle, so an
+    // empty log alone would prove nothing. Rewriting the device list forces the
+    // item to restart and re-resolve, which is what generates fresh entries.
+    set tSC = ..SetSetting("DeviceNodePaths", "i=85|Objects" _ $Char(10) _ "i=2253|NoColumns")
+    do ..Check("device list re-applied to force a re-resolve", $$$ISOK(tSC), 1, .pPass, .pFail)
     Quit:$$$ISERR(tSC)
 
-    do ..Settle(10)
-    do ..Check("service reports a strict-mode failure", ..LoggedErrorMatching("StrictSchemaMatch"), 1, .pPass, .pFail)
+    do ..Settle(12)
 
-    do ..SetSetting("StrictSchemaMatch", 0)
+    // The NoColumns device resolves none of the schema's columns, and must not
+    // prevent the other device from collecting.
+    do ..Check("rows still accumulating despite an unresolved device", (..RowCount() > tBaseline), 1, .pPass, .pFail)
+    do ..Check("resolved columns still populated", ..HasNonNull("SA1"), 1, .pPass, .pFail)
+    do ..Check("unresolved column warns on re-resolve", ..LoggedWarningMatching("NoColumns", "SA1"), 1, .pPass, .pFail)
+
+    // No refuse-to-collect path exists any more; an unresolved column is not an error.
+    do ..Check("no error logged for an unresolved column", ..LoggedErrorMatching("did not resolve"), 0, .pPass, .pFail)
 }
 
 // ==================== fixtures ====================
@@ -432,7 +446,7 @@ ClassMethod TableName() As %String [ CodeMode = expression, Private ]
 ##class(OPCUA.REST.SchemaService).TableName(..#SchemaClass)
 }
 
-/// Drop this item's log entries so strict-mode assertions see only fresh ones.
+/// Drop this item's log entries so the assertions see only fresh ones.
 ClassMethod ClearLog() [ Private ]
 {
     Try {

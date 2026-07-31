@@ -12,10 +12,10 @@ recompiling the class.
     children **by name** against the schema's columns, at connect time.
   - `OPCUA.REST.SchemaService` and `/schemas` endpoints (list, create, get, delete,
     validate). Creating a schema has no production side effects.
-  - `POST /pipelines/rebind` — change a pipeline's device list or strictness as a
-    settings update: no regeneration, no recompile.
-  - `DeviceNodePaths` and `StrictSchemaMatch` adapter settings. A pipeline can now be
-    built entirely from the Management Portal, with no webapp involved.
+  - `POST /pipelines/rebind` — change a pipeline's device list as a settings update:
+    no regeneration, no recompile.
+  - `DeviceNodePaths` adapter setting. A pipeline can now be built entirely from the
+    Management Portal, with no webapp involved.
   - Pipeline health reporting: a pipeline that is enabled but failing to connect or
     resolve is reported as `error` rather than looking healthy.
   - Webapp: Schemas library, schema builder, device binding screen with a live
@@ -31,6 +31,10 @@ recompiling the class.
     failure reports its real cause on every retry and recovers from a config edit
     instead of stalling until restarted.
   - Schema columns are typed from a sample read instead of all landing as `%String`.
+  - Schema columns are named relative to an explicitly marked template device, so a
+    device's own name and browse path never become part of a column name.
+  - A device missing some columns stores NULL for them and keeps collecting the rest.
+    Coverage is reported before deploy, so there is no refuse-to-collect toggle.
 
 ### Removed
   - `^OPCUA.RowSource`. Device metadata, column masks and the nesting spec are now

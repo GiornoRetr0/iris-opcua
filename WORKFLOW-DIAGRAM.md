@@ -152,7 +152,7 @@ sequenceDiagram
     Note over DS: refuse a duplicate config-item name
     DS->>DS: EnsureProductionExists()
     DS->>DS: AddServiceItem(pBody, schemaClass, itemName, mode, devices)
-    Note over DS,ENS: Ens.Config.Item ClassName = TCPPollingRowSourceService<br/>(or TCPSubscriptionRowSourceService) — AddSetting<br/>DataSourceClass / DeviceNodePaths / URL /<br/>StrictSchemaMatch / CallInterval
+    Note over DS,ENS: Ens.Config.Item ClassName = TCPPollingRowSourceService<br/>(or TCPSubscriptionRowSourceService) — AddSetting<br/>DataSourceClass / DeviceNodePaths / URL /<br/>CallInterval
     DS->>ENS: tProd.Items.Insert() + %Save() + SaveToClass()
     DS->>DS: StartOrUpdateProduction()
     DS->>ENS: Ens.Director.UpdateProduction() / StartProduction()
@@ -212,7 +212,7 @@ sequenceDiagram
             CMN->>CL: Connect(URL, user, pass)
             CL->>CPP: $ZF(-5, lib, ord=13/38)
             AD->>AD: ResolveSpecification()
-            AD->>CFG: read DeviceNodePaths + StrictSchemaMatch
+            AD->>CFG: read DeviceNodePaths
             AD->>RES: ParseDeviceNodePaths() then ResolveSpecification(client, class, devices)
             RES->>CPP: Browse() per device root
             Note over RES: match children BY NAME against schema columns<br/>→ combined spec + per-device masks + NodePath labels<br/>unmatched → NULL + warning (or refuse if strict)

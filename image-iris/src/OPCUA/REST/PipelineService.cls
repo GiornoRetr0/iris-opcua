@@ -54,7 +54,6 @@ ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %S
 			// editing a pipeline's devices is editing this string.
 			set tDeviceNodePaths = ..GetSettingValue(tCfgItem, "DeviceNodePaths")
 			set tItem.deviceNodePaths = tDeviceNodePaths
-			set tItem.strictSchemaMatch = +..GetSettingValue(tCfgItem, "StrictSchemaMatch")
 
 			// Derive table name from DataSource class
 			if tItem.dataSourceClass '= "" {
@@ -336,18 +335,18 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 	Quit tSC
 }
 
-/// Rebind an existing pipeline's devices, and optionally its strictness.
+/// Rebind an existing pipeline's device list.
 ///
 /// This is the whole of "editing a pipeline" once schema creation and device
 /// binding are separate concerns: the schema is fixed at deploy time, so a
-/// pipeline owns only which devices it reads and how strictly. Both are
-/// config-item settings, so this needs no regeneration and no recompile.
+/// pipeline owns only which devices it reads. That is a config-item setting, so
+/// this needs no regeneration and no recompile.
 ///
 /// Changing a schema's <em>columns</em> is deliberately not possible here, and
 /// currently not possible anywhere — the regenerating edit path was removed with
 /// the wizard that drove it. Recreating the schema is the supported route.
 ///
-/// Body: { name required, devices required, strictSchemaMatch optional }
+/// Body: { name required, devices required }
 ClassMethod Rebind(pBody As %DynamicObject, Output pResult As %DynamicObject) As %Status
 {
 	#dim tSC As %Status = $$$OK
@@ -380,13 +379,6 @@ ClassMethod Rebind(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		set tSC = ..UpdateDeviceNodePaths(tName, tDevices)
 		Quit:$$$ISERR(tSC)
 
-		// Only touch strictness when the caller actually sent it, so a rebind that
-		// omits the flag leaves the existing setting alone.
-		if pBody.%IsDefined("strictSchemaMatch") {
-			set tSC = ..UpdateSetting(tName, "StrictSchemaMatch", +pBody.%Get("strictSchemaMatch"))
-			Quit:$$$ISERR(tSC)
-		}
-
 		// The adapter re-resolves on every (re)connect, so restarting the item is
 		// all that is needed for the new device list to take effect.
 		do ##class(Ens.Director).GetProductionStatus(.tRunning, .tRunState)
@@ -399,54 +391,6 @@ ClassMethod Rebind(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		set pResult.name = tName
 		set pResult.deviceCount = $LL(tParsed)
 
-	} Catch (e) {
-		set tSC = e.AsStatus()
-	}
-	Quit tSC
-}
-
-/// Write an arbitrary adapter setting on a config item, adding it if absent.
-ClassMethod UpdateSetting(pItemName As %String, pName As %String, pValue As %String) As %Status [ Private ]
-{
-	#dim tSC As %Status = $$$OK
-	Try {
-		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
-		if '$IsObject(tProd) {
-			set tSC = $$$ERROR($$$GeneralError, "Cannot open production: "_..#ProductionClass)
-			Quit
-		}
-
-		set tFound = 0
-		for i=1:1:tProd.Items.Count() {
-			set tItem = tProd.Items.GetAt(i)
-			continue:tItem.Name'=pItemName
-
-			set tSet = 0
-			for j=1:1:tItem.Settings.Count() {
-				set tSetting = tItem.Settings.GetAt(j)
-				continue:tSetting.Name'=pName
-				set tSetting.Value = pValue
-				set tSet = 1
-			}
-			if 'tSet {
-				set tSetting = ##class(Ens.Config.Setting).%New()
-				set tSetting.Target = "Adapter"
-				set tSetting.Name = pName
-				set tSetting.Value = pValue
-				do tItem.Settings.Insert(tSetting)
-			}
-			set tFound = 1
-		}
-
-		if 'tFound {
-			set tSC = $$$ERROR($$$GeneralError, "Pipeline '"_pItemName_"' not found in production")
-			Quit
-		}
-
-		set tSC = tProd.%Save()
-		$$$ThrowOnError(tSC)
-		set tSC = tProd.SaveToClass()
-		$$$ThrowOnError(tSC)
 	} Catch (e) {
 		set tSC = e.AsStatus()
 	}

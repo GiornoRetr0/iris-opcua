@@ -361,7 +361,7 @@ That is why adding a second pipeline over an existing schema costs one config it
 
 4. **Add a service item** (`AddServiceItem()`):
    - Create an `Ens.Config.Item`, set its class to `OPCUA.Service.TCPPollingRowSourceService` or `OPCUA.Service.TCPSubscriptionRowSourceService` (chosen by `mode`)
-   - Configure settings: `DataSourceClass`, **`DeviceNodePaths`**, `URL`, `StrictSchemaMatch`, poll/subscription intervals, security parameters
+   - Configure settings: `DataSourceClass`, **`DeviceNodePaths`**, `URL`, poll/subscription intervals, security parameters
    - Add it, save the production, call `SaveToClass()`
 
 5. **Start or update the production:** `Ens.Director.UpdateProduction()` if already running, else `StartProduction()`
@@ -418,7 +418,7 @@ This is the base class that both adapters extend. It manages:
 configurable in the Production Configuration UI with no webapp involved:
 
 ```objectscript
-Parameter SETTINGS = "...,DataSourceClass:Data:selector?context={Ens.ContextSearch/SubclassOf?class=OPCUA.DataSource.DeviceSchema},DeviceNodePaths:Data,StrictSchemaMatch:Data,..."
+Parameter SETTINGS = "...,DataSourceClass:Data:selector?context={Ens.ContextSearch/SubclassOf?class=OPCUA.DataSource.DeviceSchema},DeviceNodePaths:Data,..."
 ```
 
 - **`DataSourceClass`** renders as a **dropdown** of available schemas, populated by
@@ -426,7 +426,6 @@ Parameter SETTINGS = "...,DataSourceClass:Data:selector?context={Ens.ContextSear
   named `class` (not `super`), and it already excludes abstract classes, so the
   `DeviceSchema` base itself never appears.
 - **`DeviceNodePaths`** is a free-text list, one device per line.
-- **`StrictSchemaMatch`** is the refuse-to-collect toggle.
 
 Two consequences worth knowing:
 
@@ -587,7 +586,11 @@ This is why:
 - A device that is offline at startup begins reporting on its own once it becomes reachable, because resolution re-runs on every reconnect
 - Nothing needs to be stored: masks are *derived*, not remembered
 
-Unresolved columns store NULL and log a warning naming the device and column. Setting `StrictSchemaMatch` makes the service refuse to collect at all instead — useful when a silently NULL column would be worse than a stopped pipeline.
+Unresolved columns store NULL and log a warning naming the device and column, and
+the pipeline keeps collecting everything that did resolve. There is deliberately no
+refuse-to-collect mode: coverage is reported *before* deploy by
+`POST /schemas/:name/validate`, so a partially matching device is bound knowingly,
+and one missing node must not cost the operator the columns that work.
 
 ### v2 Service startup (OnInit / Connect)
 
@@ -685,7 +688,7 @@ Deleting a schema is `SchemaService.Delete()`, which refuses while any pipeline 
 
 `PipelineService.Rebind()` (`POST /pipelines/rebind`):
 1. Parses and validates the new device list
-2. Writes the `DeviceNodePaths` setting (and `StrictSchemaMatch`, if supplied)
+2. Writes the `DeviceNodePaths` setting
 3. Calls `UpdateProduction()` — the service re-resolves on its next connect
 
 That is the whole of editing a pipeline. Because devices are resolved by name at connect time, changing the list is a **settings update**: no regeneration, no recompile, no metadata to migrate.

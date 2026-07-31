@@ -39,7 +39,6 @@ ClassMethod Deploy(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 ///   devices           required, newline-separated nodepaths (DeviceNodePaths form)
 ///   dataSourceName    config item name; defaults to the schema's short name
 ///   mode              "polling" (default) or "subscription"
-///   strictSchemaMatch optional boolean
 ///   url               OPC UA endpoint
 ///   callInterval      polling mode, seconds (default 5)
 ///   publishingInterval / samplingInterval / queueSize   subscription mode, ms
@@ -189,11 +188,6 @@ ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDS
 		// The device list lives in the config item, so it is visible and editable
 		// in the Management Portal — adding a device is a one-line edit here.
 		do ..AddSetting(tItem, "Adapter", "DeviceNodePaths", pDeviceNodePaths)
-
-		// Optional strictness: refuse to start rather than storing NULL columns.
-		if +pBody.%Get("strictSchemaMatch") {
-			do ..AddSetting(tItem, "Adapter", "StrictSchemaMatch", 1)
-		}
 
 		if pMode = "polling" {
 			set tInterval = +pBody.%Get("callInterval")

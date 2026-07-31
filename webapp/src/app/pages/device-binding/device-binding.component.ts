@@ -286,8 +286,8 @@ function parseNodeId(path: string): { ns: number; id: string } | null {
             @if (!v.allResolved) {
               <p class="text-xs text-on-surface-variant mb-4 flex items-start gap-2">
                 <span class="material-symbols-outlined text-sm shrink-0 mt-0.5">info</span>
-                Missing columns are stored as NULL and logged as warnings at runtime. Enable
-                <span class="font-semibold">Strict schema match</span> below to refuse to start instead.
+                Missing columns are stored as NULL, and each is logged as a warning on every
+                connect. The rest of the device still collects normally.
               </p>
             }
 
@@ -385,16 +385,6 @@ function parseNodeId(path: string): { ns: number; id: string } | null {
               }
             }
 
-            <div class="sm:col-span-2 flex items-start gap-3 pt-2">
-              <input type="checkbox" id="strict" [ngModel]="strictSchemaMatch()" (ngModelChange)="strictSchemaMatch.set($event)"
-                     class="mt-0.5 rounded border-outline-variant/40 text-primary focus:ring-primary/30" />
-              <label for="strict" class="text-sm text-on-surface cursor-pointer">
-                <span class="font-semibold">Strict schema match</span>
-                <span class="block text-[11px] text-on-surface-variant">
-                  Refuse to start if any column fails to resolve, instead of storing NULL.
-                </span>
-              </label>
-            </div>
           </div>
         </section>
 
@@ -456,7 +446,6 @@ export class DeviceBindingComponent implements OnInit {
   mode = signal<'polling' | 'subscription'>('polling');
   callInterval = signal(5);
   publishingInterval = signal(1000);
-  strictSchemaMatch = signal(false);
   deploying = signal(false);
 
   advancedOpen = signal(false);
@@ -539,7 +528,6 @@ export class DeviceBindingComponent implements OnInit {
 
         this.pipelineName.set(p.name);
         this.deviceText.set(p['deviceNodePaths'] || '');
-        this.strictSchemaMatch.set(!!p['strictSchemaMatch']);
         if (p.mode === 'subscription') this.mode.set('subscription');
 
         // Prefer the pipeline's own server so the tree browses what it reads.
@@ -654,7 +642,7 @@ export class DeviceBindingComponent implements OnInit {
     // Editing changes only the binding, so it never regenerates the schema.
     if (this.editMode()) {
       this.api
-        .rebindPipeline(this.pipelineName(), this.deviceText(), this.strictSchemaMatch())
+        .rebindPipeline(this.pipelineName(), this.deviceText())
         .subscribe({
           next: () => {
             this.deploying.set(false);
@@ -673,7 +661,6 @@ export class DeviceBindingComponent implements OnInit {
       dataSourceName: this.pipelineName().trim(),
       devices: this.deviceText(),
       mode: this.mode(),
-      strictSchemaMatch: this.strictSchemaMatch() ? 1 : 0,
     };
     if (this.mode() === 'polling') {
       params['callInterval'] = this.callInterval();

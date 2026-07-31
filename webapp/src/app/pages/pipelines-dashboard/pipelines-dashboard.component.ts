@@ -247,12 +247,6 @@ import { Pipeline, PipelineHealth } from '../../core/models/opcua.models';
                     </span>
                   </div>
                 }
-                @if (pipeline['strictSchemaMatch']) {
-                  <span class="px-2 py-0.5 rounded-full bg-primary-fixed/40 text-[10px] font-bold uppercase tracking-wider text-primary"
-                        title="Refuses to start if any column fails to resolve">
-                    Strict
-                  </span>
-                }
               </div>
             }
 
@@ -454,9 +448,6 @@ export class PipelinesDashboardComponent implements OnInit, OnDestroy {
   /** Why a pipeline isn't collecting, when we can tell from config alone. */
   getFailureHint(p: Pipeline): string {
     if (!this.isFailing(p)) return '';
-    if (p['strictSchemaMatch']) {
-      return 'Strict schema match is on and some columns did not resolve. Check the event log, then fix the device list or turn strict off.';
-    }
     return 'The service is retrying but not collecting. Check the event log for the reason.';
   }
 

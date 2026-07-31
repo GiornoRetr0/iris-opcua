@@ -10,7 +10,7 @@ Class OPCUA.Adapter.Common Extends Ens.InboundAdapter
 /// Ens.ContextSearch.SubclassOf takes the superclass in a parameter named
 /// "class" (not "super"), and already excludes abstract classes, so the abstract
 /// DeviceSchema base never appears in the list.
-Parameter SETTINGS = "URL:Connection,ConnectionRetryTimeout:Connection,AlwaysConnect:Connection,DataSourceClass:Data:selector?context={Ens.ContextSearch/SubclassOf?class=OPCUA.DataSource.DeviceSchema},DeviceNodePaths:Data,StrictSchemaMatch:Data,Username:User,Password:User,SecurityMode:Security,ClientURI:Security,PublicCertificate:Security,PrivateKey:Security,TrustListDir:Security,RevocationListDir:Security,LogFileTag:Logging";
+Parameter SETTINGS = "URL:Connection,ConnectionRetryTimeout:Connection,AlwaysConnect:Connection,DataSourceClass:Data:selector?context={Ens.ContextSearch/SubclassOf?class=OPCUA.DataSource.DeviceSchema},DeviceNodePaths:Data,Username:User,Password:User,SecurityMode:Security,ClientURI:Security,PublicCertificate:Security,PrivateKey:Security,TrustListDir:Security,RevocationListDir:Security,LogFileTag:Logging";
 
 // *** PROPERTIES INFLUENCED BY SETTINGS ***
 
@@ -53,13 +53,6 @@ Property DataSourceClass As %String;
 /// no regeneration and no recompile. Only used by the row-source services; the
 /// declarative Examples/Tests path ignores it.
 Property DeviceNodePaths As %String(MAXLEN = 32000);
-
-/// If set, refuse to start when any schema column fails to resolve on any
-/// configured device. The default (0) stores NULL for unresolved columns and
-/// logs a warning naming the device and column, which matches the behaviour of
-/// the precomputed column masks this replaced. Turn it on in production when a
-/// silently NULL column would be worse than a service that refuses to start.
-Property StrictSchemaMatch As %Boolean [ InitialExpression = 0 ];
 
 /// The username with which to log on to the OPC UA server.
 Property Username As %String;
@@ -214,8 +207,7 @@ Method ResolveSpecification() As %Status
 ///
 /// Shared by both row-source adapters' ResolveSpecification() overrides, so the
 /// polling and subscription paths cannot drift apart. Unresolved columns are
-/// logged once per (device, column) and stored as NULL, unless StrictSchemaMatch
-/// is set, in which case resolution fails instead.
+/// logged once per (device, column) and stored as NULL.
 Method ResolveRowSourceSpec(Output pSpec As %List, Output pMasks As %List, Output pPaths As %List) As %Status
 {
 	#dim tSC as %Status = $$$OK
@@ -245,18 +237,13 @@ Method ResolveRowSourceSpec(Output pSpec As %List, Output pMasks As %List, Outpu
 
 		// Report every unresolved column, naming the device and the column.
 		//
-		// The consequence differs by mode, so say which one applies rather than
-		// promising NULL storage that the strict check below then overrides.
-		set tStrict = (..StrictSchemaMatch && ($LL(tDiagnostics) > 0))
-		set tConsequence = $Select(tStrict:"This pipeline will not collect data while StrictSchemaMatch is enabled.", 1:"It will be stored as NULL.")
+		// A partially matching device is a legitimate binding, not an error: the
+		// coverage dry run (POST /schemas/:name/validate) shows exactly which
+		// columns are missing before deploy, so a device bound anyway was bound
+		// deliberately. Its unresolved columns store NULL and say so here.
 		for i=1:1:$LL(tDiagnostics) {
 			set tD = $LI(tDiagnostics, i)
-			$$$LOGWARNING("Device '"_$LI(tD, 1)_"': column '"_$LI(tD, 2)_"' did not resolve — "_$LI(tD, 3)_". "_tConsequence)
-		}
-
-		if tStrict {
-			set tSC = $$$ERROR($$$GeneralError, "StrictSchemaMatch is enabled and "_$LL(tDiagnostics)_" column(s) did not resolve — see the warnings above. No data will be collected until every column resolves on every device, or StrictSchemaMatch is turned off.")
-			Quit
+			$$$LOGWARNING("Device '"_$LI(tD, 1)_"': column '"_$LI(tD, 2)_"' did not resolve — "_$LI(tD, 3)_". It will be stored as NULL.")
 		}
 
 		// NodePath values, in device order, for the service to tag rows with.
