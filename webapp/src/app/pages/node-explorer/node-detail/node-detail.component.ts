@@ -71,7 +71,31 @@ import { severityOf, statusText, statusDetail } from '../../../core/opcua-status
               <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-[0.2em] mb-1">Current Process Value</p>
               <h2 class="text-sm font-medium text-on-surface-muted">{{ node()!.displayName }}</h2>
             </div>
-            <div class="flex items-baseline gap-4 mt-8">
+
+            <!-- The failure is surfaced on the card that owns the value, not only on
+                 the nav-rail dot on its independent 15s timer. Vocabulary mirrors the
+                 pipeline side, which names the consequence rather than the mechanism. -->
+            @if (isStale()) {
+              <div class="flex items-start gap-2.5 rounded-lg px-3 py-2.5 mt-4 border"
+                   [class]="freshness() === 'disconnected'
+                     ? 'bg-error-container/25 border-error/20'
+                     : 'bg-amber-50 border-amber-300'">
+                <span class="material-symbols-outlined text-lg shrink-0"
+                      [class]="freshness() === 'disconnected' ? 'text-error' : 'text-amber-700'">history</span>
+                <div class="min-w-0">
+                  <p class="text-sm font-bold"
+                     [class]="freshness() === 'disconnected' ? 'text-on-error-container' : 'text-amber-900'">
+                    {{ freshness() === 'disconnected' ? 'Not reading this node' : 'This value may be out of date' }}
+                  </p>
+                  <p class="text-xs mt-0.5"
+                     [class]="freshness() === 'disconnected' ? 'text-on-error-container/80' : 'text-amber-900/80'">
+                    {{ stalenessMessage() }}
+                  </p>
+                </div>
+              </div>
+            }
+            <div class="flex items-baseline gap-4 mt-8"
+                 [class.opacity-60]="isStale()">
               @if (readResult()) {
                 <!-- Size bound to length: 120px only holds about six characters, so a
                      long string used to overflow its card silently. getUnit() and its
@@ -90,6 +114,17 @@ import { severityOf, statusText, statusDetail } from '../../../core/opcua-status
             </div>
             <div class="mt-8 pt-6 border-t border-surface-container">
               <div class="flex gap-12">
+                <div>
+                  <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-1">Read</p>
+                  <span class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-bold"
+                        [class]="ageChipClass()"
+                        [title]="lastSuccessAt() ? 'Last successful read at ' + lastSuccessClock() : 'No successful read yet'">
+                    @if (isStale()) {
+                      <span class="material-symbols-outlined text-[13px]">history</span>
+                    }
+                    {{ ageLabel() }}
+                  </span>
+                </div>
                 <div>
                   <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-1">Status</p>
                   <div class="flex items-center gap-2">
@@ -197,21 +232,55 @@ export class NodeDetailComponent implements OnDestroy {
   autoRefresh = true;
   private refreshInterval: any;
 
+  // ── Staleness tracking ──────────────────────────────────────────────────────
+  // The REST API is stateless: every read opens a connection, reads, and
+  // disconnects. A failed read used to leave the previous result on screen
+  // untouched — same value, same status, same timestamp — so an operator could
+  // watch "31 / Good / 12:04:07" while the server had been unreachable for a
+  // minute. The only signal was the nav rail's dot, on its own 15s timer, in a
+  // different part of the screen, reporting server reachability rather than "the
+  // value you are looking at is stale". That is the dangerous failure mode in a
+  // tool whose decisions reach physical equipment.
+
+  /** When the last *successful* read landed. Null until one does. */
+  lastSuccessAt = signal<number | null>(null);
+  /** Why the most recent read failed, or '' if it succeeded. */
+  lastError = signal('');
+  /** Consecutive failures. Reset by any success. */
+  consecutiveFailures = signal(0);
+  /** Ticks every second so the rendered age stays true without a re-read. */
+  private now = signal(Date.now());
+  private ageTicker: any;
+
   constructor() {
     effect(() => {
       const n = this.node();
       if (n) {
+        // A different node means the previous node's history says nothing about
+        // this one. Clearing is what stops one node's freshness vouching for
+        // another's.
+        this.resetFreshness();
         this.readValue();
         this.setupAutoRefresh();
       } else {
         this.clearAutoRefresh();
         this.readResult.set(null);
+        this.resetFreshness();
       }
     });
+
+    this.ageTicker = setInterval(() => this.now.set(Date.now()), 1000);
   }
 
   ngOnDestroy(): void {
     this.clearAutoRefresh();
+    if (this.ageTicker) clearInterval(this.ageTicker);
+  }
+
+  private resetFreshness(): void {
+    this.lastSuccessAt.set(null);
+    this.lastError.set('');
+    this.consecutiveFailures.set(0);
   }
 
   readValue(): void {
@@ -222,9 +291,105 @@ export class NodeDetailComponent implements OnDestroy {
       next: (result) => {
         this.readResult.set(result);
         this.readLoading.set(false);
+        // A transported read whose StatusCode is Bad is not a successful reading.
+        // Counting it as fresh would let a server that answers "I can't tell you"
+        // keep the card looking live.
+        if (result.readError) {
+          this.recordFailure(result.readError);
+        } else {
+          this.lastSuccessAt.set(Date.now());
+          this.lastError.set('');
+          this.consecutiveFailures.set(0);
+        }
       },
-      error: () => this.readLoading.set(false),
+      error: (err) => {
+        // The error callback used to only clear the spinner. Recording the
+        // failure is what makes staleness visible at all.
+        this.readLoading.set(false);
+        this.recordFailure(err?.error?.error || err?.message || 'The read failed');
+      },
     });
+  }
+
+  private recordFailure(message: string): void {
+    this.lastError.set(message);
+    this.consecutiveFailures.update((n) => n + 1);
+  }
+
+  /** Seconds since the last successful read, or null if there has never been one. */
+  ageSeconds(): number | null {
+    const at = this.lastSuccessAt();
+    if (at == null) return null;
+    return Math.max(0, Math.round((this.now() - at) / 1000));
+  }
+
+  /**
+   * Freshness, derived from the refresh interval rather than hardcoded — a 30s
+   * interval should not be called stale at 15s (D4).
+   *
+   *   live         a recent successful read
+   *   stale        no success for ~3 intervals — the value may no longer be true
+   *   disconnected no success for ~6 intervals — treat the value as historical
+   */
+  freshness(): 'unknown' | 'live' | 'stale' | 'disconnected' {
+    const age = this.ageSeconds();
+    if (age == null) return 'unknown';
+    const interval = this.config.get().autoRefreshInterval || 5;
+    // Without auto-refresh nothing is re-reading, so age is the user's own doing
+    // and decaying the value would be misleading rather than informative.
+    if (!this.autoRefresh) return 'live';
+    if (age >= interval * 6) return 'disconnected';
+    if (age >= interval * 3) return 'stale';
+    return 'live';
+  }
+
+  /** True once the value on screen should stop claiming to be current. */
+  isStale(): boolean {
+    const f = this.freshness();
+    return f === 'stale' || f === 'disconnected';
+  }
+
+  /** "4s ago" / "2m ago", for the age chip beside the value. */
+  ageLabel(): string {
+    const age = this.ageSeconds();
+    if (age == null) return 'never read';
+    if (age < 2) return 'just now';
+    if (age < 60) return `${age}s ago`;
+    if (age < 3600) return `${Math.floor(age / 60)}m ago`;
+    return `${Math.floor(age / 3600)}h ago`;
+  }
+
+  ageChipClass(): string {
+    switch (this.freshness()) {
+      case 'stale': return 'text-amber-700 bg-amber-50 border-amber-300';
+      case 'disconnected': return 'text-error bg-error-container/40 border-error/30';
+      default: return 'text-on-surface-muted bg-surface-container-low border-outline-variant/20';
+    }
+  }
+
+  /** The clock time the on-screen value was actually read at. */
+  lastSuccessClock(): string {
+    const at = this.lastSuccessAt();
+    if (at == null) return '';
+    return new Date(at).toLocaleTimeString('en-US', {
+      hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+  }
+
+  /**
+   * The banner text. Mirrors the pipeline side's vocabulary, which already gets
+   * this right: name the consequence, not the mechanism.
+   */
+  stalenessMessage(): string {
+    const f = this.freshness();
+    const failures = this.consecutiveFailures();
+    const detail = this.lastError() ? ` ${this.lastError()}` : '';
+    if (f === 'disconnected') {
+      return `Not reading — ${failures} failed attempt${failures === 1 ? '' : 's'} since ` +
+        `${this.lastSuccessClock()}. The value below is historical.${detail}`;
+    }
+    return `Last read failed${failures > 1 ? ` (${failures} attempts)` : ''} — ` +
+      `this value is from ${this.lastSuccessClock()}.${detail}`;
   }
 
   onAutoRefreshToggle(): void {
