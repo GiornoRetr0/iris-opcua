@@ -204,10 +204,12 @@ import { Pipeline, PipelineHealth } from '../../core/models/opcua.models';
 
                 <!-- Center box: SERVICE (blue) -->
                 <div class="relative z-10">
-                  <div class="rounded-lg px-6 py-4 text-center shadow-lg min-w-[170px]"
-                       [class]="isRunning(pipeline)
-                         ? 'bg-primary text-on-primary border border-primary-container'
-                         : 'bg-primary/80 text-on-primary border border-primary-container'">
+                  <!-- One background for both states. The stopped look is carried by the
+                       wrapper's grayscale(1); a bg-primary/80 here was a further opacity
+                       on top of it, and measuring the rendered pixels put the SERVICE
+                       label at 3.51:1 even after the other three were fixed. -->
+                  <div class="rounded-lg px-6 py-4 text-center shadow-lg min-w-[170px]
+                              bg-primary text-on-primary border border-primary-container">
                     <p class="text-[0.55rem] font-bold uppercase tracking-widest mb-0.5 text-on-primary-muted">Service</p>
                     <p class="text-sm font-bold">{{ pipeline.name }}</p>
                     <p class="text-[10px] mt-0.5 text-on-primary-muted">{{ getIntervalLabel(pipeline) }}</p>
