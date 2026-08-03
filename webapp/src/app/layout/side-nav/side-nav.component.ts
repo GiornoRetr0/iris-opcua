@@ -17,33 +17,12 @@ import { ServerProfile } from '../../core/models/opcua.models';
         <p class="text-[10px] uppercase tracking-widest text-on-surface-muted font-bold">OPC UA Console</p>
       </div>
 
-      <!-- Server connections -->
-      @if (servers().length > 0) {
-        <div class="mx-4 mb-3 space-y-1.5">
-          @for (server of servers(); track server.id) {
-            <div class="px-3 py-2 bg-white rounded-lg border border-slate-200/60 shadow-sm">
-              <div class="flex items-center gap-2">
-                <span class="relative flex h-2 w-2 shrink-0">
-                  <span class="absolute inline-flex h-full w-full rounded-full opacity-75"
-                        [class]="serverOnline()[server.id] ? 'bg-emerald-400 animate-ping' : 'bg-red-400'"></span>
-                  <span class="relative inline-flex rounded-full h-2 w-2"
-                        [class]="serverOnline()[server.id] ? 'bg-emerald-500' : 'bg-red-500'"></span>
-                </span>
-                <span class="text-[11px] font-semibold text-slate-700 truncate flex-1" [title]="server.name">{{ server.name }}</span>
-                <span class="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-semibold"
-                      [class]="server.securityMode === 3
-                        ? 'bg-emerald-50 text-emerald-700'
-                        : 'bg-amber-50 text-amber-700'">
-                  <span class="material-symbols-outlined text-[10px]">{{ server.securityMode === 3 ? 'lock' : 'lock_open' }}</span>
-                </span>
-              </div>
-              <p class="text-[10px] font-mono text-slate-500 truncate mt-0.5" [title]="server.url">{{ server.url }}</p>
-            </div>
-          }
-        </div>
-      }
-
-      <!-- Navigation -->
+      <!-- Navigation.
+           Above the server list, deliberately: this block used to sit inside a
+           conditional *above* <nav>, so adding the first server pushed all three
+           nav items down ~80px and the destination you were aiming for moved
+           (F24). Nav is now fixed at the top and the variable-height list is
+           what moves. -->
       <nav class="space-y-1 px-2 flex-grow overflow-y-auto custom-scrollbar">
         <a routerLink="/explorer"
            routerLinkActive="bg-blue-100/50 text-[#131c79]"
@@ -84,6 +63,38 @@ import { ServerProfile } from '../../core/models/opcua.models';
           <span class="text-sm font-medium">Pipelines</span>
         </a>
       </nav>
+
+      <!-- Server connections.
+           A real <button>: this was a plain <div> styled exactly like the
+           interactive cards elsewhere — name, dot, URL, padlock, the most
+           natural thing on the page to click for server settings — and it did
+           nothing. One of the two dead routes into connection setup (F14). -->
+      @if (servers().length > 0) {
+        <div class="mx-4 mt-3 mb-4 space-y-1.5 shrink-0 max-h-[40vh] overflow-y-auto custom-scrollbar">
+          @for (server of servers(); track server.id) {
+            <button (click)="openSettings()" type="button"
+                    [title]="'Open connection settings for ' + server.name"
+                    class="w-full text-left px-3 py-2 bg-white rounded-lg border border-slate-200/60 shadow-sm
+                           hover:border-primary/40 hover:shadow focus:outline-none focus:ring-2 focus:ring-primary/40
+                           transition-all cursor-pointer">
+              <div class="flex items-center gap-2">
+                <span class="relative flex h-2 w-2 shrink-0">
+                  <span class="absolute inline-flex h-full w-full rounded-full opacity-75"
+                        [class]="serverOnline()[server.id] ? 'bg-emerald-400 animate-ping' : 'bg-red-400'"></span>
+                  <span class="relative inline-flex rounded-full h-2 w-2"
+                        [class]="serverOnline()[server.id] ? 'bg-emerald-500' : 'bg-red-500'"></span>
+                </span>
+                <span class="text-[11px] font-semibold text-slate-700 truncate flex-1">{{ server.name }}</span>
+                <span class="material-symbols-outlined text-[11px] shrink-0"
+                      [class]="server.securityMode === 3 ? 'text-emerald-700' : 'text-amber-700'">
+                  {{ server.securityMode === 3 ? 'lock' : 'lock_open' }}
+                </span>
+              </div>
+              <p class="text-[10px] font-mono text-on-surface-muted truncate mt-0.5">{{ server.url }}</p>
+            </button>
+          }
+        </div>
+      }
     </aside>
   `,
 })

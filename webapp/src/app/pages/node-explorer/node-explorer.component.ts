@@ -26,23 +26,41 @@ import { TreeNode } from '../../core/models/opcua.models';
             <span class="material-symbols-outlined text-sm">settings</span>
             Open Settings
           </button>
-          <div class="mt-10 grid grid-cols-3 gap-4 text-center">
-            <div class="p-4 bg-surface-container-lowest rounded-xl border border-outline-variant/10">
-              <span class="material-symbols-outlined text-primary text-2xl mb-2">hub</span>
-              <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">1. Connect</p>
-              <p class="text-[11px] text-on-surface-muted mt-1">Enter server URL</p>
-            </div>
-            <div class="p-4 bg-surface-container-lowest rounded-xl border border-outline-variant/10">
-              <span class="material-symbols-outlined text-primary text-2xl mb-2">account_tree</span>
-              <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">2. Browse</p>
-              <p class="text-[11px] text-on-surface-muted mt-1">Explore nodes</p>
-            </div>
-            <div class="p-4 bg-surface-container-lowest rounded-xl border border-outline-variant/10">
-              <span class="material-symbols-outlined text-primary text-2xl mb-2">bar_chart</span>
-              <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">3. Read</p>
-              <p class="text-[11px] text-on-surface-muted mt-1">View live data</p>
-            </div>
-          </div>
+          <!-- These were three <div>s in bordered, rounded, shadowed containers
+               identical to the interactive cards elsewhere, and none of them did
+               anything (F14). Steps 2 and 3 describe actions that cannot be
+               performed until a server exists, so there is no honest destination
+               for a click — the fix is to stop promising one. Step 1 is a real
+               button, because it does have somewhere to go. -->
+          <ol class="mt-10 text-left space-y-3">
+            <li>
+              <button (click)="openSettings()" type="button"
+                      class="w-full flex items-center gap-3 p-4 bg-surface-container-lowest rounded-xl
+                             border border-outline-variant/10 hover:border-primary/40 hover:shadow
+                             focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all cursor-pointer">
+                <span class="material-symbols-outlined text-primary text-2xl shrink-0">hub</span>
+                <span class="flex-1">
+                  <span class="block text-xs font-bold text-on-surface">1. Connect a server</span>
+                  <span class="block text-[11px] text-on-surface-muted">Enter its URL and security mode</span>
+                </span>
+                <span class="material-symbols-outlined text-on-surface-muted text-lg shrink-0">chevron_right</span>
+              </button>
+            </li>
+            <li class="flex items-center gap-3 px-4">
+              <span class="material-symbols-outlined text-on-surface-muted text-2xl shrink-0">account_tree</span>
+              <span>
+                <span class="block text-xs font-bold text-on-surface-muted">2. Browse the address space</span>
+                <span class="block text-[11px] text-on-surface-muted">Explore the server's nodes</span>
+              </span>
+            </li>
+            <li class="flex items-center gap-3 px-4">
+              <span class="material-symbols-outlined text-on-surface-muted text-2xl shrink-0">bar_chart</span>
+              <span>
+                <span class="block text-xs font-bold text-on-surface-muted">3. Read a node's value</span>
+                <span class="block text-[11px] text-on-surface-muted">See live data and its status</span>
+              </span>
+            </li>
+          </ol>
         </div>
       </div>
     } @else {
