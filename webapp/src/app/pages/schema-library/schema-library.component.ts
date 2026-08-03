@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { ApiService } from '../../core/services/api.service';
 import { Schema } from '../../core/models/opcua.models';
+import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dialog.component';
 
 /**
  * Schema library: browse, inspect and delete reusable device schemas.
@@ -14,7 +15,7 @@ import { Schema } from '../../core/models/opcua.models';
 @Component({
   selector: 'app-schema-library',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, ConfirmDialogComponent],
   template: `
     <div class="p-8 max-w-7xl mx-auto">
       <!-- Page header -->
@@ -212,6 +213,15 @@ import { Schema } from '../../core/models/opcua.models';
         }
       </div>
     </div>
+
+    @if (pendingDelete()) {
+      <app-confirm-dialog
+        [title]="'Delete schema &quot;' + pendingDelete()!.name + '&quot;?'"
+        [detail]="deleteDetail()"
+        confirmLabel="Delete schema and table"
+        (confirmed)="confirmDelete()"
+        (cancelled)="pendingDelete.set(null)" />
+    }
   `,
 })
 export class SchemaLibraryComponent implements OnInit {
@@ -280,9 +290,29 @@ export class SchemaLibraryComponent implements OnInit {
     this.router.navigate(['/pipelines/bind', schema.schemaClass]);
   }
 
+  /** Which schema the confirmation dialog is about, or null when it is closed. */
+  pendingDelete = signal<Schema | null>(null);
+
   remove(schema: Schema): void {
     if (schema.usedBy.length) return;
-    if (!confirm(`Delete schema "${schema.name}"? This drops its table.`)) return;
+    this.pendingDelete.set(schema);
+  }
+
+  /**
+   * Deleting a schema *is* the data-losing operation — unlike deleting a pipeline,
+   * which keeps both. Name the table, since that is what goes.
+   */
+  deleteDetail(): string {
+    const s = this.pendingDelete();
+    if (!s) return '';
+    return `This drops the ${s.tableName} table and every row collected into it. ` +
+      `Schema columns cannot be edited, so recreating it is the only way back — and the data does not come with it.`;
+  }
+
+  confirmDelete(): void {
+    const schema = this.pendingDelete();
+    if (!schema) return;
+    this.pendingDelete.set(null);
     this.api.deleteSchema(schema.schemaClass).subscribe({
       next: () => this.load(),
       error: (err) => this.error.set(this.message(err)),

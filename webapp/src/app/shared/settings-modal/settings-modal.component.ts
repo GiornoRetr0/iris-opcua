@@ -133,12 +133,24 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
                   </div>
                   <div>
                     <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Security Mode</label>
+                    <!-- min-w so it cannot truncate mid-identifier: Basic256Sha256 and
+                         Basic128Rsa15 are different things, and "Sign & Encrypt
+                         (Basic256Sha2" told you nothing about which. The policy moves
+                         to a second line below rather than into the option text. -->
                     <select [(ngModel)]="editingServer()!.securityMode"
                             (ngModelChange)="onSecurityModeChange($event)"
-                            class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all appearance-none cursor-pointer">
+                            class="w-full min-w-[16rem] bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all appearance-none cursor-pointer">
                       <option [ngValue]="1">None</option>
-                      <option [ngValue]="3">Sign & Encrypt (Basic256Sha256)</option>
+                      <option [ngValue]="3">Sign &amp; Encrypt</option>
                     </select>
+                    <p class="text-[11px] text-on-surface-muted mt-1">
+                      @if (editingServer()!.securityMode === 3) {
+                        Policy <code class="font-mono">Basic256Sha256</code>. Needs a client
+                        certificate, key and trust list below.
+                      } @else {
+                        No message security — traffic is unencrypted and unsigned.
+                      }
+                    </p>
                   </div>
                   <div class="md:col-span-2">
                     <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">OPC UA Server URL</label>
@@ -286,9 +298,17 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
                     }
                   </div>
                   <div>
-                    <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Auto-Refresh Interval (s)</label>
+                    <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Auto-refresh interval (seconds)</label>
                     <input type="number" [(ngModel)]="gatewayForm.autoRefreshInterval" min="1" max="60"
                            class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
+                    <!-- The min/max already existed (C4); it just was not communicated.
+                         Naming the two screens it governs also separates it from the
+                         per-pipeline poll interval, which is a different concept with an
+                         overlapping name. -->
+                    <p class="text-[11px] text-on-surface-muted mt-1">
+                      Between 1 and 60. Applies to the node explorer and the pipelines
+                      list — not to how often a pipeline polls its server.
+                    </p>
                   </div>
                 </div>
               </section>

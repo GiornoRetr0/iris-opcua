@@ -4,11 +4,12 @@ import { Router } from '@angular/router';
 import { ApiService } from '../../core/services/api.service';
 import { ConfigService } from '../../core/services/config.service';
 import { Pipeline, PipelineHealth } from '../../core/models/opcua.models';
+import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dialog.component';
 
 @Component({
   selector: 'app-pipelines-dashboard',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, ConfirmDialogComponent],
   template: `
     <div class="p-8 max-w-7xl mx-auto">
       <!-- Page Header -->
@@ -289,6 +290,14 @@ import { Pipeline, PipelineHealth } from '../../core/models/opcua.models';
       </div>
     </div>
 
+    @if (pendingDelete()) {
+      <app-confirm-dialog
+        [title]="'Delete pipeline &quot;' + pendingDelete()!.name + '&quot;?'"
+        [detail]="deleteDetail()"
+        confirmLabel="Delete pipeline"
+        (confirmed)="confirmDelete()"
+        (cancelled)="pendingDelete.set(null)" />
+    }
   `,
 })
 export class PipelinesDashboardComponent implements OnInit, OnDestroy {
@@ -361,15 +370,32 @@ export class PipelinesDashboardComponent implements OnInit, OnDestroy {
     this.router.navigate(['/pipelines/edit', pipeline.name]);
   }
 
+  /** Which pipeline the confirmation dialog is about, or null when it is closed. */
+  pendingDelete = signal<Pipeline | null>(null);
+
   deletePipeline(pipeline: Pipeline): void {
-    // Say what survives: the schema and its table are kept, so this is not the
-    // data-losing operation the bare prompt implied.
-    const schema = this.getSchemaName(pipeline);
-    const detail = schema
-      ? `\n\nThe "${schema}" schema and its collected data are kept. Delete the schema from the Schemas page if you no longer need it.`
+    this.pendingDelete.set(pipeline);
+  }
+
+  /**
+   * The consequence, kept verbatim from the native prompt this replaced — the copy
+   * was the good part. Says what survives: the schema and its table are kept, so
+   * this is not the data-losing operation a bare "Delete pipeline?" implies.
+   */
+  deleteDetail(): string {
+    const p = this.pendingDelete();
+    if (!p) return '';
+    const schema = this.getSchemaName(p);
+    return schema
+      ? `The "${schema}" schema and its collected data are kept. Delete the schema from the Schemas page if you no longer need it.`
       : '';
-    if (!confirm(`Delete pipeline "${pipeline.name}"?${detail}`)) return;
-    this.api.deletePipeline(pipeline.name).subscribe({
+  }
+
+  confirmDelete(): void {
+    const p = this.pendingDelete();
+    if (!p) return;
+    this.pendingDelete.set(null);
+    this.api.deletePipeline(p.name).subscribe({
       next: () => this.loadPipelines(),
     });
   }
