@@ -1,7 +1,22 @@
 import { Injectable, signal, computed } from '@angular/core';
 import { AppConfig, ServerProfile } from '../models/opcua.models';
 
-const STORAGE_KEY = 'precisionArchitect::config';
+/**
+ * Where configuration lives, and it is worth being explicit about the shape of
+ * that: cleartext `localStorage`, per-browser rather than per-user, holding every
+ * OPC UA server password and the IRIS API password. See SECURITY-REVIEW.md — that
+ * is a security question, not a design one, and it is escalated rather than
+ * decided here. The UI states the browser-local part so a user is not surprised
+ * when their servers do not follow them to another machine.
+ */
+const STORAGE_KEY = 'opcua-console::config';
+
+/**
+ * The previous key, from an earlier iteration of the product. Read once and
+ * migrated so nobody loses their servers to a rename — the name was shipping
+ * internal branding and would eventually surface in a support call.
+ */
+const LEGACY_STORAGE_KEY = 'precisionArchitect::config';
 
 let _nextId = 1;
 function generateId(): string {
@@ -39,7 +54,17 @@ export class ConfigService {
 
   load(): void {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      let raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) {
+        // One-time migration off the old key. Written under the new key
+        // immediately so this branch is taken exactly once.
+        const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+        if (legacy) {
+          localStorage.setItem(STORAGE_KEY, legacy);
+          localStorage.removeItem(LEGACY_STORAGE_KEY);
+          raw = legacy;
+        }
+      }
       if (raw) {
         const saved = JSON.parse(raw);
         const merged = { ...DEFAULTS };

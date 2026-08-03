@@ -318,6 +318,19 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
             }
           </div>
 
+          <!-- Where this configuration lives. Per-browser, not per-user: two operators
+               at one workstation share it and the same operator elsewhere has none of
+               it, and nothing said so. See SECURITY-REVIEW.md for the credential
+               question, which is not a design call. -->
+          <p class="px-8 pb-4 -mt-4 flex items-start gap-1.5 text-[11px] text-on-surface-muted">
+            <span class="material-symbols-outlined text-sm shrink-0">info</span>
+            <span>
+              These settings are stored in this browser only, including any passwords.
+              They do not follow you to another machine, and anyone using this browser
+              profile can see them.
+            </span>
+          </p>
+
           <!-- Footer Actions -->
           <div class="px-8 py-6 border-t border-outline-variant/10 bg-surface-container-low/50 flex flex-col sm:flex-row items-center justify-between gap-4">
             @if (activeTab() === 'servers' && editingServer()) {

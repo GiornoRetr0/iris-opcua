@@ -99,7 +99,7 @@ const config = {
 // per-origin, so seeding on :4200 does nothing for a build served from :4300.
 await send('Page.navigate', { url: new URL(url).origin + '/' });
 await new Promise((r) => setTimeout(r, 2200));
-await evalJs(`localStorage.setItem('precisionArchitect::config', ${JSON.stringify(JSON.stringify(config))})`);
+await evalJs(`localStorage.setItem('opcua-console::config', ${JSON.stringify(JSON.stringify(config))})`);
 await send('Page.navigate', { url });
 await new Promise((r) => setTimeout(r, 4000));
 
