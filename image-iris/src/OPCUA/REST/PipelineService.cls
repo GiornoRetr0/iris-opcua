@@ -77,9 +77,10 @@ ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %S
 			// nothing. Surface the adapter's own verdict so the UI can tell the two
 			// apart — this is what "started but silently collecting nothing" looked
 			// like before.
-			do ..GetHealth(tItem.name, tProdRunning, tCfgItem.Enabled, .tHealth, .tLastActivity)
+			do ..GetHealth(tItem.name, tProdRunning, tCfgItem.Enabled, .tHealth, .tLastActivity, .tCycles)
 			set tItem.health = tHealth
 			set tItem.lastActivity = tLastActivity
+			set tItem.cycles = tCycles
 
 			set tItem.productionRunning = tProdRunning
 			set tItem.nodes = ..GetNodeNames(tItem.dataSourceClass)
@@ -127,10 +128,14 @@ ClassMethod GetSettingValue(pItem As Ens.Config.Item, pName As %String) As %Stri
 /// <li><tt>ok</tt> — collecting normally</li>
 /// <li><tt>starting</tt> — enabled, but has not reported a cycle yet</li>
 /// </ul>
-ClassMethod GetHealth(pItemName As %String, pProdRunning As %Boolean, pEnabled As %Boolean, Output pHealth As %String, Output pLastActivity As %String) [ Private ]
+///
+/// pCycles is the number of completed cycles, or "" when the host has not reported
+/// any. It is what separates "just started" from "running dry".
+ClassMethod GetHealth(pItemName As %String, pProdRunning As %Boolean, pEnabled As %Boolean, Output pHealth As %String, Output pLastActivity As %String, Output pCycles As %Integer) [ Private ]
 {
 	set pHealth = "ok"
 	set pLastActivity = ""
+	set pCycles = ""
 
 	if 'pProdRunning {
 		set pHealth = "stopped"
@@ -144,6 +149,11 @@ ClassMethod GetHealth(pItemName As %String, pProdRunning As %Boolean, pEnabled A
 	Try {
 		set tStatus = $$$GetHostMonitor(pItemName, $$$eMonitorStatus)
 		set pLastActivity = $$$GetHostMonitor(pItemName, $$$eMonitorLastActivity)
+		// Completed cycles, which Ensemble already counts per host — this surfaces an
+		// existing counter rather than adding bookkeeping. Zero rows after one cycle
+		// is normal; zero rows after fifty is a problem, and the UI cannot tell those
+		// apart from health alone.
+		set pCycles = $$$GetHostMonitor(pItemName, $$$eMonitorCount)
 
 		// No entry yet means the job exists but hasn't completed a cycle. Calling
 		// that "ok" would claim success that hasn't happened.
