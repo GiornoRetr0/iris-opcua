@@ -123,7 +123,7 @@ import { Pipeline, PipelineHealth } from '../../core/models/opcua.models';
                 </div>
                 <div>
                   <h3 class="text-lg font-semibold"
-                      [class]="isStopped(pipeline) ? 'text-primary opacity-60' : 'text-primary'">{{ pipeline.name }}</h3>
+                      [class]="isStopped(pipeline) ? 'text-on-surface-variant' : 'text-primary'">{{ pipeline.name }}</h3>
                   <div class="flex items-center gap-2">
                     <span class="w-2 h-2 rounded-full" [class]="getStatusDotClass(pipeline)"></span>
                     <span class="text-xs font-bold uppercase tracking-widest" [class]="getStatusTextClass(pipeline)">
@@ -176,9 +176,11 @@ import { Pipeline, PipelineHealth } from '../../core/models/opcua.models';
             }
 
             <!-- ═══ Flow Visualization (3-box: Nodes → Service → Table) ═══ -->
+            <!-- grayscale(1) alone carries the stopped state (S7) and preserves
+                 luminance contrast. The opacity that used to sit alongside it is what
+                 pushed SERVICE to 1.54:1 — dropping it keeps the design idea intact. -->
             <div class="flex justify-center mb-6"
-                 [style.filter]="isStopped(pipeline) ? 'grayscale(1)' : 'none'"
-                 [style.opacity]="isStopped(pipeline) ? '0.4' : '1'">
+                 [style.filter]="isStopped(pipeline) ? 'grayscale(1)' : 'none'">
               <div class="inline-grid grid-cols-[auto_1fr_auto_1fr_auto] items-center gap-0 w-[85%] mx-auto">
 
                 <!-- Left box: NODES -->
@@ -203,9 +205,9 @@ import { Pipeline, PipelineHealth } from '../../core/models/opcua.models';
                        [class]="isRunning(pipeline)
                          ? 'bg-primary text-on-primary border border-primary-container'
                          : 'bg-primary/80 text-on-primary border border-primary-container'">
-                    <p class="text-[0.55rem] font-bold uppercase tracking-widest mb-0.5 opacity-70">Service</p>
+                    <p class="text-[0.55rem] font-bold uppercase tracking-widest mb-0.5 text-on-primary-muted">Service</p>
                     <p class="text-sm font-bold">{{ pipeline.name }}</p>
-                    <p class="text-[10px] mt-0.5 opacity-70">{{ getIntervalLabel(pipeline) }}</p>
+                    <p class="text-[10px] mt-0.5 text-on-primary-muted">{{ getIntervalLabel(pipeline) }}</p>
                   </div>
                 </div>
 
@@ -259,19 +261,19 @@ import { Pipeline, PipelineHealth } from '../../core/models/opcua.models';
               <div class="flex items-center gap-6">
                 <div class="space-y-0.5 text-right">
                   <div class="text-[0.6rem] font-bold text-on-surface-variant uppercase tracking-widest">Rows</div>
-                  <div class="text-sm font-semibold" [class]="isStopped(pipeline) ? 'text-primary opacity-40' : 'text-primary'">
+                  <div class="text-sm font-semibold" [class]="isStopped(pipeline) ? 'text-on-surface-variant' : 'text-primary'">
                     {{ pipeline.rowCount != null ? pipeline.rowCount : '—' }}
                   </div>
                 </div>
                 <div class="space-y-0.5 text-right">
                   <div class="text-[0.6rem] font-bold text-on-surface-variant uppercase tracking-widest">Frequency</div>
-                  <div class="text-sm font-semibold" [class]="isStopped(pipeline) ? 'text-primary opacity-40' : 'text-primary'">
+                  <div class="text-sm font-semibold" [class]="isStopped(pipeline) ? 'text-on-surface-variant' : 'text-primary'">
                     {{ getIntervalLabel(pipeline) }}
                   </div>
                 </div>
                 <div class="space-y-0.5 text-right">
                   <div class="text-[0.6rem] font-bold text-on-surface-variant uppercase tracking-widest">Last Activity</div>
-                  <div class="text-sm font-semibold" [class]="isStopped(pipeline) ? 'text-primary opacity-40' : 'text-primary'">
+                  <div class="text-sm font-semibold" [class]="isStopped(pipeline) ? 'text-on-surface-variant' : 'text-primary'">
                     {{ pipeline.lastActivity || '—' }}
                   </div>
                 </div>
