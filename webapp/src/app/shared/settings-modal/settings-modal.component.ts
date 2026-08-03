@@ -53,6 +53,15 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
                   <div class="flex-1 min-w-0">
                     <p class="text-xs font-semibold truncate">{{ server.name }}</p>
                     <p class="text-[10px] font-mono text-on-surface-muted truncate">{{ server.url }}</p>
+                    <!-- The mode in words under the URL, so the list itself says which
+                         connections are unsecured without opening each one. -->
+                    <p class="flex items-center gap-1 text-[10px] font-semibold"
+                       [class]="server.securityMode === 3 ? 'text-emerald-700' : 'text-amber-700'">
+                      <span class="material-symbols-outlined text-[11px]">
+                        {{ server.securityMode === 3 ? 'lock' : 'lock_open' }}
+                      </span>
+                      {{ server.securityMode === 3 ? 'Sign & Encrypt' : 'Unsecured' }}
+                    </p>
                   </div>
                   <button (click)="removeServer(server.id, $event)"
                           class="opacity-0 group-hover:opacity-100 text-on-surface-variant hover:text-error transition-all p-0.5 rounded">

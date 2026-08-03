@@ -85,11 +85,17 @@ import { ServerProfile } from '../../core/models/opcua.models';
                         [class]="serverOnline()[server.id] ? 'bg-emerald-500' : 'bg-red-500'"></span>
                 </span>
                 <span class="text-[11px] font-semibold text-slate-700 truncate flex-1">{{ server.name }}</span>
-                <span class="material-symbols-outlined text-[11px] shrink-0"
-                      [class]="server.securityMode === 3 ? 'text-emerald-700' : 'text-amber-700'">
+              </div>
+              <!-- Named, not just padlocked. State carried by icon-and-colour alone
+                   fails a grayscale screenshot and fails anyone who cannot separate
+                   amber from emerald; the padlock stays as reinforcement. -->
+              <p class="flex items-center gap-1 text-[10px] font-semibold mt-0.5"
+                 [class]="server.securityMode === 3 ? 'text-emerald-700' : 'text-amber-700'">
+                <span class="material-symbols-outlined text-[11px]">
                   {{ server.securityMode === 3 ? 'lock' : 'lock_open' }}
                 </span>
-              </div>
+                {{ server.securityMode === 3 ? 'Sign & Encrypt' : 'Unsecured' }}
+              </p>
               <p class="text-[10px] font-mono text-on-surface-muted truncate mt-0.5">{{ server.url }}</p>
             </button>
           }

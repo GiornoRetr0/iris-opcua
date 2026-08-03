@@ -37,11 +37,17 @@ interface ServerRoot {
             </span>
             <span class="material-symbols-outlined text-lg text-primary">dns</span>
             <span class="font-medium text-slate-700 truncate flex-1" [title]="sr.server.url">{{ sr.server.name }}</span>
-            <span class="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-semibold shrink-0"
+            <!-- The mode in words. Readable from a grayscale screenshot, which
+                 padlock-plus-colour is not. -->
+            <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold shrink-0"
                   [class]="sr.server.securityMode === 3
                     ? 'bg-emerald-50 text-emerald-700'
-                    : 'bg-amber-50 text-amber-700'">
+                    : 'bg-amber-50 text-amber-700'"
+                  [title]="sr.server.securityMode === 3
+                    ? 'Sign & Encrypt (Basic256Sha256)'
+                    : 'No message security — traffic is unencrypted and unsigned'">
               <span class="material-symbols-outlined text-[10px]">{{ sr.server.securityMode === 3 ? 'lock' : 'lock_open' }}</span>
+              {{ sr.server.securityMode === 3 ? 'Sign & Encrypt' : 'Unsecured' }}
             </span>
           </div>
 
