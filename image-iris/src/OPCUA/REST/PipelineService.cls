@@ -36,6 +36,14 @@ ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %S
 			set tItem.name = tCfgItem.Name
 			set tItem.className = tCfgItem.ClassName
 			set tItem.enabled = tCfgItem.Enabled
+			// An optional human label, held in the config item's own Comment field.
+			// The Name is the interop identity — the lookup key for Toggle and
+			// DescribeItem, the key for health telemetry, and the string that appears
+			// in Ens_Util.Log and the Management Portal — so it cannot be renamed.
+			// A display name is therefore webapp-only sugar and must never be
+			// presented as *the* name; using Comment rather than a private setting
+			// means the Portal shows the same label, so the two views agree.
+			set tItem.displayName = tCfgItem.Comment
 
 			// Determine mode and pipeline version from service class
 			if tItem.className = "OPCUA.Service.TCPSubscriptionRowSourceService" {
@@ -431,6 +439,14 @@ ClassMethod Rebind(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		set tSC = ..UpdateDeviceNodePaths(tName, tDevices)
 		Quit:$$$ISERR(tSC)
 
+		// The display label rides along with a rebind, since editing a pipeline is
+		// where a user would expect to change it. Absent from the body means "leave
+		// it alone"; an empty string means "clear it".
+		if pBody.%IsDefined("displayName") {
+			set tSC = ..UpdateDisplayName(tName, pBody.%Get("displayName"))
+			Quit:$$$ISERR(tSC)
+		}
+
 		// The adapter re-resolves on every (re)connect, so restarting the item is
 		// all that is needed for the new device list to take effect.
 		do ##class(Ens.Director).GetProductionStatus(.tRunning, .tRunState)
@@ -526,6 +542,47 @@ ClassMethod UpdateDeviceNodePaths(pItemName As %String, pValue As %String) As %S
 				set tSetting.Value = pValue
 				do tItem.Settings.Insert(tSetting)
 			}
+			set tFound = 1
+		}
+
+		if 'tFound {
+			set tSC = $$$ERROR($$$GeneralError, "Pipeline '"_pItemName_"' not found in production")
+			Quit
+		}
+
+		set tSC = tProd.%Save()
+		$$$ThrowOnError(tSC)
+		set tSC = tProd.SaveToClass()
+		$$$ThrowOnError(tSC)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit tSC
+}
+
+/// Set a pipeline's human-facing label.
+///
+/// Stored in <tt>Ens.Config.Item.Comment</tt>. This is deliberately *not* a rename:
+/// <tt>Name</tt> is the InterSystems interop identity and renaming it means
+/// destroying and recreating the config item, which is what the UI honestly tells
+/// you to do. An operator reading <tt>Ens_Util.Log</tt> or the Management Portal
+/// still sees the Name, which is why the webapp shows both wherever the distinction
+/// matters.
+ClassMethod UpdateDisplayName(pItemName As %String, pValue As %String) As %Status [ Private ]
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
+		if '$IsObject(tProd) {
+			set tSC = $$$ERROR($$$GeneralError, "Cannot open production: "_..#ProductionClass)
+			Quit
+		}
+
+		set tFound = 0
+		for i=1:1:tProd.Items.Count() {
+			set tItem = tProd.Items.GetAt(i)
+			continue:tItem.Name'=pItemName
+			set tItem.Comment = pValue
 			set tFound = 1
 		}
 

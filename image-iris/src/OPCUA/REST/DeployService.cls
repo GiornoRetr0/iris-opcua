@@ -192,6 +192,10 @@ ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDS
 		set tItem = ##class(Ens.Config.Item).%New()
 		set tItem.Name = pDSName
 		set tItem.ClassName = tServiceClass
+		// Optional human label. Name is the interop identity and is immutable; this
+		// is the mutable label beside it, in the field the Management Portal also
+		// shows, so both views agree on what a pipeline is called.
+		set tItem.Comment = pBody.%Get("displayName")
 		set tItem.PoolSize = 1
 		// Created switched off. Deploying is configuring; polling a live server and
 		// writing rows is a separate, explicit act — so the operator gets a chance
