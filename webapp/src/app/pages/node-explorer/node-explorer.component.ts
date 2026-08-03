@@ -17,7 +17,7 @@ import { TreeNode } from '../../core/models/opcua.models';
           <div class="w-24 h-24 mx-auto mb-8 rounded-2xl bg-surface-container-low flex items-center justify-center">
             <span class="material-symbols-outlined text-5xl text-on-surface-variant/30">lan</span>
           </div>
-          <h2 class="text-2xl font-semibold text-on-surface mb-3 tracking-tight">Connect to an OPC UA Server</h2>
+          <h2 class="text-2xl font-semibold text-primary mb-3 tracking-tight">Connect to an OPC UA Server</h2>
           <p class="text-sm text-on-surface-variant leading-relaxed mb-8">
             Configure your OPC UA server connection to start browsing the address space and reading node values.
           </p>

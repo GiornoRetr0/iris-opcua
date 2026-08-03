@@ -141,3 +141,12 @@ select {
 .flow-dot {
   animation: flow-travel 2s ease-in-out infinite;
 }
+
+/* Switch knob travel.
+   Tailwind's `peer-*` variants only match later *siblings* of the peer, and the
+   knob needs to react to a checkbox that is its sibling's sibling — expressible as
+   an arbitrary variant, but `[&>span]` puts a `>` inside an Angular inline
+   template and breaks parsing. A named rule is clearer than either. */
+.peer:checked ~ .switch-knob {
+  transform: translateX(1rem);
+}

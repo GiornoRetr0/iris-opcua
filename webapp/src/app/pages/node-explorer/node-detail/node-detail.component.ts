@@ -15,7 +15,7 @@ import { severityOf, statusText, statusDetail } from '../../../core/opcua-status
       <!-- Empty state -->
       <div class="flex flex-col items-center justify-center min-h-[60vh] text-on-surface-variant">
         <span class="material-symbols-outlined text-8xl opacity-10 mb-4">account_tree</span>
-        <h2 class="text-xl font-semibold mb-2">Select a Node</h2>
+        <h2 class="text-xl font-semibold text-primary mb-2">Select a Node</h2>
         <p class="text-sm text-on-surface-muted">Browse the address space tree on the left to view node details.</p>
       </div>
     } @else {
@@ -37,10 +37,19 @@ import { severityOf, statusText, statusDetail } from '../../../core/opcua-status
             <h1 class="text-2xl font-semibold text-primary">{{ node()!.displayName }}</h1>
           </div>
           <div class="flex items-center gap-4">
-            <label class="flex items-center gap-2 text-sm font-medium text-on-surface-variant cursor-pointer">
-              <input type="checkbox" [(ngModel)]="autoRefresh"
-                     (ngModelChange)="onAutoRefreshToggle()"
-                     class="rounded border-outline-variant text-primary focus:ring-primary h-4 w-4">
+            <!-- A switch, not a checkbox: this takes effect immediately rather than
+                 on a submit, which is the convention a switch signals. Still a real
+                 checkbox input underneath, so it keeps its keyboard behaviour and
+                 label association for free. -->
+            <label class="flex items-center gap-2 text-sm font-medium text-on-surface-variant cursor-pointer select-none">
+              <span class="relative inline-flex items-center">
+                <input type="checkbox" [(ngModel)]="autoRefresh"
+                       (ngModelChange)="onAutoRefreshToggle()"
+                       class="peer sr-only">
+                <span class="switch-track h-5 w-9 rounded-full bg-surface-container-highest transition-colors
+                             peer-checked:bg-primary peer-focus-visible:ring-2 peer-focus-visible:ring-primary/40"></span>
+                <span class="switch-knob absolute left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform"></span>
+              </span>
               Auto-refresh
             </label>
             <button (click)="readValue()"

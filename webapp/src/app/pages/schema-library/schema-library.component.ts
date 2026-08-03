@@ -89,7 +89,7 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
       @if (!loading() && schemas().length === 0) {
         <div class="flex flex-col items-center justify-center py-20 text-on-surface-variant">
           <span class="material-symbols-outlined text-8xl opacity-10 mb-4">schema</span>
-          <h2 class="text-xl font-semibold mb-2">No Schemas Yet</h2>
+          <h2 class="text-xl font-semibold text-primary mb-2">No Schemas Yet</h2>
           <p class="text-sm text-on-surface-muted mb-6 max-w-md text-center">
             A schema describes one device type. Create one from the node tree, then bind as many
             identical devices to it as you like.
