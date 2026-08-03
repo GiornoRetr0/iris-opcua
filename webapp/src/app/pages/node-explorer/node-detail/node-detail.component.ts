@@ -87,7 +87,15 @@ import { ConfigService } from '../../../core/services/config.service';
                 </div>
                 <div>
                   <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-1">Source Timestamp</p>
-                  <p class="text-sm font-bold text-on-surface">{{ readResult()?.sourceTimestamp ? 'Synchronized' : '—' }}</p>
+                  <!-- SourceTimestamp is genuinely optional in OPC UA, so its absence is
+                       information rather than an error — say "not reported", not a dash.
+                       This used to render the word "Synchronized" while holding the real
+                       timestamp, which asserted a sync state nothing had measured. -->
+                  @if (sourceTimestampText(); as ts) {
+                    <p class="text-sm font-bold text-on-surface">{{ ts }}</p>
+                  } @else {
+                    <p class="text-sm font-medium text-on-surface-muted italic">not reported</p>
+                  }
                 </div>
               </div>
             </div>
@@ -282,6 +290,17 @@ export class NodeDetailComponent implements OnDestroy {
     if (type.includes('Int')) return '';
     if (type.includes('Boolean')) return '';
     return '';
+  }
+
+  /**
+   * The source timestamp as a clock time, or '' when the server did not report
+   * one. Returning '' rather than a placeholder lets the template pick the
+   * treatment: real data gets the bold on-surface style, absence gets muted
+   * italics and says so in words.
+   */
+  sourceTimestampText(): string {
+    const ts = this.readResult()?.sourceTimestamp;
+    return this.isMissingTimestamp(ts) ? '' : this.formatTimestamp(ts);
   }
 
   /**

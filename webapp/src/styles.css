@@ -55,6 +55,15 @@
   --color-surface-container-highest: #e1e3e4;
   --color-on-surface: #191c1d;
   --color-on-surface-variant: #44474e;
+
+  /* Muted text that still passes SC 1.4.3 (4.5:1). Use these instead of an
+     opacity modifier on text — every contrast failure the audit measured came
+     from opacity applied on top of a token that passes on its own:
+     on-surface-variant is 9.30:1 on white but only 4.06:1 at 70% and 2.52:1 at
+     50%. Ratios computed, not sampled. Opacity on icons and decorative glyphs
+     is fine and exempt from 1.4.3. */
+  --color-on-surface-muted: #5c5f66;   /* 6.40:1 on white; 4.57:1 worst case, on surface-dim */
+  --color-on-primary-muted: #c3c8ff;   /* 8.86:1 on primary #131c79 */
   --color-background: #f8f9fa;
   --color-on-background: #191c1d;
   --color-inverse-surface: #2e3132;
