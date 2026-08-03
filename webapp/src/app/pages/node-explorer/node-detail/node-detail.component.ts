@@ -23,12 +23,18 @@ import { severityOf, statusText, statusDetail } from '../../../core/opcua-status
         <!-- Header Breadcrumb/Title -->
         <div class="flex items-end justify-between">
           <div>
+            <!-- A real path, walked from parentRef. The first segment used to be the
+                 hardcoded string "Objects", so this read "Objects > Objects" at the
+                 root and "Objects > SA1" for nodes not under Objects at all. -->
             <nav class="flex items-center gap-2 text-xs font-medium text-on-surface-variant mb-2">
-              <span>Objects</span>
-              <span class="material-symbols-outlined text-xs">chevron_right</span>
-              <span class="text-primary">{{ node()!.displayName }}</span>
+              @for (seg of breadcrumb(); track $index; let last = $last) {
+                <span [class]="last ? 'text-primary font-semibold' : ''">{{ seg }}</span>
+                @if (!last) {
+                  <span class="material-symbols-outlined text-xs">chevron_right</span>
+                }
+              }
             </nav>
-            <h1 class="text-2xl font-semibold text-primary">Node Details: {{ node()!.displayName }}</h1>
+            <h1 class="text-2xl font-semibold text-primary">{{ node()!.displayName }}</h1>
           </div>
           <div class="flex items-center gap-4">
             <label class="flex items-center gap-2 text-sm font-medium text-on-surface-variant cursor-pointer">
@@ -58,12 +64,15 @@ import { severityOf, statusText, statusDetail } from '../../../core/opcua-status
             </div>
             <div class="flex items-baseline gap-4 mt-8">
               @if (readResult()) {
-                <span class="text-[120px] font-bold leading-none tracking-tighter text-primary">
+                <!-- Size bound to length: 120px only holds about six characters, so a
+                     long string used to overflow its card silently. getUnit() and its
+                     always-empty text-2xl span are gone (D3) — engineering units need
+                     an EUInformation read the C++ layer does not expose, which is its
+                     own piece of work, not a reserved empty box. -->
+                <span class="font-bold leading-none tracking-tighter break-all"
+                      [class]="heroSizeClass()">
                   {{ formatHeroValue(readResult()!) }}
                 </span>
-                <div class="flex flex-col">
-                  <span class="text-2xl font-bold text-tertiary">{{ getUnit() }}</span>
-                </div>
               } @else if (readLoading()) {
                 <span class="text-4xl font-bold text-on-surface-variant opacity-30">Reading...</span>
               } @else {
@@ -124,18 +133,32 @@ import { severityOf, statusText, statusDetail } from '../../../core/opcua-status
             </div>
           </div>
 
-          <!-- Detailed Properties Grid (3 cards) -->
-          <div class="md:col-span-12 grid grid-cols-1 md:grid-cols-3 gap-6">
-            <!-- Category -->
+          <!-- Detailed Properties Grid.
+               Two cards, not three: CATEGORY used to render nodeCategory twice in one
+               card ("Folder" then "Node Category: folder"), and TYPE DEFINITION
+               headlined a data type inferred from the *value read* — so a folder,
+               whose read necessarily fails, displayed "String". That did not mean
+               "this is a string"; it meant "the read failed". They are now one card
+               that separates node class (from browse, always known) from data type
+               (from the read, sometimes not). -->
+          <div class="md:col-span-12 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Node class + data type -->
             <div class="bg-surface-container-lowest p-6 rounded-xl shadow-sm border border-outline-variant/5">
               <div class="flex items-center gap-3 mb-4">
                 <div class="bg-secondary-container/50 p-2 rounded-lg text-primary">
                   <span class="material-symbols-outlined">category</span>
                 </div>
-                <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Category</p>
+                <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Node Class &amp; Type</p>
               </div>
+              <p class="text-[10px] font-bold text-on-surface-muted uppercase tracking-widest">Node class</p>
               <p class="text-xl font-bold text-on-surface capitalize">{{ node()!.nodeCategory }}</p>
-              <p class="text-xs text-on-surface-variant mt-2">Node Category: {{ node()!.nodeCategory }}</p>
+
+              <p class="text-[10px] font-bold text-on-surface-muted uppercase tracking-widest mt-3">Data type</p>
+              <p class="text-sm font-semibold"
+                 [class]="dataTypeKnown() ? 'text-on-surface' : 'text-on-surface-muted italic'">
+                {{ dataTypeLabel() }}
+              </p>
+              <p class="text-xs text-on-surface-muted mt-2">TypeDef: ns={{ node()!.typeDefNs }}, id={{ node()!.typeDefId }}</p>
             </div>
             <!-- Reference -->
             <div class="bg-surface-container-lowest p-6 rounded-xl shadow-sm border border-outline-variant/5">
@@ -146,18 +169,7 @@ import { severityOf, statusText, statusDetail } from '../../../core/opcua-status
                 <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Reference</p>
               </div>
               <p class="text-xl font-bold text-on-surface">{{ node()!.referenceType }}</p>
-              <p class="text-xs text-on-surface-variant mt-2">Reference Type</p>
-            </div>
-            <!-- Type Definition -->
-            <div class="bg-surface-container-lowest p-6 rounded-xl shadow-sm border border-outline-variant/5">
-              <div class="flex items-center gap-3 mb-4">
-                <div class="bg-secondary-container/50 p-2 rounded-lg text-primary">
-                  <span class="material-symbols-outlined">model_training</span>
-                </div>
-                <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Type Definition</p>
-              </div>
-              <p class="text-xl font-bold text-on-surface">{{ inferredTypeName() }}</p>
-              <p class="text-xs text-on-surface-variant mt-2">TypeDef: ns={{ node()!.typeDefNs }}, id={{ node()!.typeDefId }}</p>
+              <p class="text-xs text-on-surface-muted mt-2">Reference Type</p>
             </div>
           </div>
         </div>
@@ -228,23 +240,55 @@ export class NodeDetailComponent implements OnDestroy {
     }
   }
 
+  /**
+   * The hero value. Truncation is marked with an ellipsis — it used to
+   * `substring(0, 20)` silently, so a 40-character value rendered as its first 20
+   * and looked complete.
+   */
   formatHeroValue(result: NodeReadResult): string {
-    if (result.readError) return '!';
+    if (result.readError) return 'no reading';
     const val = result.value;
-    if (val == null || val === '') return '—';
+    if (val == null || val === '') return 'empty';
     const num = parseFloat(val);
-    if (!isNaN(num)) {
+    if (!isNaN(num) && String(val).trim() !== '') {
       return num % 1 === 0 ? String(Math.round(num)) : num.toFixed(2);
     }
-    return String(val).substring(0, 20);
+    const s = String(val);
+    return s.length > 20 ? s.slice(0, 20) + '…' : s;
   }
 
-  getUnit(): string {
-    const type = this.readResult()?.inferredType || '';
-    if (type.includes('Double') || type.includes('Float')) return '';
-    if (type.includes('Int')) return '';
-    if (type.includes('Boolean')) return '';
-    return '';
+  /**
+   * 120px fits roughly six characters in this card. Anything longer steps down
+   * rather than overflowing.
+   */
+  heroSizeClass(): string {
+    const r = this.readResult();
+    if (!r) return 'text-5xl text-on-surface-muted';
+    const rendered = this.formatHeroValue(r);
+    // 'no reading' / 'empty' are statements about absence, not values, so they get
+    // the muted treatment. The colour lives here rather than in the static class
+    // list, so there is one source of truth for it.
+    if (r.readError || rendered === 'empty' || rendered === 'no reading') {
+      return 'text-4xl text-on-surface-muted italic font-medium';
+    }
+    if (rendered.length <= 6) return 'text-[120px] text-primary';
+    if (rendered.length <= 12) return 'text-6xl text-primary';
+    return 'text-4xl text-primary';
+  }
+
+  /**
+   * The path to this node, walked up parentRef. Falls back to the node's own name
+   * when it has no threaded parent (a server root, or a node reached directly).
+   */
+  breadcrumb(): string[] {
+    const segments: string[] = [];
+    let cur: TreeNode | null | undefined = this.node();
+    // Guard against a malformed cycle rather than hanging the render.
+    for (let i = 0; cur && i < 32; i++) {
+      segments.unshift(cur.displayName);
+      cur = cur.parentRef;
+    }
+    return segments;
   }
 
   /**
@@ -362,12 +406,28 @@ export class NodeDetailComponent implements OnDestroy {
     };
   }
 
-  get inferredTypeName(): () => string {
-    return () => {
-      const r = this.readResult();
-      if (!r?.inferredType) return '—';
-      const parts = r.inferredType.split('.');
-      return parts[parts.length - 1].replace('DataValue', '');
-    };
+  /**
+   * Whether the data type on screen came from a successful read.
+   *
+   * `inferredType` is derived by reading the node's value and pattern-matching the
+   * result, and `ReadService` substitutes StringDataValue as a blanket default when
+   * that fails. So "String" arrives identically for a genuine string, an
+   * unreadable node, a folder, and an unreachable server — and must not be
+   * presented as a type in the last three cases.
+   */
+  dataTypeKnown(): boolean {
+    const r = this.readResult();
+    if (!r || r.readError || !r.inferredType) return false;
+    if (this.node()?.nodeCategory !== 'variable') return false;
+    return this.severity() === 'good' || this.severity() === 'uncertain';
+  }
+
+  dataTypeLabel(): string {
+    const r = this.readResult();
+    if (!r) return 'not read yet';
+    if (this.node()?.nodeCategory !== 'variable') return 'not applicable — this node has no value';
+    if (!this.dataTypeKnown()) return 'not readable';
+    const parts = r.inferredType!.split('.');
+    return parts[parts.length - 1].replace('DataValue', '');
   }
 }

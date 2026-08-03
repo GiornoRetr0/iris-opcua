@@ -209,6 +209,9 @@ export class NodeTreeComponent implements OnInit {
           ...c,
           level: (node.level ?? 0) + 1,
           serverId: node.serverId,
+          // Threaded so the detail pane can render a real path rather than a
+          // hardcoded first segment. opcua-tree already did this; this tree did not.
+          parentRef: node,
         }));
         if (children.length === 0) {
           node.hasChildren = false;
