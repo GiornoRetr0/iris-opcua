@@ -278,6 +278,12 @@ function defaultPipelineName(schemaShortName: string): string {
               <span class="material-symbols-outlined text-base transition-transform"
                     [class.rotate-90]="advancedOpen()">chevron_right</span>
               Edit as text
+              <!-- Preview the format in the closed state. The docs inside are good and
+                   have three worked examples, but they were invisible until opened —
+                   the finding is the disclosure, not the documentation (C3). -->
+              <span class="font-normal normal-case tracking-normal text-on-surface-muted">
+                — one device per line, <code class="font-mono">ns=2;s=Name|Label</code>
+              </span>
             </summary>
 
             <div class="mt-3">
@@ -300,6 +306,20 @@ function defaultPipelineName(schemaShortName: string): string {
               </div>
             </div>
           </details>
+
+          @if (duplicateDevices().length) {
+            <div class="mt-4 flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-300 px-3 py-2.5 text-xs">
+              <span class="material-symbols-outlined text-sm text-amber-700 shrink-0 mt-0.5">content_copy</span>
+              <p class="text-on-surface">
+                @for (dup of duplicateDevices(); track dup.label) {
+                  <span class="block">
+                    <code class="font-mono font-bold">{{ dup.label }}</code> is listed
+                    {{ dup.count }} times — it would produce {{ dup.count }} identical rows per cycle.
+                  </span>
+                }
+              </p>
+            </div>
+          }
 
           <!-- A one-line summary; the per-device detail lives in the rows above,
                so there is nothing to duplicate here. -->
@@ -390,6 +410,18 @@ function defaultPipelineName(schemaShortName: string): string {
                     Subscription
                   </button>
                 </div>
+                <!-- The mechanics were already right; only the explanation was missing.
+                     This is the highest-impact performance decision on the screen and
+                     its cost lands on the PLC, so it should not be silent. -->
+                <p class="text-[11px] text-on-surface-muted mt-1.5">
+                  @if (mode() === 'polling') {
+                    Reads every device on a fixed timer. Predictable load; one row per
+                    device per cycle even when nothing changed.
+                  } @else {
+                    The server pushes values as they change. Lighter on the PLC for
+                    values that rarely move, and rows appear only on change.
+                  }
+                </p>
               </div>
 
               @if (mode() === 'polling') {
@@ -527,6 +559,25 @@ export class DeviceBindingComponent implements OnInit {
       };
     })
   );
+
+  /**
+   * Devices listed more than once. Two lines resolving to one NodeId produce two
+   * identical rows per cycle, which nothing warned about front or back — the
+   * duplicate is silently obeyed. Warns, deliberately does not block: it is legal,
+   * just almost certainly not intended.
+   */
+  duplicateDevices = computed(() => {
+    const groups = new Map<string, ParsedDevice[]>();
+    for (const d of this.parsedDevices()) {
+      if (!d.key) continue;
+      const list = groups.get(d.key);
+      if (list) list.push(d);
+      else groups.set(d.key, [d]);
+    }
+    return [...groups.values()]
+      .filter((g) => g.length > 1)
+      .map((g) => ({ label: g[0].label, count: g.length }));
+  });
 
   /** Which tree rows to tick. Derived, so pasted text lights the tree up too. */
   selectedKeys = computed(
