@@ -33,11 +33,14 @@ import { Pipeline, PipelineHealth } from '../../core/models/opcua.models';
         </div>
       </div>
 
-      <!-- Dashboard Stats Grid -->
+      <!-- Dashboard Stats Grid.
+           Skipped entirely with no pipelines: four zeros say nothing the empty
+           state below doesn't say better. -->
+      @if (pipelines().length) {
       <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
         <!-- Total Pipelines -->
         <div class="bg-white p-6 rounded-2xl shadow-[0_2px_12px_-2px_rgba(19,28,121,0.08),0_4px_6px_-2px_rgba(19,28,121,0.04)] border border-slate-200/60 relative overflow-hidden group">
-          <span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 opacity-40 text-slate-300/40 group-hover:text-slate-300/60 transition-colors" style="font-size:80px">account_tree</span>
+          <span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 text-slate-300/25 group-hover:text-slate-300/40 transition-colors" style="font-size:56px">account_tree</span>
           <div class="relative z-10">
             <div class="text-[0.65rem] font-bold text-on-surface-muted uppercase tracking-widest mb-3">Total Pipelines</div>
             <div class="flex items-baseline gap-2">
@@ -48,38 +51,55 @@ import { Pipeline, PipelineHealth } from '../../core/models/opcua.models';
         </div>
         <!-- Running Streams -->
         <div class="bg-white p-6 rounded-2xl shadow-[0_2px_12px_-2px_rgba(19,28,121,0.08),0_4px_6px_-2px_rgba(19,28,121,0.04)] border border-slate-200/60 relative overflow-hidden group">
-          <span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 opacity-40 text-emerald-400/30 group-hover:text-emerald-400/50 transition-colors" style="font-size:80px">bolt</span>
+          <span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 transition-colors" style="font-size:56px"
+                [class]="runningCount() ? 'text-emerald-400/25 group-hover:text-emerald-400/40' : 'text-slate-300/25'">bolt</span>
           <div class="relative z-10">
             <div class="text-[0.65rem] font-bold text-on-surface-muted uppercase tracking-widest mb-3">Running Streams</div>
             <div class="flex items-baseline gap-2">
-              <span class="text-4xl font-black text-emerald-600">{{ runningCount() }}</span>
-              <span class="text-sm font-bold text-on-surface-muted">Active</span>
+              <span class="text-4xl font-black" [class]="runningCount() ? 'text-emerald-700' : 'text-on-surface-variant'">
+                {{ runningCount() }}
+              </span>
+              <span class="text-sm font-bold text-on-surface-muted">{{ runningCount() ? 'Active' : 'None' }}</span>
             </div>
           </div>
         </div>
-        <!-- Error Warnings -->
-        <div class="bg-white p-6 rounded-2xl shadow-[0_2px_12px_-2px_rgba(19,28,121,0.08),0_4px_6px_-2px_rgba(19,28,121,0.04)] border border-slate-200/60 relative overflow-hidden group">
-          <span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 opacity-40 text-amber-400/30 group-hover:text-amber-400/50 transition-colors" style="font-size:80px">warning</span>
+        <!-- Error Warnings — alarm styling only when something is actually wrong.
+             A permanent amber tile at zero spends an operator's trained reflex on
+             noise, and over a shift teaches people to stop looking. -->
+        <div class="bg-white p-6 rounded-2xl shadow-[0_2px_12px_-2px_rgba(19,28,121,0.08),0_4px_6px_-2px_rgba(19,28,121,0.04)] border relative overflow-hidden group"
+             [class]="errorCount() ? 'border-amber-300' : 'border-slate-200/60'">
+          <span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 transition-colors" style="font-size:56px"
+                [class]="errorCount() ? 'text-amber-400/30 group-hover:text-amber-400/50' : 'text-slate-300/25'">
+            {{ errorCount() ? 'warning' : 'check_circle' }}
+          </span>
           <div class="relative z-10">
             <div class="text-[0.65rem] font-bold text-on-surface-muted uppercase tracking-widest mb-3">Error Warnings</div>
             <div class="flex items-baseline gap-2">
-              <span class="text-4xl font-black text-amber-500">{{ errorCount() }}</span>
-              <span class="text-sm font-bold text-on-surface-muted">Critical</span>
+              <!-- amber-700 is 5.02:1, so this holds up as body text and does not
+                   lean on the large-text exemption the way amber-600 (3.19:1) would. -->
+              <span class="text-4xl font-black" [class]="errorCount() ? 'text-amber-700' : 'text-on-surface-variant'">
+                {{ errorCount() }}
+              </span>
+              <span class="text-sm font-bold text-on-surface-muted">{{ errorCount() ? 'Critical' : 'None' }}</span>
             </div>
           </div>
         </div>
         <!-- Stopped -->
         <div class="bg-white p-6 rounded-2xl shadow-[0_2px_12px_-2px_rgba(19,28,121,0.08),0_4px_6px_-2px_rgba(19,28,121,0.04)] border border-slate-200/60 relative overflow-hidden group">
-          <span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 opacity-40 text-primary/20 group-hover:text-primary/35 transition-colors" style="font-size:80px">pause_circle</span>
+          <span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 transition-colors" style="font-size:56px"
+                [class]="stoppedCount() ? 'text-primary/20 group-hover:text-primary/30' : 'text-slate-300/25'">pause_circle</span>
           <div class="relative z-10">
             <div class="text-[0.65rem] font-bold text-on-surface-muted uppercase tracking-widest mb-3">Stopped</div>
             <div class="flex items-baseline gap-2">
-              <span class="text-4xl font-black text-primary">{{ stoppedCount() }}</span>
-              <span class="text-sm font-bold text-on-surface-muted">Inactive</span>
+              <span class="text-4xl font-black" [class]="stoppedCount() ? 'text-primary' : 'text-on-surface-variant'">
+                {{ stoppedCount() }}
+              </span>
+              <span class="text-sm font-bold text-on-surface-muted">{{ stoppedCount() ? 'Inactive' : 'None' }}</span>
             </div>
           </div>
         </div>
       </div>
+      }
 
       <!-- Pipeline Cards -->
       <div class="space-y-6">
