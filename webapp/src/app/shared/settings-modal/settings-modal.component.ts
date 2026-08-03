@@ -110,6 +110,7 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
                   <div>
                     <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Display Name</label>
                     <input type="text" [(ngModel)]="editingServer()!.name"
+                           (ngModelChange)="clearSaveError()"
                            class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
                            placeholder="Factory Floor PLC">
                   </div>
@@ -125,6 +126,7 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
                   <div class="md:col-span-2">
                     <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">OPC UA Server URL</label>
                     <input type="text" [(ngModel)]="editingServer()!.url"
+                           (ngModelChange)="clearSaveError()"
                            class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
                            placeholder="opc.tcp://localhost:4840">
                   </div>
@@ -265,6 +267,14 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
               <div></div>
             }
             <div class="flex items-center gap-3 w-full sm:w-auto">
+              <!-- The error belongs at the control that was pressed. Putting it in
+                   the sidebar widget instead is the mistake F5 is about. -->
+              @if (saveError()) {
+                <p class="flex items-start gap-1.5 text-xs text-error font-medium max-w-xs order-first sm:order-none">
+                  <span class="material-symbols-outlined text-sm shrink-0">error</span>
+                  <span>{{ saveError() }}</span>
+                </p>
+              }
               <button (click)="closed.emit()"
                       class="flex-1 sm:flex-none px-6 py-2.5 text-on-surface-variant text-sm font-semibold rounded-lg hover:bg-surface-variant transition-all">
                 Cancel
@@ -289,6 +299,8 @@ export class SettingsModalComponent {
   activeTab = signal<'servers' | 'gateway'>('servers');
   testing = signal(false);
   testStatus = signal('');
+  /** Rendered at the Save button — the control the user just pressed. */
+  saveError = signal('');
 
   // Server list (mutable copies for editing)
   servers = signal<ServerProfile[]>([]);
@@ -347,6 +359,8 @@ export class SettingsModalComponent {
   removeServer(id: string, event: MouseEvent): void {
     event.stopPropagation();
     this.servers.update(list => list.filter(s => s.id !== id));
+    // Removing the row is the other way to resolve a "no server URL" error.
+    this.clearSaveError();
     if (this.selectedServerId() === id) {
       const remaining = this.servers();
       if (remaining.length > 0) {
@@ -388,9 +402,30 @@ export class SettingsModalComponent {
     });
   }
 
+  /**
+   * Clear the save error. Called on any field edit: leaving a stale complaint
+   * beside the button while the user fixes the thing it complains about reads as
+   * the app not noticing.
+   */
+  clearSaveError(): void {
+    if (this.saveError()) this.saveError.set('');
+  }
+
   saveAll(): void {
-    // Filter out empty servers (no URL)
-    const validServers = this.servers().filter(s => s.url);
+    const all = this.servers();
+    const invalid = all.filter(s => !s.url);
+    if (invalid.length) {
+      // Silently dropping a row the user filled in is data loss. Name it and stop.
+      const which = invalid.map(s => s.name || 'Untitled server').join(', ');
+      this.saveError.set(
+        `${which} ${invalid.length === 1 ? 'has' : 'have'} no server URL. ` +
+        `Add one, or remove the row, before saving.`
+      );
+      return;
+    }
+    this.saveError.set('');
+
+    const validServers = all;
     // Auto-name untitled servers
     for (const s of validServers) {
       if (!s.name) {
