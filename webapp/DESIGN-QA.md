@@ -22,6 +22,17 @@ cd webapp && npx ng serve                      # http://localhost:4200
 Some checks need a broken server. `docker compose stop plc` is the switch;
 `docker compose start plc` puts it back.
 
+**Driving it from the terminal.** `tools/qa-drive.mjs` seeds a working config,
+navigates, and screenshots or evaluates a snippet in the page — useful for the
+checks that need a specific server count (§Cross-screen, F24) or for sampling
+rendered pixels rather than trusting a computed contrast ratio. Setup command is
+in the file's header. It supplements this list; it does not replace looking.
+
+> Sampling matters more than it sounds. Every contrast ratio computed
+> analytically for the stopped pipeline card came out optimistic, because each
+> calculation missed one compositing step in a stack of four independent
+> opacities. The rendered PNG was the only thing that told the truth.
+
 ---
 
 ## The rule everything below serves
