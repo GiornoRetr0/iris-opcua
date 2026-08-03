@@ -7,6 +7,7 @@ import { catchError, map, switchMap } from 'rxjs/operators';
 import { ApiService } from '../../core/services/api.service';
 import { ConfigService } from '../../core/services/config.service';
 import { ServerProfile, TreeNode } from '../../core/models/opcua.models';
+import { nodeIcon, nodeIconClass } from '../../shared/opcua-tree/node-icons';
 
 /** A column being assembled for the new schema. */
 interface DraftColumn {
@@ -690,33 +691,16 @@ export class SchemaBuilderComponent implements OnInit {
     this.router.navigate(['/schemas']);
   }
 
-  icon(node: TreeNode): string {
-    switch (node.nodeCategory) {
-      case 'folder':
-        return 'folder';
-      case 'variable':
-        return 'label';
-      case 'property':
-        return 'tag';
-      case 'method':
-        return 'function';
-      default:
-        return 'category';
-    }
-  }
-
-  iconClass(node: TreeNode): string {
-    switch (node.nodeCategory) {
-      case 'folder':
-        return 'text-amber-500';
-      case 'variable':
-        return 'text-tertiary';
-      case 'property':
-        return 'text-slate-400';
-      default:
-        return 'text-slate-500';
-    }
-  }
+  /**
+   * The shared icon set (T3.2, item 4). This screen was the real outlier of the
+   * three trees: variables were `label` here and `settings_input_component`
+   * elsewhere, properties `tag` versus `tune`, objects `category` versus
+   * `inventory_2` — so the same address space looked like a different one depending
+   * on which screen you were on. The checkbox selection stays, because ticking
+   * columns genuinely is a different gesture from picking a device.
+   */
+  icon = nodeIcon;
+  iconClass = (node: TreeNode) => nodeIconClass(node);
 
   private message(err: any): string {
     return err?.error?.error || err?.message || 'Request failed';

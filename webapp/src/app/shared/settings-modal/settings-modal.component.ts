@@ -17,9 +17,12 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
       <div class="bg-surface-container-lowest w-full max-w-4xl rounded-xl shadow-[0_20px_40px_rgba(25,28,29,0.06)] overflow-hidden flex flex-col md:flex-row max-h-[90vh]">
         <!-- Left Sidebar -->
         <div class="hidden md:flex flex-col w-72 bg-surface-container-low p-6 border-r border-outline-variant/10">
+          <!-- Says what this dialog is, rather than repeating the brand lockup that
+               is already in the nav rail two inches to the left (T3.6). A modal
+               header should orient you inside the modal. -->
           <div class="mb-6">
-            <h2 class="text-lg font-bold text-primary tracking-tight">InterSystems</h2>
-            <p class="text-[10px] uppercase font-bold text-on-surface-variant tracking-widest">OPC UA Console</p>
+            <h2 class="text-lg font-bold text-primary tracking-tight">Settings</h2>
+            <p class="text-[10px] uppercase font-bold text-on-surface-variant tracking-widest">Servers and connection</p>
           </div>
 
           <!-- Section tabs -->
