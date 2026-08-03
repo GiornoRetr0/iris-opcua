@@ -1,6 +1,6 @@
 import { Component, signal, inject, computed, NgZone } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { NodeTreeComponent } from './node-tree/node-tree.component';
+import { OpcuaTreeComponent } from '../../shared/opcua-tree/opcua-tree.component';
 import { NodeDetailComponent } from './node-detail/node-detail.component';
 import { ConfigService } from '../../core/services/config.service';
 import { TreeNode } from '../../core/models/opcua.models';
@@ -8,7 +8,7 @@ import { TreeNode } from '../../core/models/opcua.models';
 @Component({
   selector: 'app-node-explorer',
   standalone: true,
-  imports: [CommonModule, NodeTreeComponent, NodeDetailComponent],
+  imports: [CommonModule, OpcuaTreeComponent, NodeDetailComponent],
   template: `
     @if (!isConfigured()) {
       <!-- Not configured state -->
@@ -68,7 +68,15 @@ import { TreeNode } from '../../core/models/opcua.models';
       <div class="flex min-h-screen">
         <aside class="fixed left-64 top-16 bottom-0 bg-slate-50 border-r border-slate-200/20 overflow-y-auto custom-scrollbar p-4 z-30"
                [style.width.px]="sidebarWidth()">
-          <app-node-tree (nodeSelected)="onNodeSelected($event)" />
+          <p class="px-1 mb-2 text-[10px] font-bold uppercase tracking-widest text-on-surface-muted">
+            Address Space
+          </p>
+          <!-- The shared tree in single-select mode. This was app-node-tree, a near
+               duplicate of this component with its own icon map (Objects was blue
+               here, amber everywhere else) and a div-with-click for the row. -->
+          <app-opcua-tree mode="single"
+                          [servers]="servers()"
+                          (nodeSelected)="onNodeSelected($event)" />
         </aside>
         <!-- Drag handle -->
         <div class="fixed top-16 bottom-0 w-1.5 z-40 cursor-col-resize group hover:bg-primary/20 active:bg-primary/30 transition-colors"
@@ -87,6 +95,8 @@ export class NodeExplorerComponent {
   private config = inject(ConfigService);
   private zone = inject(NgZone);
   selectedNode = signal<TreeNode | null>(null);
+  /** Every configured server; the tree renders one collapsible root each. */
+  servers = signal(this.config.getServers());
   sidebarWidth = signal(256);
   private resizing = false;
 

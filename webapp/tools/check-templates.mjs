@@ -46,7 +46,6 @@ const INTERACTIVE = new Set([
  */
 const BASELINE = {
   'app/layout/top-nav/top-nav.component.ts': 1,
-  'app/pages/node-explorer/node-tree/node-tree.component.ts': 3,
   'app/pages/schema-builder/schema-builder.component.ts': 1,
   'app/shared/settings-modal/settings-modal.component.ts': 4,
 };
