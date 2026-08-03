@@ -18,7 +18,7 @@ interface ServerRoot {
   imports: [CommonModule],
   template: `
     <div class="pt-4 border-t border-slate-200/50">
-      <p class="px-3 mb-2 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant opacity-70">
+      <p class="px-3 mb-2 text-[10px] font-bold uppercase tracking-widest text-on-surface-muted">
         Address Space
       </p>
       <div class="text-sm space-y-0.5">

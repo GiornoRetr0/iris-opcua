@@ -177,9 +177,9 @@ const MAX_DEPTH = 2;
           @if (!columns().length) {
             <div class="flex-1 flex flex-col items-center justify-center py-12 text-on-surface-variant">
               <span class="material-symbols-outlined text-6xl opacity-10 mb-3">view_column</span>
-              <p class="text-xs opacity-70">No columns yet</p>
+              <p class="text-xs text-on-surface-muted">No columns yet</p>
               @if (!deviceRoot()) {
-                <p class="text-[11px] opacity-50 mt-1">Mark a template device first</p>
+                <p class="text-[11px] text-on-surface-muted mt-1">Mark a template device first</p>
               }
             </div>
           } @else {
@@ -200,7 +200,7 @@ const MAX_DEPTH = 2;
                       <span>ns={{ col.nodeNs }}</span>
                       @if (col.typeProbed) {
                         <span class="px-1.5 rounded bg-surface-container font-mono"
-                              [class]="col.inferredType ? 'text-tertiary' : 'text-on-surface-variant/60'">
+                              [class]="col.inferredType ? 'text-tertiary' : 'text-on-surface-muted'">
                           {{ typeLabel(col) }}
                         </span>
                       } @else {
@@ -256,7 +256,7 @@ const MAX_DEPTH = 2;
                   class="px-6 py-3 font-bold rounded-lg flex items-center gap-2 transition-all"
                   [class]="canSave()
                     ? 'bg-primary text-on-primary shadow-xl shadow-primary/30 hover:brightness-110 active:scale-95'
-                    : 'bg-surface-container-highest text-on-surface-variant/40 cursor-not-allowed'">
+                    : 'bg-surface-container-highest text-on-surface-muted cursor-not-allowed'">
             <span class="material-symbols-outlined" [class.animate-spin]="saving()">
               {{ saving() ? 'progress_activity' : 'save' }}
             </span>

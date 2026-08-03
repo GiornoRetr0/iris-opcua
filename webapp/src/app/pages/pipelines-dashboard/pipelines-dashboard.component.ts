@@ -39,10 +39,10 @@ import { Pipeline, PipelineHealth } from '../../core/models/opcua.models';
         <div class="bg-white p-6 rounded-2xl shadow-[0_2px_12px_-2px_rgba(19,28,121,0.08),0_4px_6px_-2px_rgba(19,28,121,0.04)] border border-slate-200/60 relative overflow-hidden group">
           <span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 opacity-40 text-slate-300/40 group-hover:text-slate-300/60 transition-colors" style="font-size:80px">account_tree</span>
           <div class="relative z-10">
-            <div class="text-[0.65rem] font-bold text-slate-400 uppercase tracking-widest mb-3">Total Pipelines</div>
+            <div class="text-[0.65rem] font-bold text-on-surface-muted uppercase tracking-widest mb-3">Total Pipelines</div>
             <div class="flex items-baseline gap-2">
               <span class="text-4xl font-black text-primary">{{ pipelines().length }}</span>
-              <span class="text-sm font-bold text-slate-400">Deployed</span>
+              <span class="text-sm font-bold text-on-surface-muted">Deployed</span>
             </div>
           </div>
         </div>
@@ -50,10 +50,10 @@ import { Pipeline, PipelineHealth } from '../../core/models/opcua.models';
         <div class="bg-white p-6 rounded-2xl shadow-[0_2px_12px_-2px_rgba(19,28,121,0.08),0_4px_6px_-2px_rgba(19,28,121,0.04)] border border-slate-200/60 relative overflow-hidden group">
           <span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 opacity-40 text-emerald-400/30 group-hover:text-emerald-400/50 transition-colors" style="font-size:80px">bolt</span>
           <div class="relative z-10">
-            <div class="text-[0.65rem] font-bold text-slate-400 uppercase tracking-widest mb-3">Running Streams</div>
+            <div class="text-[0.65rem] font-bold text-on-surface-muted uppercase tracking-widest mb-3">Running Streams</div>
             <div class="flex items-baseline gap-2">
               <span class="text-4xl font-black text-emerald-600">{{ runningCount() }}</span>
-              <span class="text-sm font-bold text-emerald-500/60">Active</span>
+              <span class="text-sm font-bold text-on-surface-muted">Active</span>
             </div>
           </div>
         </div>
@@ -61,10 +61,10 @@ import { Pipeline, PipelineHealth } from '../../core/models/opcua.models';
         <div class="bg-white p-6 rounded-2xl shadow-[0_2px_12px_-2px_rgba(19,28,121,0.08),0_4px_6px_-2px_rgba(19,28,121,0.04)] border border-slate-200/60 relative overflow-hidden group">
           <span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 opacity-40 text-amber-400/30 group-hover:text-amber-400/50 transition-colors" style="font-size:80px">warning</span>
           <div class="relative z-10">
-            <div class="text-[0.65rem] font-bold text-slate-400 uppercase tracking-widest mb-3">Error Warnings</div>
+            <div class="text-[0.65rem] font-bold text-on-surface-muted uppercase tracking-widest mb-3">Error Warnings</div>
             <div class="flex items-baseline gap-2">
               <span class="text-4xl font-black text-amber-500">{{ errorCount() }}</span>
-              <span class="text-sm font-bold text-amber-500/60">Critical</span>
+              <span class="text-sm font-bold text-on-surface-muted">Critical</span>
             </div>
           </div>
         </div>
@@ -72,10 +72,10 @@ import { Pipeline, PipelineHealth } from '../../core/models/opcua.models';
         <div class="bg-white p-6 rounded-2xl shadow-[0_2px_12px_-2px_rgba(19,28,121,0.08),0_4px_6px_-2px_rgba(19,28,121,0.04)] border border-slate-200/60 relative overflow-hidden group">
           <span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 opacity-40 text-primary/20 group-hover:text-primary/35 transition-colors" style="font-size:80px">pause_circle</span>
           <div class="relative z-10">
-            <div class="text-[0.65rem] font-bold text-slate-400 uppercase tracking-widest mb-3">Stopped</div>
+            <div class="text-[0.65rem] font-bold text-on-surface-muted uppercase tracking-widest mb-3">Stopped</div>
             <div class="flex items-baseline gap-2">
               <span class="text-4xl font-black text-primary">{{ stoppedCount() }}</span>
-              <span class="text-sm font-bold text-slate-400">Inactive</span>
+              <span class="text-sm font-bold text-on-surface-muted">Inactive</span>
             </div>
           </div>
         </div>
@@ -94,7 +94,7 @@ import { Pipeline, PipelineHealth } from '../../core/models/opcua.models';
           <div class="flex flex-col items-center justify-center py-20 text-on-surface-variant">
             <span class="material-symbols-outlined text-8xl opacity-10 mb-4">account_tree</span>
             <h2 class="text-xl font-semibold mb-2">No Pipelines Yet</h2>
-            <p class="text-sm opacity-60 mb-6">
+            <p class="text-sm text-on-surface-muted mb-6">
               A pipeline is a schema bound to a list of devices. Start by choosing a schema.
             </p>
             <button (click)="createPipeline()"

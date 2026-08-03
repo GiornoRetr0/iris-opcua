@@ -52,7 +52,7 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
                   </span>
                   <div class="flex-1 min-w-0">
                     <p class="text-xs font-semibold truncate">{{ server.name }}</p>
-                    <p class="text-[10px] font-mono text-on-surface-variant/60 truncate">{{ server.url }}</p>
+                    <p class="text-[10px] font-mono text-on-surface-muted truncate">{{ server.url }}</p>
                   </div>
                   <button (click)="removeServer(server.id, $event)"
                           class="opacity-0 group-hover:opacity-100 text-on-surface-variant hover:text-error transition-all p-0.5 rounded">

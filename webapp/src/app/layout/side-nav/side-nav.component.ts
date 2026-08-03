@@ -14,7 +14,7 @@ import { ServerProfile } from '../../core/models/opcua.models';
       <!-- Branding -->
       <div class="px-6 pt-6 pb-2">
         <h2 class="text-lg font-bold text-[#131c79]">InterSystems</h2>
-        <p class="text-[10px] uppercase tracking-widest text-on-surface-variant font-bold opacity-70">OPC UA Console</p>
+        <p class="text-[10px] uppercase tracking-widest text-on-surface-muted font-bold">OPC UA Console</p>
       </div>
 
       <!-- Server connections -->

@@ -30,17 +30,17 @@ import { TreeNode } from '../../core/models/opcua.models';
             <div class="p-4 bg-surface-container-lowest rounded-xl border border-outline-variant/10">
               <span class="material-symbols-outlined text-primary text-2xl mb-2">hub</span>
               <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">1. Connect</p>
-              <p class="text-[11px] text-on-surface-variant/70 mt-1">Enter server URL</p>
+              <p class="text-[11px] text-on-surface-muted mt-1">Enter server URL</p>
             </div>
             <div class="p-4 bg-surface-container-lowest rounded-xl border border-outline-variant/10">
               <span class="material-symbols-outlined text-primary text-2xl mb-2">account_tree</span>
               <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">2. Browse</p>
-              <p class="text-[11px] text-on-surface-variant/70 mt-1">Explore nodes</p>
+              <p class="text-[11px] text-on-surface-muted mt-1">Explore nodes</p>
             </div>
             <div class="p-4 bg-surface-container-lowest rounded-xl border border-outline-variant/10">
               <span class="material-symbols-outlined text-primary text-2xl mb-2">bar_chart</span>
               <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">3. Read</p>
-              <p class="text-[11px] text-on-surface-variant/70 mt-1">View live data</p>
+              <p class="text-[11px] text-on-surface-muted mt-1">View live data</p>
             </div>
           </div>
         </div>

@@ -72,7 +72,7 @@ import { TreeNode, ServerProfile } from '../../core/models/opcua.models';
                   [class]="isSelected(node) ? 'font-semibold text-primary' : 'text-on-surface'">
               {{ node.displayName }}
             </span>
-            <span class="text-[10px] font-mono text-on-surface-variant/70 shrink-0 hidden sm:inline">
+            <span class="text-[10px] font-mono text-on-surface-muted shrink-0 hidden sm:inline">
               ns={{ node.nodeNs }}
             </span>
 
@@ -87,7 +87,7 @@ import { TreeNode, ServerProfile } from '../../core/models/opcua.models';
         @if (node.expanded && node.children) {
           @if (!node.children.length && !node.loading) {
             <p [style.padding-left.rem]="(level + 1) * 1.1"
-               class="px-2 py-1 text-[11px] text-on-surface-variant/70 italic">empty</p>
+               class="px-2 py-1 text-[11px] text-on-surface-muted italic">empty</p>
           }
           @for (child of node.children; track nodeKey(child)) {
             <ng-container *ngTemplateOutlet="tpl; context: { $implicit: child, level: level + 1 }" />

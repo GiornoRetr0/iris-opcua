@@ -15,7 +15,7 @@ import { ConfigService } from '../../../core/services/config.service';
       <div class="flex flex-col items-center justify-center min-h-[60vh] text-on-surface-variant">
         <span class="material-symbols-outlined text-8xl opacity-10 mb-4">account_tree</span>
         <h2 class="text-xl font-semibold mb-2">Select a Node</h2>
-        <p class="text-sm opacity-60">Browse the address space tree on the left to view node details.</p>
+        <p class="text-sm text-on-surface-muted">Browse the address space tree on the left to view node details.</p>
       </div>
     } @else {
       <div class="max-w-6xl mx-auto space-y-8">
@@ -53,7 +53,7 @@ import { ConfigService } from '../../../core/services/config.service';
             </div>
             <div>
               <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-[0.2em] mb-1">Current Process Value</p>
-              <h2 class="text-sm font-medium text-on-surface-variant opacity-60">{{ node()!.displayName }}</h2>
+              <h2 class="text-sm font-medium text-on-surface-muted">{{ node()!.displayName }}</h2>
             </div>
             <div class="flex items-baseline gap-4 mt-8">
               @if (readResult()) {
@@ -106,15 +106,15 @@ import { ConfigService } from '../../../core/services/config.service';
               <p class="text-[10px] font-bold text-on-primary-container uppercase tracking-widest mb-4">Node Identification</p>
               <div class="space-y-6">
                 <div>
-                  <p class="text-[10px] text-on-primary-container uppercase font-bold tracking-widest opacity-60">Node ID</p>
+                  <p class="text-[10px] text-on-primary-muted uppercase font-bold tracking-widest">Node ID</p>
                   <p class="text-lg font-mono font-medium truncate">ns={{ node()!.nodeNs }};{{ idPrefix() }}={{ node()!.nodeId }}</p>
                 </div>
                 <div>
-                  <p class="text-[10px] text-on-primary-container uppercase font-bold tracking-widest opacity-60">Namespace</p>
+                  <p class="text-[10px] text-on-primary-muted uppercase font-bold tracking-widest">Namespace</p>
                   <p class="text-md font-medium">{{ node()!.nodeNs }}</p>
                 </div>
                 <div>
-                  <p class="text-[10px] text-on-primary-container uppercase font-bold tracking-widest opacity-60">ID Type</p>
+                  <p class="text-[10px] text-on-primary-muted uppercase font-bold tracking-widest">ID Type</p>
                   <div class="mt-1 inline-block px-2 py-1 bg-white/10 rounded text-xs font-bold uppercase tracking-wider">
                     {{ idTypeName() }}
                   </div>

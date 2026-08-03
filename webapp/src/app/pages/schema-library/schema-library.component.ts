@@ -37,30 +37,30 @@ import { Schema } from '../../core/models/opcua.models';
         <div class="bg-white p-6 rounded-2xl shadow-[0_2px_12px_-2px_rgba(19,28,121,0.08),0_4px_6px_-2px_rgba(19,28,121,0.04)] border border-slate-200/60 relative overflow-hidden group">
           <span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 opacity-40 text-slate-300/40 group-hover:text-slate-300/60 transition-colors" style="font-size:80px">schema</span>
           <div class="relative z-10">
-            <div class="text-[0.65rem] font-bold text-slate-400 uppercase tracking-widest mb-3">Total Schemas</div>
+            <div class="text-[0.65rem] font-bold text-on-surface-muted uppercase tracking-widest mb-3">Total Schemas</div>
             <div class="flex items-baseline gap-2">
               <span class="text-4xl font-black text-primary">{{ schemas().length }}</span>
-              <span class="text-sm font-bold text-slate-400">Defined</span>
+              <span class="text-sm font-bold text-on-surface-muted">Defined</span>
             </div>
           </div>
         </div>
         <div class="bg-white p-6 rounded-2xl shadow-[0_2px_12px_-2px_rgba(19,28,121,0.08),0_4px_6px_-2px_rgba(19,28,121,0.04)] border border-slate-200/60 relative overflow-hidden group">
           <span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 opacity-40 text-emerald-400/30 group-hover:text-emerald-400/50 transition-colors" style="font-size:80px">link</span>
           <div class="relative z-10">
-            <div class="text-[0.65rem] font-bold text-slate-400 uppercase tracking-widest mb-3">In Use</div>
+            <div class="text-[0.65rem] font-bold text-on-surface-muted uppercase tracking-widest mb-3">In Use</div>
             <div class="flex items-baseline gap-2">
               <span class="text-4xl font-black text-emerald-600">{{ inUseCount() }}</span>
-              <span class="text-sm font-bold text-emerald-500/60">Bound</span>
+              <span class="text-sm font-bold text-on-surface-muted">Bound</span>
             </div>
           </div>
         </div>
         <div class="bg-white p-6 rounded-2xl shadow-[0_2px_12px_-2px_rgba(19,28,121,0.08),0_4px_6px_-2px_rgba(19,28,121,0.04)] border border-slate-200/60 relative overflow-hidden group">
           <span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 opacity-40 text-primary/20 group-hover:text-primary/35 transition-colors" style="font-size:80px">inventory_2</span>
           <div class="relative z-10">
-            <div class="text-[0.65rem] font-bold text-slate-400 uppercase tracking-widest mb-3">Unused</div>
+            <div class="text-[0.65rem] font-bold text-on-surface-muted uppercase tracking-widest mb-3">Unused</div>
             <div class="flex items-baseline gap-2">
               <span class="text-4xl font-black text-primary">{{ schemas().length - inUseCount() }}</span>
-              <span class="text-sm font-bold text-slate-400">Available</span>
+              <span class="text-sm font-bold text-on-surface-muted">Available</span>
             </div>
           </div>
         </div>
@@ -89,7 +89,7 @@ import { Schema } from '../../core/models/opcua.models';
         <div class="flex flex-col items-center justify-center py-20 text-on-surface-variant">
           <span class="material-symbols-outlined text-8xl opacity-10 mb-4">schema</span>
           <h2 class="text-xl font-semibold mb-2">No Schemas Yet</h2>
-          <p class="text-sm opacity-60 mb-6 max-w-md text-center">
+          <p class="text-sm text-on-surface-muted mb-6 max-w-md text-center">
             A schema describes one device type. Create one from the node tree, then bind as many
             identical devices to it as you like.
           </p>

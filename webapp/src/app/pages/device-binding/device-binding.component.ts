@@ -204,8 +204,8 @@ function defaultPipelineName(schemaShortName: string): string {
                 @if (!parsedDevices().length) {
                   <div class="h-full flex flex-col items-center justify-center text-on-surface-variant px-4 text-center">
                     <span class="material-symbols-outlined text-5xl opacity-10 mb-2">lan</span>
-                    <p class="text-xs opacity-70">No devices bound yet</p>
-                    <p class="text-[11px] opacity-50 mt-1">Pick nodes from the tree, or paste a list below.</p>
+                    <p class="text-xs text-on-surface-muted">No devices bound yet</p>
+                    <p class="text-[11px] text-on-surface-muted mt-1">Pick nodes from the tree, or paste a list below.</p>
                   </div>
                 } @else {
                   <!-- Each device carries its own coverage: it is checked against
@@ -225,7 +225,7 @@ function defaultPipelineName(schemaShortName: string): string {
                             <span class="material-symbols-outlined text-sm shrink-0 text-primary animate-spin">progress_activity</span>
                           } @else {
                             <span class="material-symbols-outlined text-sm shrink-0"
-                                  [class]="bad ? 'text-error' : cov ? (cov.complete ? 'text-tertiary' : 'text-amber-600') : 'text-on-surface-variant/50'">
+                                  [class]="bad ? 'text-error' : cov ? (cov.complete ? 'text-tertiary' : 'text-amber-600') : 'text-on-surface-muted'">
                               {{ bad ? 'block' : cov ? (cov.complete ? 'check_circle' : 'error') : 'lan' }}
                             </span>
                           }
@@ -366,7 +366,7 @@ function defaultPipelineName(schemaShortName: string): string {
                      empty deploys under it. -->
                 <input [ngModel]="pipelineName()" (ngModelChange)="pipelineName.set($event)" spellcheck="false"
                        [placeholder]="suggestedName()"
-                       class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:border-primary focus:ring-1 focus:ring-primary/30" />
+                       class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-muted focus:border-primary focus:ring-1 focus:ring-primary/30" />
                 <p class="text-[11px] text-on-surface-variant mt-1">
                   @if (pipelineName().trim()) {
                     Shown as the production config item.
@@ -439,7 +439,7 @@ function defaultPipelineName(schemaShortName: string): string {
                   class="px-6 py-3 font-bold rounded-lg flex items-center gap-2 transition-all"
                   [class]="canDeploy()
                     ? 'bg-primary text-on-primary shadow-xl shadow-primary/30 hover:brightness-110 active:scale-95'
-                    : 'bg-surface-container-highest text-on-surface-variant/40 cursor-not-allowed'">
+                    : 'bg-surface-container-highest text-on-surface-muted cursor-not-allowed'">
             <span class="material-symbols-outlined" [class.animate-spin]="deploying()">
               {{ deploying() ? 'progress_activity' : (editMode() ? 'sync' : 'add_circle') }}
             </span>

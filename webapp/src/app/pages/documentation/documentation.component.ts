@@ -11,7 +11,7 @@ import { CommonModule } from '@angular/common';
         <!-- Content Column -->
         <article class="flex-1 min-w-0">
           <!-- Breadcrumbs -->
-          <nav class="flex items-center space-x-2 text-[10px] font-medium uppercase tracking-widest text-on-surface-variant/60 mb-8">
+          <nav class="flex items-center space-x-2 text-[10px] font-medium uppercase tracking-widest text-on-surface-muted mb-8">
             <a class="hover:text-primary transition-colors cursor-pointer">Home</a>
             <span class="material-symbols-outlined text-[12px]">chevron_right</span>
             <span class="text-on-surface">Documentation</span>
