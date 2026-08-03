@@ -1,4 +1,4 @@
-import { Component, inject, signal, input, output, effect, computed } from '@angular/core';
+import { Component, inject, signal, input, output, effect, computed, untracked } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/services/api.service';
@@ -236,24 +236,38 @@ export class OpcuaTreeComponent {
     // Re-browse whenever the caller points us at a different server. Switching
     // servers must clear the old address space rather than leave stale nodes that
     // would resolve against the wrong endpoint.
+    //
+    // The whole body is wrapped in untracked(): it *writes* the same signals a
+    // naive read would subscribe to, and `toggleServerRoot` writes `serverRoots`
+    // too. Tracking those writes made the effect re-trigger itself without end,
+    // and because each pass rebuilt the entries with `roots: []` the re-entered
+    // `toggleServerRoot` cleared its own already-browsed guard and fired a fresh
+    // browse request every iteration — an unbounded request loop that stalled the
+    // tab. It reproduced only with exactly one configured server, which is the
+    // ordinary case. The dependency this effect *should* have is the two inputs,
+    // so they are read outside the untracked block and nothing else is.
     effect(() => {
       const srv = this.server();
       const list = this.servers();
-      this.error.set('');
 
-      if (list.length) {
+      untracked(() => {
+        this.error.set('');
+
+        if (list.length) {
+          this.roots.set([]);
+          const entries = list.map((s) => ({
+            server: s, roots: [] as TreeNode[], expanded: false, loading: false, error: '',
+          }));
+          this.serverRoots.set(entries);
+          // Auto-expand a lone server: there is no choice to present.
+          if (entries.length === 1) this.toggleServerRoot(entries[0]);
+          return;
+        }
+
+        this.serverRoots.set([]);
         this.roots.set([]);
-        this.serverRoots.set(
-          list.map((s) => ({ server: s, roots: [], expanded: false, loading: false, error: '' }))
-        );
-        // Auto-expand a lone server: there is no choice to present.
-        if (list.length === 1) this.toggleServerRoot(this.serverRoots()[0]);
-        return;
-      }
-
-      this.serverRoots.set([]);
-      this.roots.set([]);
-      if (srv) this.load(srv);
+        if (srv) this.load(srv);
+      });
     });
   }
 

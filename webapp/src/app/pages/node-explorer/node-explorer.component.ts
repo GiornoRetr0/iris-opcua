@@ -95,8 +95,15 @@ export class NodeExplorerComponent {
   private config = inject(ConfigService);
   private zone = inject(NgZone);
   selectedNode = signal<TreeNode | null>(null);
-  /** Every configured server; the tree renders one collapsible root each. */
-  servers = signal(this.config.getServers());
+  /**
+   * Every configured server; the tree renders one collapsible root each.
+   *
+   * Computed rather than a constructor snapshot, so adding a server in settings
+   * shows up without a reload. Safe against re-browsing on every unrelated
+   * setting change because `ConfigService.save()` spreads the previous config —
+   * the `servers` array keeps its reference unless servers themselves changed.
+   */
+  servers = computed(() => this.config.config().servers ?? []);
   sidebarWidth = signal(256);
   private resizing = false;
 

@@ -1,4 +1,4 @@
-import { Component, input, inject, signal, effect, OnDestroy } from '@angular/core';
+import { Component, input, inject, signal, effect, untracked, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TreeNode, NodeReadResult } from '../../../core/models/opcua.models';
@@ -253,20 +253,29 @@ export class NodeDetailComponent implements OnDestroy {
   private ageTicker: any;
 
   constructor() {
+    // Only the selected node should drive this. Everything the body calls is
+    // untracked because `setupAutoRefresh` and `readValue` both read the config
+    // signal on their way to an interval and a URL: tracked, that made an
+    // unrelated settings save re-enter the effect, which calls `resetFreshness()`
+    // — so changing any preference silently threw away the staleness history and
+    // made a stale value look freshly read. The node is the dependency; the rest
+    // is the work.
     effect(() => {
       const n = this.node();
-      if (n) {
-        // A different node means the previous node's history says nothing about
-        // this one. Clearing is what stops one node's freshness vouching for
-        // another's.
-        this.resetFreshness();
-        this.readValue();
-        this.setupAutoRefresh();
-      } else {
-        this.clearAutoRefresh();
-        this.readResult.set(null);
-        this.resetFreshness();
-      }
+      untracked(() => {
+        if (n) {
+          // A different node means the previous node's history says nothing about
+          // this one. Clearing is what stops one node's freshness vouching for
+          // another's.
+          this.resetFreshness();
+          this.readValue();
+          this.setupAutoRefresh();
+        } else {
+          this.clearAutoRefresh();
+          this.readResult.set(null);
+          this.resetFreshness();
+        }
+      });
     });
 
     this.ageTicker = setInterval(() => this.now.set(Date.now()), 1000);
