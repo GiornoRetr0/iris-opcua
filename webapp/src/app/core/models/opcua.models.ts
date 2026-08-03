@@ -42,6 +42,12 @@ export type PipelineHealth = 'ok' | 'error' | 'starting' | 'disabled' | 'stopped
 
 export interface Pipeline {
   name: string;
+  /**
+   * Completed cycles, from Ensemble's own per-host counter. Distinguishes a
+   * pipeline that has just started from one that has been running dry — `ok`
+   * health with zero rows means different things at 1 cycle and at 50.
+   */
+  cycles?: number;
   status?: string;
   className?: string;
   dataSourceName?: string;

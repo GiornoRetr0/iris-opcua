@@ -245,6 +245,28 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
               </div>
             }
 
+            <!-- Running dry: health is ok, cycles are being completed, and no row has
+                 ever landed. The adapter is genuinely fine — nothing is failing — so
+                 this is not an error, and styling it as one would be crying wolf. It
+                 is the gap the audit named: a card that looks entirely healthy while
+                 the table stays empty. Extends the existing "not collecting"
+                 vocabulary rather than inventing new language. -->
+            @else if (isRunningDry(pipeline)) {
+              <div class="flex items-start gap-3 mb-6 bg-amber-50 border border-amber-300 rounded-lg px-4 py-3">
+                <span class="material-symbols-outlined text-amber-700 text-xl shrink-0">table_rows</span>
+                <div class="min-w-0">
+                  <p class="text-sm font-bold text-amber-900">
+                    Running, no rows yet — {{ pipeline.cycles }} cycles completed
+                  </p>
+                  <p class="text-xs text-amber-900/80 mt-0.5">
+                    The service is polling without errors but nothing is being stored.
+                    Check that the bound devices actually expose the schema's columns —
+                    Edit shows the coverage.
+                  </p>
+                </div>
+              </div>
+            }
+
             <!-- Collapsed: one line carrying what the diagram would have said, so a
                  compact row is still informative rather than just shorter. -->
             @if (!isExpanded(pipeline)) {
@@ -671,6 +693,20 @@ export class PipelinesDashboardComponent implements OnInit, OnDestroy {
   getFailureHint(p: Pipeline): string {
     if (!this.isFailing(p)) return '';
     return 'The service is retrying but not collecting. Check the event log for the reason.';
+  }
+
+  /**
+   * Healthy, cycling, and still empty — the `ok`-but-zero-rows gap (R27).
+   *
+   * The cycle threshold matters: the first cycle legitimately completes before any
+   * row is written, so flagging at 1 would accuse every pipeline of running dry for
+   * a few seconds after every start. Requiring more than two means the `starting`
+   * state has been through and left. A backend without `cycles` returns undefined,
+   * which fails the comparison and shows nothing — degrading to the previous
+   * behaviour rather than to a false alarm.
+   */
+  isRunningDry(p: Pipeline): boolean {
+    return this.health(p) === 'ok' && p.rowCount === 0 && (p.cycles ?? 0) > 2;
   }
 
   /** Derive a source label from pipeline name (e.g. "from-PLC-SA1" → "PLC_SA1") */
