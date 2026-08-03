@@ -17,20 +17,6 @@ import { Pipeline, PipelineHealth } from '../../core/models/opcua.models';
           <h1 class="text-3xl font-semibold text-primary tracking-tight">Pipelines</h1>
           <p class="text-on-surface-variant">Monitor and orchestrate your OPC UA data streams in real-time.</p>
         </div>
-        <div class="flex gap-3">
-          <div class="flex bg-surface-container p-1 rounded-lg">
-            <button (click)="activeFilter.set('active')"
-                    class="px-4 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider transition-all"
-                    [class]="activeFilter() === 'active' ? 'bg-surface-container-lowest text-primary shadow-sm' : 'text-on-surface-variant hover:text-primary'">
-              Active
-            </button>
-            <button (click)="activeFilter.set('archived')"
-                    class="px-4 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider transition-all"
-                    [class]="activeFilter() === 'archived' ? 'bg-surface-container-lowest text-primary shadow-sm' : 'text-on-surface-variant hover:text-primary'">
-              Archived
-            </button>
-          </div>
-        </div>
       </div>
 
       <!-- Dashboard Stats Grid.
@@ -177,9 +163,6 @@ import { Pipeline, PipelineHealth } from '../../core/models/opcua.models';
                     <span class="material-symbols-outlined">delete</span>
                   </button>
                 }
-                <button class="p-2 text-on-surface-variant hover:text-on-surface transition-colors">
-                  <span class="material-symbols-outlined">more_vert</span>
-                </button>
               </div>
             </div>
 
@@ -313,7 +296,6 @@ export class PipelinesDashboardComponent implements OnInit, OnDestroy {
 
   pipelines = signal<Pipeline[]>([]);
   loading = signal(false);
-  activeFilter = signal<'active' | 'archived'>('active');
 
   runningCount = signal(0);
   errorCount = signal(0);
