@@ -284,14 +284,34 @@ export class NodeDetailComponent implements OnDestroy {
     return '';
   }
 
+  /**
+   * True when a timestamp field carries no timestamp.
+   *
+   * Three ways that happens, and only one of them is a missing string: the OPC UA
+   * null DateTime is 1601-01-01 (the Windows FILETIME epoch), and the server
+   * sends it in full for a node that has no timestamp to report. A folder read
+   * comes back with "1601-01-01 00:00:00.0000000" — truthy, parseable, and
+   * rendering as a confident "00:00:00" if you only check for absence.
+   */
+  private isMissingTimestamp(ts: string | undefined): boolean {
+    if (!ts) return true;
+    const d = new Date(ts);
+    return isNaN(d.getTime()) || d.getUTCFullYear() <= 1601;
+  }
+
+  /**
+   * A clock time, HH:MM:SS.
+   *
+   * Milliseconds are dropped deliberately: on a 5-second refresh they are false
+   * precision. This previously passed `fractionalSecondDigits` *alone*, which
+   * asks for the fractional part of a time whose hours, minutes and seconds were
+   * never requested — hence the bare "235" the audit found.
+   */
   formatTimestamp(ts: string | undefined): string {
-    if (!ts) return '—';
-    try {
-      const d = new Date(ts);
-      return d.toLocaleTimeString('en-US', { hour12: false, fractionalSecondDigits: 3 });
-    } catch {
-      return ts;
-    }
+    if (this.isMissingTimestamp(ts)) return '—';
+    return new Date(ts!).toLocaleTimeString('en-US', {
+      hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
   }
 
   get idPrefix(): () => string {
