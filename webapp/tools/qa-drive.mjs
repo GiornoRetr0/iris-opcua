@@ -95,8 +95,9 @@ const config = {
   crlDir: '', clientURI: '', rootNodeId: '85', rootNodeNs: 0,
 };
 
-// Land on the origin first so localStorage is writable, seed it, then navigate.
-await send('Page.navigate', { url: 'http://localhost:4200/explorer' });
+// Land on the target's own origin first so localStorage is writable — it is
+// per-origin, so seeding on :4200 does nothing for a build served from :4300.
+await send('Page.navigate', { url: new URL(url).origin + '/' });
 await new Promise((r) => setTimeout(r, 2200));
 await evalJs(`localStorage.setItem('precisionArchitect::config', ${JSON.stringify(JSON.stringify(config))})`);
 await send('Page.navigate', { url });

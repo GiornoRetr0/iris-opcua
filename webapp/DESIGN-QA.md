@@ -77,6 +77,11 @@ Reachable by clearing `localStorage` and reloading `/explorer`.
 
 ## 3. Node Explorer — node detail, variable selected (`SA1` on `plc`)
 
+> Note the dev-server trap: an `ng serve` left running across a long session can
+> stop picking up changes, so a fix looks broken when it is only unserved. If
+> something you just changed does not appear, check `npx ng build` output or serve
+> `dist/webapp/browser` before concluding the code is wrong.
+
 - [ ] The hero value shows a number.
 - [ ] `LAST UPDATED` reads as a clock time, `HH:MM:SS`. Not bare milliseconds.
 - [ ] `SOURCE TIMESTAMP` shows a time, or the words `not reported`. Never
@@ -94,8 +99,11 @@ Reachable by clearing `localStorage` and reloading `/explorer`.
 - [ ] **The status dot is red.** A folder has no Value attribute, so the read
       returns `BadAttributeIdInvalid` — a Bad status must not render on the
       healthy dot.
-- [ ] The status label is words, not a bare integer. The numeric code is
-      available on hover.
+- [ ] The status label is words, not a bare integer — *"Bad — attribute not
+      supported for this node"* — with `BadAttributeIdInvalid (0x80350000)` on
+      hover. Values in `core/opcua-status.ts` are generated from the OPC
+      Foundation's `StatusCode.csv`; never hand-edit one. A wrong mapping is worse
+      than the raw integer.
 - [ ] Node class reads `folder`. The data-type field says it is not readable —
       never `String`, which here means only "the read failed".
 - [ ] The same value is not printed twice in one card.
@@ -178,8 +186,14 @@ Start a pipeline, `docker compose stop plc`, wait one cycle.
 - [ ] The banner appears: *"Enabled, but not collecting data."*
 - [ ] Status label reads `Not collecting`. Pulsing red dot, red card border.
 - [ ] Exactly one amber element appears on the page — the earned `ERROR
-      WARNINGS` tile.
-- [ ] Screenshot this. It had never been seen when the audit was written.
+      WARNINGS` tile, which gains its border and warning triangle only here.
+- [ ] The nav-rail server dot goes red.
+
+> **Seen and confirmed.** This state had never been observed when the audit was
+> written, and R7's zero-gating assumed the earned-amber case would look right. It
+> does: with `plc` stopped, exactly one amber element appears, and it is the tile
+> that means something. If that ever stops being true, the zero-gating in T1.7 is
+> what to re-examine.
 
 ## 12. Pipelines — starting state
 
