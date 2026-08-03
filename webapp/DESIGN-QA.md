@@ -67,18 +67,14 @@ Reachable by clearing `localStorage` and reloading `/explorer`.
 ## 3. Node Explorer — node detail, variable selected (`SA1` on `plc`)
 
 - [ ] The hero value shows a number.
-- [ ] **Telemetry: bars are visible, and their heights differ.** A flat row of
-      ten identical bars means the empty-state seed is rendering as data. An
-      empty rectangle means the bars have lost their width class again.
-- [ ] Before the first sample, the panel says so in words — it does not draw
-      bars.
 - [ ] `LAST UPDATED` reads as a clock time, `HH:MM:SS`. Not bare milliseconds.
 - [ ] `SOURCE TIMESTAMP` shows a time, or the words `not reported`. Never
       `Synchronized`. It may differ slightly from `LAST UPDATED` — that is the
       point of the field.
 - [ ] The status dot is green and the label reads `Good`.
-- [ ] No decorative dots in the telemetry header implying pagination.
 - [ ] No empty space reserved beside the hero value for a unit that never comes.
+- [ ] There is no telemetry panel. It was removed deliberately; a reinstated
+      sparkline needs axes, a time range and a y-scale to be worth the canvas.
 - [ ] A long string value is ellipsised (`…`) and shrinks its type size rather
       than overflowing.
 
