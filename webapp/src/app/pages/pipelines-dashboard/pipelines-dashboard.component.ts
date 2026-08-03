@@ -1,5 +1,6 @@
-import { Component, inject, signal, OnInit, OnDestroy } from '@angular/core';
+import { Component, inject, signal, computed, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { ApiService } from '../../core/services/api.service';
 import { ConfigService } from '../../core/services/config.service';
@@ -9,7 +10,7 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
 @Component({
   selector: 'app-pipelines-dashboard',
   standalone: true,
-  imports: [CommonModule, ConfirmDialogComponent],
+  imports: [CommonModule, FormsModule, ConfirmDialogComponent],
   template: `
     <div class="p-8 max-w-7xl mx-auto">
       <!-- Page Header -->
@@ -19,6 +20,49 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
           <p class="text-on-surface-variant">Monitor and orchestrate your OPC UA data streams in real-time.</p>
         </div>
       </div>
+
+      <!-- Sort and filter. This is the slot the inert ARCHIVED control used to
+           occupy (T1.10); it now carries controls that do something. Only shown
+           once there is enough to be worth filtering. -->
+      @if (pipelines().length > 3) {
+        <div class="flex flex-wrap items-center gap-2 mb-6">
+          <div class="relative flex-1 min-w-[12rem] max-w-xs">
+            <span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-base text-on-surface-muted pointer-events-none">search</span>
+            <input type="text" [ngModel]="search()" (ngModelChange)="search.set($event)"
+                   placeholder="Filter by name or schema" spellcheck="false"
+                   class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest pl-8 pr-3 py-1.5 text-xs text-on-surface placeholder:text-on-surface-muted focus:border-primary focus:ring-1 focus:ring-primary/30" />
+          </div>
+
+          <div class="flex bg-surface-container p-1 rounded-lg">
+            @for (opt of healthFilters; track opt.key) {
+              <button (click)="healthFilter.set(opt.key)"
+                      class="px-3 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider transition-all"
+                      [class]="healthFilter() === opt.key
+                        ? 'bg-surface-container-lowest text-primary shadow-sm'
+                        : 'text-on-surface-variant hover:text-primary'">
+                {{ opt.label }}
+              </button>
+            }
+          </div>
+
+          <label class="flex items-center gap-1.5 text-[11px] font-medium text-on-surface-muted">
+            Sort
+            <select [ngModel]="sortBy()" (ngModelChange)="sortBy.set($event)"
+                    class="rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-2 py-1.5 text-xs text-on-surface focus:border-primary focus:ring-1 focus:ring-primary/30">
+              <option value="name">Name</option>
+              <option value="health">Health</option>
+              <option value="mode">Mode</option>
+              <option value="rows">Rows</option>
+            </select>
+          </label>
+
+          <button (click)="setExpandAll(!isMostlyExpanded())"
+                  class="ml-auto flex items-center gap-1.5 rounded-lg border border-outline-variant/30 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-on-surface-variant hover:text-primary hover:border-primary/40 transition-colors">
+            <span class="material-symbols-outlined text-base">{{ isMostlyExpanded() ? 'unfold_less' : 'unfold_more' }}</span>
+            {{ isMostlyExpanded() ? 'Collapse all' : 'Expand all' }}
+          </button>
+        </div>
+      }
 
       <!-- Dashboard Stats Grid.
            Skipped entirely with no pipelines: four zeros say nothing the empty
@@ -112,7 +156,18 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
           </div>
         }
 
-        @for (pipeline of pipelines(); track pipeline.name) {
+        @if (pipelines().length && !visiblePipelines().length) {
+          <div class="flex flex-col items-center justify-center py-16 text-on-surface-variant">
+            <span class="material-symbols-outlined text-5xl text-on-surface-muted mb-3">filter_alt_off</span>
+            <p class="text-sm">No pipeline matches this filter.</p>
+            <button (click)="clearFilters()"
+                    class="mt-3 text-xs font-bold uppercase tracking-wider text-primary hover:underline">
+              Clear filters
+            </button>
+          </div>
+        }
+
+        @for (pipeline of visiblePipelines(); track pipeline.name) {
           <!-- Pipeline Card -->
           <div class="group rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow"
                [class]="isFailing(pipeline)
@@ -121,14 +176,25 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
                    ? 'bg-surface-container-low/50 border border-outline-variant/5 hover:border-outline-variant/20 opacity-80 hover:opacity-100'
                    : 'bg-surface-container-lowest border border-outline-variant/10'">
 
-            <!-- Card Header: title + status + actions -->
-            <div class="flex items-start justify-between mb-8">
-              <div class="flex items-center gap-4">
-                <div class="h-12 w-12 rounded-lg flex items-center justify-center"
+            <!-- Card Header: title + status + actions.
+                 The flow diagram is excellent at n=1 and wrong at n=20 — each card
+                 runs ~320px, so ten pipelines was ~3,200px of scrolling. Rather than
+                 delete the thing that works, it collapses: full cards while there is
+                 little to scan, compact rows once the list is long enough for height
+                 to be the problem, and one click either way. -->
+            <div class="flex items-start justify-between" [class]="isExpanded(pipeline) ? 'mb-8' : ''">
+              <div class="flex items-center gap-4 min-w-0">
+                <button (click)="toggleExpanded(pipeline)"
+                        [attr.aria-expanded]="isExpanded(pipeline)"
+                        [title]="isExpanded(pipeline) ? 'Collapse' : 'Show the flow diagram'"
+                        class="shrink-0 text-on-surface-variant hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded transition-colors">
+                  <span class="material-symbols-outlined">{{ isExpanded(pipeline) ? 'expand_less' : 'expand_more' }}</span>
+                </button>
+                <div class="h-12 w-12 rounded-lg flex items-center justify-center shrink-0"
                      [class]="getStatusIconBg(pipeline)">
                   <span class="material-symbols-outlined text-2xl">{{ getStatusIcon(pipeline) }}</span>
                 </div>
-                <div>
+                <div class="min-w-0">
                   <h3 class="text-lg font-semibold"
                       [class]="isStopped(pipeline) ? 'text-on-surface-variant' : 'text-primary'">{{ pipeline.name }}</h3>
                   <div class="flex items-center gap-2">
@@ -179,6 +245,30 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
               </div>
             }
 
+            <!-- Collapsed: one line carrying what the diagram would have said, so a
+                 compact row is still informative rather than just shorter. -->
+            @if (!isExpanded(pipeline)) {
+              <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 pl-[5.5rem] text-xs text-on-surface-variant">
+                <span class="flex items-center gap-1.5">
+                  <span class="material-symbols-outlined text-sm text-tertiary">schema</span>
+                  <span class="font-mono">{{ getSchemaName(pipeline) || getTableName(pipeline) }}</span>
+                </span>
+                @if (getDeviceCount(pipeline)) {
+                  <span class="flex items-center gap-1.5">
+                    <span class="material-symbols-outlined text-sm text-amber-600">device_hub</span>
+                    {{ getDeviceCount(pipeline) }} device{{ getDeviceCount(pipeline) === 1 ? '' : 's' }}
+                  </span>
+                }
+                <span class="flex items-center gap-1.5">
+                  <span class="material-symbols-outlined text-sm">table_rows</span>
+                  <strong class="font-bold text-primary">{{ pipeline.rowCount != null ? pipeline.rowCount : '—' }}</strong> rows
+                </span>
+                <span>{{ getIntervalLabel(pipeline) }}</span>
+                <span [title]="lastActivityTitle(pipeline)">{{ lastActivityLabel(pipeline) }}</span>
+              </div>
+            }
+
+            @if (isExpanded(pipeline)) {
             <!-- ═══ Flow Visualization (3-box: Nodes → Service → Table) ═══ -->
             <!-- grayscale(1) alone carries the stopped state (S7) and preserves
                  luminance contrast. The opacity that used to sit alongside it is what
@@ -285,6 +375,7 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
                 </div>
               </div>
             </div>
+            }
           </div>
         }
       </div>
@@ -307,6 +398,105 @@ export class PipelinesDashboardComponent implements OnInit, OnDestroy {
 
   pipelines = signal<Pipeline[]>([]);
   loading = signal(false);
+
+  // ── Density, sort and filter (T3.5) ───────────────────────────────────────
+  // Each full card runs ~320px, so ten pipelines was ~3,200px of scrolling with no
+  // sort, filter or search — the flow diagram is genuinely good at n=1 and wrong at
+  // n=20. Rather than delete it, it collapses.
+
+  search = signal('');
+  healthFilter = signal<'all' | 'running' | 'problem' | 'stopped'>('all');
+  sortBy = signal<'name' | 'health' | 'mode' | 'rows'>('name');
+  /** Overrides the size-based default in both directions. */
+  expandAll = signal<boolean | null>(null);
+  /** Per-pipeline overrides, keyed by config item name. */
+  private manualExpand = signal<Record<string, boolean>>({});
+
+  readonly healthFilters = [
+    { key: 'all' as const, label: 'All' },
+    { key: 'running' as const, label: 'Running' },
+    { key: 'problem' as const, label: 'Problem' },
+    { key: 'stopped' as const, label: 'Stopped' },
+  ];
+
+  /**
+   * Full cards at 1-3, compact rows above that (D4 in the density question).
+   * Keeps the diagram as the first impression when there is little to scan, and
+   * switches once height is the problem.
+   */
+  private readonly EXPANDED_BY_DEFAULT_UP_TO = 3;
+
+  visiblePipelines = computed(() => {
+    const q = this.search().trim().toLowerCase();
+    const health = this.healthFilter();
+    const sort = this.sortBy();
+
+    let list = this.pipelines().filter((p) => {
+      if (q) {
+        const haystack = `${p.name} ${this.getSchemaName(p)} ${this.getTableName(p)}`.toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      switch (health) {
+        case 'running': return this.health(p) === 'ok';
+        // "Problem" is error *or* starting-forever: both mean not collecting now.
+        case 'problem': return this.health(p) === 'error' || this.health(p) === 'starting';
+        case 'stopped': return this.isStopped(p);
+        default: return true;
+      }
+    });
+
+    // Rank by how much attention it needs, so a failing pipeline sorts to the top
+    // where "health" is chosen.
+    const rank = (p: Pipeline) => {
+      switch (this.health(p)) {
+        case 'error': return 0;
+        case 'starting': return 1;
+        case 'ok': return 2;
+        default: return 3;
+      }
+    };
+
+    list = [...list].sort((a, b) => {
+      switch (sort) {
+        case 'health': return rank(a) - rank(b) || a.name.localeCompare(b.name);
+        case 'mode': return (a.mode || '').localeCompare(b.mode || '') || a.name.localeCompare(b.name);
+        case 'rows': return (b.rowCount ?? -1) - (a.rowCount ?? -1) || a.name.localeCompare(b.name);
+        default: return a.name.localeCompare(b.name);
+      }
+    });
+    return list;
+  });
+
+  isExpanded(p: Pipeline): boolean {
+    const manual = this.manualExpand()[p.name];
+    if (manual !== undefined) return manual;
+    const all = this.expandAll();
+    if (all !== null) return all;
+    return this.pipelines().length <= this.EXPANDED_BY_DEFAULT_UP_TO;
+  }
+
+  toggleExpanded(p: Pipeline): void {
+    const next = !this.isExpanded(p);
+    this.manualExpand.update((m) => ({ ...m, [p.name]: next }));
+  }
+
+  /** True if most visible rows are open, so the button offers the useful action. */
+  isMostlyExpanded(): boolean {
+    const list = this.visiblePipelines();
+    if (!list.length) return false;
+    return list.filter((p) => this.isExpanded(p)).length * 2 >= list.length;
+  }
+
+  /** Clears per-item overrides too, or the button would appear to do nothing. */
+  setExpandAll(value: boolean): void {
+    this.manualExpand.set({});
+    this.expandAll.set(value);
+  }
+
+  clearFilters(): void {
+    this.search.set('');
+    this.healthFilter.set('all');
+  }
 
   runningCount = signal(0);
   errorCount = signal(0);
