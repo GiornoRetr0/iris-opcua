@@ -154,8 +154,22 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
                   </div>
                   <div>
                     <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Password</label>
-                    <input type="password" [(ngModel)]="editingServer()!.password" autocomplete="off" placeholder="••••••••"
-                           class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
+                    <!-- A bullet *placeholder* made an empty field and a filled one
+                         pixel-identical: both showed bullets. Empty now looks empty and
+                         says so; a set password is stated rather than mimed, with a
+                         Change button that clears the field for re-entry. -->
+                    @if (serverPasswordSet()) {
+                      <div class="flex items-center gap-2 w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5">
+                        <span class="material-symbols-outlined text-base text-tertiary">key</span>
+                        <span class="text-sm text-on-surface flex-1">Password set</span>
+                        <button type="button" (click)="clearServerPassword()"
+                                class="text-xs font-semibold text-primary hover:underline">Change</button>
+                      </div>
+                    } @else {
+                      <input type="password" [(ngModel)]="editingServer()!.password" autocomplete="off"
+                             placeholder="No password set"
+                             class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
+                    }
                   </div>
                 </div>
               </section>
@@ -258,8 +272,18 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
                   </div>
                   <div>
                     <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">IRIS API Password</label>
-                    <input type="password" [(ngModel)]="gatewayForm.apiPassword" autocomplete="off" placeholder="••••••••"
-                           class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
+                    @if (gatewayPasswordSet()) {
+                      <div class="flex items-center gap-2 w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5">
+                        <span class="material-symbols-outlined text-base text-tertiary">key</span>
+                        <span class="text-sm text-on-surface flex-1">Password set</span>
+                        <button type="button" (click)="clearGatewayPassword()"
+                                class="text-xs font-semibold text-primary hover:underline">Change</button>
+                      </div>
+                    } @else {
+                      <input type="password" [(ngModel)]="gatewayForm.apiPassword" autocomplete="off"
+                             placeholder="No password set"
+                             class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
+                    }
                   </div>
                   <div>
                     <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Auto-Refresh Interval (s)</label>
@@ -337,6 +361,17 @@ export class SettingsModalComponent {
    * never has to infer an outcome by matching on the text.
    */
   testFailed = signal(false);
+
+  /**
+   * Which passwords were already set when the modal opened.
+   *
+   * Tracked rather than read live off the form, so that pressing Change reveals an
+   * empty field to type into instead of flipping straight back to "Password set".
+   * A last-updated date would need a storage-shape change (see the plan's
+   * §Decisions); the set/unset distinction is the finding.
+   */
+  private revealedServerPasswords = signal<Set<string>>(new Set());
+  private revealedGatewayPassword = signal(false);
 
   // Server list (mutable copies for editing)
   servers = signal<ServerProfile[]>([]);
@@ -445,6 +480,29 @@ export class SettingsModalComponent {
    * beside the button while the user fixes the thing it complains about reads as
    * the app not noticing.
    */
+  /** A server password counts as set only if it has a value and has not been revealed for editing. */
+  serverPasswordSet(): boolean {
+    const server = this.editingServer();
+    if (!server) return false;
+    return !!server.password && !this.revealedServerPasswords().has(server.id);
+  }
+
+  clearServerPassword(): void {
+    const server = this.editingServer();
+    if (!server) return;
+    server.password = '';
+    this.revealedServerPasswords.update((s) => new Set(s).add(server.id));
+  }
+
+  gatewayPasswordSet(): boolean {
+    return !!this.gatewayForm.apiPassword && !this.revealedGatewayPassword();
+  }
+
+  clearGatewayPassword(): void {
+    this.gatewayForm.apiPassword = '';
+    this.revealedGatewayPassword.set(true);
+  }
+
   clearSaveError(): void {
     if (this.saveError()) this.saveError.set('');
   }
