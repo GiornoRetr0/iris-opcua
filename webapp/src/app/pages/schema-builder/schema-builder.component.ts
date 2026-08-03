@@ -122,26 +122,36 @@ const MAX_DEPTH = 2;
             </button>
           </div>
 
-          <!-- Which node is the device has to be said out loud; it can't be guessed
-               from depth without baking the browse path into the column names. -->
+          <!-- A persistent slot for the template device, filled or empty.
+               Which node is the device has to be said out loud; it can't be guessed
+               from depth without baking the browse path into the column names.
+
+               This replaces the callout that explained *where the button was*
+               ("Hover a node and press Set device"). Needing to document the location
+               of a control is the symptom; now that Set device is always visible
+               (T3.3) and the current selection has a fixed home, that sentence is
+               deletable — which was the stated test for this being fixed. -->
           @if (roots().length) {
-            <div class="mb-3 flex items-start gap-2 rounded-lg px-3 py-2 text-[11px] leading-snug"
+            <div class="mb-3 flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] leading-snug"
                  [class]="deviceRoot()
                    ? 'bg-primary/8 border border-primary/20 text-on-surface'
-                   : 'bg-amber-50 border border-amber-300/50 text-amber-900'">
-              <span class="material-symbols-outlined text-sm shrink-0 mt-px"
-                    [class]="deviceRoot() ? 'text-primary' : 'text-amber-600'">
-                {{ deviceRoot() ? 'memory' : 'info' }}
-              </span>
+                   : 'bg-surface-container-low border border-outline-variant/20 text-on-surface-variant'">
+              <span class="material-symbols-outlined text-sm shrink-0"
+                    [class]="deviceRoot() ? 'text-primary' : 'text-on-surface-muted'">memory</span>
               @if (deviceRoot(); as root) {
-                <span>
+                <span class="min-w-0 flex-1">
                   Template device: <strong class="font-bold">{{ root.displayName }}</strong>.
                   Columns are named relative to it — its own name never becomes part of a column.
                 </span>
+                <button (click)="clearDeviceRoot()"
+                        title="Clear the template device"
+                        class="shrink-0 text-[10px] font-bold uppercase tracking-wider text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded px-1">
+                  Change
+                </button>
               } @else {
-                <span>
-                  Hover a node and press <strong class="font-bold">Set device</strong> on the one
-                  representing a single device. Columns can only be picked inside it.
+                <span class="min-w-0 flex-1">
+                  <strong class="font-bold">No template device.</strong>
+                  Pick the node representing one device — columns are named relative to it.
                 </span>
               }
             </div>
@@ -209,8 +219,13 @@ const MAX_DEPTH = 2;
                       }
                     </p>
                   </div>
+                  <!-- Always visible. This was opacity-0 group-hover:opacity-100 with no
+                       focus fallback of any kind, so on a touch device you could not
+                       remove a draft column at all — the worst of the three
+                       hover-gated controls. -->
                   <button (click)="removeColumn(col)"
-                          class="p-1 rounded text-on-surface-variant/40 hover:text-error hover:bg-error-container/20 opacity-0 group-hover:opacity-100 transition-all">
+                          [title]="'Remove ' + col.displayName"
+                          class="p-1 rounded text-on-surface-variant hover:text-error hover:bg-error-container/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition-colors">
                     <span class="material-symbols-outlined text-base">close</span>
                   </button>
                 </div>
@@ -326,8 +341,11 @@ const MAX_DEPTH = 2;
                 Device
               </button>
             } @else {
+              <!-- Always visible too. It was focusable and revealed itself on focus, so
+                   WCAG 2.1.1 was met (C1) — the failures were discoverability (tab
+                   blindly through every row to find it) and touch. -->
               <button (click)="setDeviceRoot(node, $event)" title="Use this node as the template device"
-                      class="ml-1.5 shrink-0 px-1.5 py-px rounded text-[9px] font-bold uppercase tracking-wider border border-outline-variant/40 text-on-surface-variant hover:border-primary hover:text-primary opacity-0 group-hover/node:opacity-100 focus:opacity-100 transition-all">
+                      class="ml-1.5 shrink-0 px-1.5 py-px rounded text-[9px] font-bold uppercase tracking-wider border border-outline-variant/40 text-on-surface-variant hover:border-primary hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition-colors">
                 Set device
               </button>
             }
@@ -474,6 +492,16 @@ export class SchemaBuilderComponent implements OnInit {
    * its path relative to that root. Clearing them is honest; silently keeping
    * paths measured against a different root would be the original bug.
    */
+  /**
+   * Unset the template device. Columns are named relative to it, so they cannot
+   * outlive it — clearing both is the honest move rather than leaving columns whose
+   * paths no longer mean anything.
+   */
+  clearDeviceRoot(): void {
+    this.deviceRoot.set(undefined);
+    this.columns.set([]);
+  }
+
   setDeviceRoot(node: TreeNode, event?: Event): void {
     event?.stopPropagation();
     const wasRoot = this.isDeviceRoot(node);

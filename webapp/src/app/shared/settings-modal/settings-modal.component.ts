@@ -63,8 +63,11 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
                       {{ server.securityMode === 3 ? 'Sign & Encrypt' : 'Unsecured' }}
                     </p>
                   </div>
+                  <!-- Always visible. Not one of the audit's three, but the same defect:
+                       a remove control that touch can never reveal. -->
                   <button (click)="removeServer(server.id, $event)"
-                          class="opacity-0 group-hover:opacity-100 text-on-surface-variant hover:text-error transition-all p-0.5 rounded">
+                          [title]="'Remove ' + (server.name || 'this server')"
+                          class="text-on-surface-variant hover:text-error focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition-colors p-0.5 rounded shrink-0">
                     <span class="material-symbols-outlined text-sm">close</span>
                   </button>
                 </div>

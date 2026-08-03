@@ -240,7 +240,7 @@ function defaultPipelineName(schemaShortName: string): string {
                             </span>
                           }
                           <button (click)="removeDeviceLine(dev.line)"
-                                  class="p-1 rounded text-on-surface-variant/40 hover:text-error hover:bg-error-container/20 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all shrink-0">
+                                  class="p-1 rounded text-on-surface-variant hover:text-error hover:bg-error-container/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition-colors shrink-0">
                             <span class="material-symbols-outlined text-base">close</span>
                           </button>
                         </div>
