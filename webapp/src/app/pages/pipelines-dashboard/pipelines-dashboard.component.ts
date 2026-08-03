@@ -265,21 +265,21 @@ import { Pipeline, PipelineHealth } from '../../core/models/opcua.models';
               </div>
               <div class="flex items-center gap-6">
                 <div class="space-y-0.5 text-right">
-                  <div class="text-[0.6rem] font-bold text-on-surface-variant uppercase tracking-widest">Rows</div>
-                  <div class="text-sm font-semibold" [class]="isStopped(pipeline) ? 'text-on-surface-variant' : 'text-primary'">
+                  <div class="text-[0.6rem] font-medium text-on-surface-muted uppercase tracking-widest">Rows</div>
+                  <div class="text-sm font-bold" [class]="isStopped(pipeline) ? 'text-on-surface-variant' : 'text-primary'">
                     {{ pipeline.rowCount != null ? pipeline.rowCount : '—' }}
                   </div>
                 </div>
                 <div class="space-y-0.5 text-right">
-                  <div class="text-[0.6rem] font-bold text-on-surface-variant uppercase tracking-widest">Frequency</div>
-                  <div class="text-sm font-semibold" [class]="isStopped(pipeline) ? 'text-on-surface-variant' : 'text-primary'">
+                  <div class="text-[0.6rem] font-medium text-on-surface-muted uppercase tracking-widest">Frequency</div>
+                  <div class="text-sm font-bold" [class]="isStopped(pipeline) ? 'text-on-surface-variant' : 'text-primary'">
                     {{ getIntervalLabel(pipeline) }}
                   </div>
                 </div>
                 <div class="space-y-0.5 text-right">
-                  <div class="text-[0.6rem] font-bold text-on-surface-variant uppercase tracking-widest">Last Activity</div>
-                  <div class="text-sm font-semibold" [class]="isStopped(pipeline) ? 'text-on-surface-variant' : 'text-primary'">
-                    {{ pipeline.lastActivity || '—' }}
+                  <div class="text-[0.6rem] font-medium text-on-surface-muted uppercase tracking-widest">Last Activity</div>
+                  <div class="text-sm font-bold" [class]="isStopped(pipeline) ? 'text-on-surface-variant' : 'text-primary'">
+                    <span [title]="lastActivityTitle(pipeline)">{{ lastActivityLabel(pipeline) }}</span>
                   </div>
                 </div>
               </div>
@@ -533,6 +533,57 @@ export class PipelinesDashboardComponent implements OnInit, OnDestroy {
 
   viewSchemas(): void {
     this.router.navigate(['/schemas']);
+  }
+
+  /**
+   * `lastActivity` as sent by the backend: `$$$GetHostMonitor` output, formatted
+   * `2026-08-03 13:07:29.980` — **no timezone offset, and it is IRIS server time.**
+   *
+   * That matters, because `new Date('2026-08-03 13:07:29.980')` parses as *local*
+   * time. In this compose environment IRIS runs UTC while the host is CEST, so
+   * naive parsing was two hours out. Appending 'Z' is right for a UTC IRIS; the
+   * container sets that, and the timezone we render makes the interpretation
+   * visible rather than silent. If IRIS is ever configured to local time this needs
+   * an offset from the backend to stay correct — which is the real fix, and a
+   * backend change.
+   */
+  private parseLastActivity(p: Pipeline): Date | null {
+    const raw = (p.lastActivity || '').trim();
+    if (!raw) return null;
+    const d = new Date(raw.replace(' ', 'T') + 'Z');
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  /**
+   * Relative age, which is what an operator needs at a glance. Millisecond
+   * precision on a field that updates every few seconds was false precision.
+   * Falls back to the raw string rather than rendering "Invalid Date".
+   */
+  lastActivityLabel(p: Pipeline): string {
+    const raw = (p.lastActivity || '').trim();
+    if (!raw) return 'never';
+    const d = this.parseLastActivity(p);
+    if (!d) return raw;
+    const secs = Math.max(0, Math.round((Date.now() - d.getTime()) / 1000));
+    if (secs < 5) return 'just now';
+    if (secs < 60) return `${secs}s ago`;
+    if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+    if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+    return `${Math.floor(secs / 86400)}d ago`;
+  }
+
+  /**
+   * The absolute time on hover, **with the timezone named** — the audit calls its
+   * absence a hazard in a system talking to equipment across sites.
+   */
+  lastActivityTitle(p: Pipeline): string {
+    const d = this.parseLastActivity(p);
+    if (!d) return (p.lastActivity || '').trim() || 'No activity reported yet';
+    return d.toLocaleString(undefined, {
+      year: 'numeric', month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      timeZoneName: 'short',
+    });
   }
 
   /** API returns: callInterval="5" (polling), publishingInterval="1000" (subscription) */
