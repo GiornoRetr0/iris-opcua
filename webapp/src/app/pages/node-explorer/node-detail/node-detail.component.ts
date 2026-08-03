@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { TreeNode, NodeReadResult } from '../../../core/models/opcua.models';
 import { ApiService } from '../../../core/services/api.service';
 import { ConfigService } from '../../../core/services/config.service';
+import { severityOf, statusText, statusDetail } from '../../../core/opcua-status';
 
 @Component({
   selector: 'app-node-detail',
@@ -259,8 +260,7 @@ export class NodeDetailComponent implements OnDestroy {
     if (!r) return 'unknown';
     if (r.readError) return 'bad';
     if (r.statusCode == null) return 'unknown';
-    const sev = (r.statusCode >>> 30) & 0b11;
-    return sev === 0 ? 'good' : sev === 1 ? 'uncertain' : 'bad';
+    return severityOf(r.statusCode);
   }
 
   severityDotClass(): string {
@@ -272,30 +272,25 @@ export class NodeDetailComponent implements OnDestroy {
     }
   }
 
-  /**
-   * Severity in words, with the numeric code alongside so an engineer can look
-   * it up. T2.2 (R12) replaces the code with a human string per StatusCode; the
-   * severity classification above is the half that stops a Bad status reading
-   * as healthy, and it needs no table.
-   */
+  /** The status in words. See core/opcua-status.ts for where the table comes from. */
   statusLabel(): string {
     const r = this.readResult();
     if (!r) return '—';
     if (r.readError) return 'Read failed';
-    switch (this.severity()) {
-      case 'good': return 'Good';
-      case 'uncertain': return `Uncertain (${r.statusCode})`;
-      case 'bad': return `Bad (${r.statusCode})`;
-      default: return 'Unknown';
-    }
+    if (r.statusCode == null) return 'Unknown';
+    return statusText(r.statusCode);
   }
 
-  /** The read error itself, for hover — it is the most specific thing we have. */
+  /**
+   * Hover text: the spec identifier and hex, which are what appear in the event
+   * log and in vendor documentation — so they are the useful things to be able to
+   * read off and search for.
+   */
   statusTitle(): string {
     const r = this.readResult();
     if (!r) return '';
     if (r.readError) return r.readError;
-    return r.statusCode != null ? `StatusCode ${r.statusCode}` : '';
+    return r.statusCode != null ? statusDetail(r.statusCode) : '';
   }
 
   /**
