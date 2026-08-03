@@ -159,37 +159,6 @@ import { ConfigService } from '../../../core/services/config.service';
               <p class="text-xs text-on-surface-variant mt-2">TypeDef: ns={{ node()!.typeDefNs }}, id={{ node()!.typeDefId }}</p>
             </div>
           </div>
-
-          <!-- Telemetry Stream -->
-          <div class="md:col-span-12 bg-white/40 backdrop-blur-md rounded-xl p-8 border border-white/20">
-            <div class="flex items-center justify-between mb-6">
-              <h3 class="text-sm font-bold text-primary uppercase tracking-widest">Telemetry Stream</h3>
-              <div class="flex gap-2">
-                <span class="w-2 h-2 rounded-full bg-tertiary"></span>
-                <span class="w-2 h-2 rounded-full bg-tertiary opacity-40"></span>
-                <span class="w-2 h-2 rounded-full bg-tertiary opacity-40"></span>
-              </div>
-            </div>
-            <div class="h-48 w-full bg-surface-container-low rounded-lg relative flex items-center justify-center">
-              <div class="absolute inset-0 opacity-10 pointer-events-none"
-                   style="background-image: radial-gradient(circle at 2px 2px, #131c79 1px, transparent 0); background-size: 24px 24px;"></div>
-              <!-- Bar visualization from history -->
-              <div class="w-full h-full px-8 py-4 flex items-end justify-between gap-1">
-                @for (val of telemetryBars(); track $index) {
-                  <!-- One class attribute, deliberately. Two of them makes Angular keep
-                       the last and drop the first, which is what left these bars with a
-                       colour but no width for as long as the panel has shipped.
-                       tools/check-templates.mjs now fails the build on a repeat. -->
-                  <div class="w-full rounded-t-sm bg-primary transition-all duration-300"
-                       [style.height.%]="val"
-                       [style.opacity]="0.1 + (val / 100) * 0.9"></div>
-                }
-              </div>
-              <p class="absolute bottom-4 left-1/2 -translate-x-1/2 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
-                Real-time sampling: {{ config.get().autoRefreshInterval }}s intervals
-              </p>
-            </div>
-          </div>
         </div>
       </div>
     }
@@ -205,8 +174,6 @@ export class NodeDetailComponent implements OnDestroy {
   readLoading = signal(false);
   autoRefresh = true;
   private refreshInterval: any;
-  telemetryBars = signal<number[]>(Array(10).fill(20));
-  private telemetryHistory: number[] = [];
 
   constructor() {
     effect(() => {
@@ -233,7 +200,6 @@ export class NodeDetailComponent implements OnDestroy {
       next: (result) => {
         this.readResult.set(result);
         this.readLoading.set(false);
-        this.pushTelemetry(result.value);
       },
       error: () => this.readLoading.set(false),
     });
@@ -259,17 +225,6 @@ export class NodeDetailComponent implements OnDestroy {
       clearInterval(this.refreshInterval);
       this.refreshInterval = null;
     }
-  }
-
-  private pushTelemetry(value: any): void {
-    const num = parseFloat(value);
-    if (isNaN(num)) return;
-    this.telemetryHistory.push(num);
-    if (this.telemetryHistory.length > 10) this.telemetryHistory.shift();
-    const max = Math.max(...this.telemetryHistory, 1);
-    this.telemetryBars.set(
-      this.telemetryHistory.map((v) => Math.max(10, (Math.abs(v) / max) * 100))
-    );
   }
 
   formatHeroValue(result: NodeReadResult): string {
