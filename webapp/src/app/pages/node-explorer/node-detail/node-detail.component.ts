@@ -74,10 +74,9 @@ import { ConfigService } from '../../../core/services/config.service';
                 <div>
                   <p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-1">Status</p>
                   <div class="flex items-center gap-2">
-                    <span class="h-2 w-2 rounded-full"
-                          [class]="readResult()?.readError ? 'bg-error' : 'bg-tertiary'"></span>
-                    <span class="text-sm font-bold text-on-surface">
-                      {{ readResult()?.readError ? 'Error' : (readResult()?.statusCode === 0 ? 'Good' : (readResult() ? 'Status ' + readResult()!.statusCode : '—')) }}
+                    <span class="h-2 w-2 rounded-full" [class]="severityDotClass()"></span>
+                    <span class="text-sm font-bold text-on-surface" [title]="statusTitle()">
+                      {{ statusLabel() }}
                     </span>
                   </div>
                 </div>
@@ -290,6 +289,58 @@ export class NodeDetailComponent implements OnDestroy {
     if (type.includes('Int')) return '';
     if (type.includes('Boolean')) return '';
     return '';
+  }
+
+  /**
+   * OPC UA severity, from the top two bits of the StatusCode.
+   * 0 = Good, 1 = Uncertain, 2/3 = Bad. See OPC UA Part 4, 7.34.
+   *
+   * The dot used to branch on `readError` alone while the label beside it read
+   * `statusCode`, so a Bad status that transported successfully — no read error,
+   * statusCode 0x80350000 — rendered on the healthy green dot.
+   */
+  severity(): 'good' | 'uncertain' | 'bad' | 'unknown' {
+    const r = this.readResult();
+    if (!r) return 'unknown';
+    if (r.readError) return 'bad';
+    if (r.statusCode == null) return 'unknown';
+    const sev = (r.statusCode >>> 30) & 0b11;
+    return sev === 0 ? 'good' : sev === 1 ? 'uncertain' : 'bad';
+  }
+
+  severityDotClass(): string {
+    switch (this.severity()) {
+      case 'good': return 'bg-tertiary';
+      case 'uncertain': return 'bg-amber-500';
+      case 'bad': return 'bg-error';
+      default: return 'bg-on-surface-variant/40';
+    }
+  }
+
+  /**
+   * Severity in words, with the numeric code alongside so an engineer can look
+   * it up. T2.2 (R12) replaces the code with a human string per StatusCode; the
+   * severity classification above is the half that stops a Bad status reading
+   * as healthy, and it needs no table.
+   */
+  statusLabel(): string {
+    const r = this.readResult();
+    if (!r) return '—';
+    if (r.readError) return 'Read failed';
+    switch (this.severity()) {
+      case 'good': return 'Good';
+      case 'uncertain': return `Uncertain (${r.statusCode})`;
+      case 'bad': return `Bad (${r.statusCode})`;
+      default: return 'Unknown';
+    }
+  }
+
+  /** The read error itself, for hover — it is the most specific thing we have. */
+  statusTitle(): string {
+    const r = this.readResult();
+    if (!r) return '';
+    if (r.readError) return r.readError;
+    return r.statusCode != null ? `StatusCode ${r.statusCode}` : '';
   }
 
   /**
