@@ -67,6 +67,16 @@ Reachable by clearing `localStorage` and reloading `/explorer`.
 
 ## 2. Node Explorer — tree
 
+> **Check this first, with exactly one server configured.** The tree froze the tab
+> in that configuration and only that one: an effect wrote the signal it read, and
+> because the auto-expand convenience is gated on `list.length === 1` it re-entered
+> itself and fired a fresh `/browse` on every pass. Open DevTools' Network panel —
+> a healthy load is a handful of browse requests that then **stops**. A counter
+> that keeps climbing with nothing touched is the bug back.
+
+- [ ] With one server configured the tree loads, auto-expands, and then goes
+      quiet. No unbounded request growth, no rising CPU.
+- [ ] Adding a second server in Settings makes it appear **without a reload**.
 - [ ] Every row shows its `ns=` annotation.
 - [ ] Folder icons are one colour, the same colour used in the device-binding
       tree. (`Objects` was blue here and amber everywhere else.)
@@ -207,6 +217,32 @@ Enable an item and capture the first cycle.
 
 - [ ] With `health === ok` and `ROWS 0` past a couple of cycles, the card says
       so in words rather than looking identical to a producing pipeline.
+- [ ] The banner is **amber, not red**. Nothing is failing — the adapter connects,
+      resolves and polls cleanly — so error styling here is crying wolf, the same
+      defect T1.7 fixed on the stats tiles.
+- [ ] It does **not** appear in the first second or two after a start. The first
+      cycle legitimately completes before any row is written, which is why the
+      threshold is `cycles > 2` rather than `> 0`.
+- [ ] It names the cycle count, and points at device coverage rather than the
+      event log — the event log has nothing to show, because nothing errored.
+
+## 13b. Pipelines — display name vs config item name
+
+Set a display label on a pipeline via Edit, then:
+
+- [ ] The card shows the label as its heading **and** the config item name
+      beneath it. Never only the label: an operator holding an `Ens_Util.Log`
+      entry or a Management Portal row has to be able to find the matching card.
+- [ ] Searching for either name finds the pipeline.
+- [ ] The flow diagram's SERVICE box still shows the **config item name** — it
+      depicts the running business service, and that is the name it runs under.
+- [ ] The delete confirmation names the config item explicitly. Friendly heading
+      is fine; the irreversible detail must be unambiguous.
+- [ ] Clear the label and save: the card falls back to the config item name, and
+      the name itself is unchanged. Then edit only the device list and save —
+      the label must **not** reappear or vanish as a side effect.
+- [ ] The event log still records the config item name, not the label. Check
+      `Ens_Util.Log`; this is the constraint the whole feature is built around.
 
 ## 14. Settings — servers
 
@@ -254,6 +290,13 @@ Run these once across the whole app, not per screen.
 - [ ] **`npm run build` passes**, which runs the template guard
       (`tools/check-templates.mjs`). It fails on a duplicate attribute — the F2
       root cause — and on new keyboard-unreachable click targets.
+- [ ] **No `effect()` writes a signal it also reads.** This shipped a tab-freezing
+      request loop in the explorer's tree, and the guard cannot catch it — `tsc` is
+      happy and the template is valid. The rule: read the inputs the effect should
+      depend on, then do the work inside `untracked()`. Watch the Network panel on
+      each screen and confirm request counts settle; a number that climbs on its own
+      is this bug. It is worth grepping `effect(` and reading each one, since there
+      are only a couple.
 
 ---
 
