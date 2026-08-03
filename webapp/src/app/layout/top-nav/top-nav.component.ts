@@ -22,12 +22,19 @@ import { ConfigService } from '../../core/services/config.service';
           </nav>
         </div>
         <div class="flex items-center gap-4">
+          <!-- Names its subject. This is a polled GET /ping against the IRIS REST API
+               and says nothing about any OPC UA server; the per-server dots in the nav
+               rail and settings are the ones that do. Labelled rather than merged with
+               them, per C6 — they measure genuinely different things. -->
           <div class="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold"
                [class]="apiOnline
                  ? 'bg-tertiary-fixed text-on-tertiary-fixed'
-                 : 'bg-error-container text-on-error-container'">
+                 : 'bg-error-container text-on-error-container'"
+               [title]="apiOnline
+                 ? 'The IRIS REST API is responding. This says nothing about your OPC UA servers.'
+                 : 'The IRIS REST API is not responding. Check the API base URL in Settings.'">
             <span class="material-symbols-outlined text-[14px] filled">sensors</span>
-            {{ apiOnline ? 'API Online' : 'API Offline' }}
+            {{ apiOnline ? 'IRIS API: Online' : 'IRIS API: Offline' }}
           </div>
           <span class="material-symbols-outlined text-slate-500 hover:text-[#131c79] cursor-pointer"
                 (click)="onSettingsClick()">settings</span>

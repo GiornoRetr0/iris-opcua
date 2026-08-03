@@ -68,15 +68,23 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
             </div>
           }
 
-          <div class="mt-auto pt-6">
-            <div class="bg-tertiary-fixed text-on-tertiary-fixed p-4 rounded-xl flex items-center gap-3">
-              <span class="material-symbols-outlined">sensors</span>
-              <div>
-                <p class="text-[10px] font-bold uppercase">System Status</p>
-                <p class="text-xs font-semibold">{{ testStatus() || 'Ready' }}</p>
+          <!-- Only rendered once a test has actually run. Its resting state used to be
+               a hardcoded 'Ready' — the most saturated colour in the palette, in the
+               one pane a user visits to find out whether their connection works,
+               asserting health while measuring nothing. An unpressed test has no
+               result, so it shows nothing. -->
+          @if (testStatus()) {
+            <div class="mt-auto pt-6">
+              <div class="p-4 rounded-xl flex items-center gap-3"
+                   [class]="testFailed() ? 'bg-error-container text-on-error-container' : 'bg-tertiary-fixed text-on-tertiary-fixed'">
+                <span class="material-symbols-outlined">{{ testFailed() ? 'error' : 'sensors' }}</span>
+                <div class="min-w-0">
+                  <p class="text-[10px] font-bold uppercase">Last test</p>
+                  <p class="text-xs font-semibold break-words">{{ testStatus() }}</p>
+                </div>
               </div>
             </div>
-          </div>
+          }
         </div>
 
         <!-- Content Area -->
@@ -257,12 +265,26 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
           <!-- Footer Actions -->
           <div class="px-8 py-6 border-t border-outline-variant/10 bg-surface-container-low/50 flex flex-col sm:flex-row items-center justify-between gap-4">
             @if (activeTab() === 'servers' && editingServer()) {
-              <button (click)="testServerConnection()"
-                      [disabled]="testing()"
-                      class="flex items-center gap-2 px-5 py-2.5 text-primary text-sm font-semibold rounded-lg hover:bg-primary/5 transition-all border border-outline-variant/30 w-full sm:w-auto disabled:opacity-50">
-                <span class="material-symbols-outlined text-xl">network_check</span>
-                {{ testing() ? 'Testing...' : 'Test Connection' }}
-              </button>
+              <!-- The result belongs next to the control that produced it. It used to
+                   appear only in the sidebar widget, in the opposite corner. -->
+              <div class="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:w-auto min-w-0">
+                <button (click)="testServerConnection()"
+                        [disabled]="testing()"
+                        class="flex items-center gap-2 px-5 py-2.5 text-primary text-sm font-semibold rounded-lg hover:bg-primary/5 transition-all border border-outline-variant/30 w-full sm:w-auto disabled:opacity-50 shrink-0">
+                  <span class="material-symbols-outlined text-xl"
+                        [class.animate-spin]="testing()">{{ testing() ? 'progress_activity' : 'network_check' }}</span>
+                  {{ testing() ? 'Testing…' : 'Test Connection' }}
+                </button>
+                @if (testStatus() && !testing()) {
+                  <p class="flex items-start gap-1.5 text-xs font-medium max-w-xs min-w-0"
+                     [class]="testFailed() ? 'text-error' : 'text-tertiary'">
+                    <span class="material-symbols-outlined text-sm shrink-0">
+                      {{ testFailed() ? 'error' : 'check_circle' }}
+                    </span>
+                    <span class="break-words">{{ testStatus() }}</span>
+                  </p>
+                }
+              </div>
             } @else {
               <div></div>
             }
@@ -301,6 +323,11 @@ export class SettingsModalComponent {
   testStatus = signal('');
   /** Rendered at the Save button — the control the user just pressed. */
   saveError = signal('');
+  /**
+   * Whether the last test failed. Kept separate from the message so the styling
+   * never has to infer an outcome by matching on the text.
+   */
+  testFailed = signal(false);
 
   // Server list (mutable copies for editing)
   servers = signal<ServerProfile[]>([]);
@@ -377,7 +404,6 @@ export class SettingsModalComponent {
     if (!server || !server.url) return;
 
     this.testing.set(true);
-    this.testStatus.set('Testing...');
     this.serverStatuses.update(s => ({ ...s, [server.id]: 'testing' }));
 
     // Temporarily save gateway settings so API base URL is current
@@ -387,15 +413,18 @@ export class SettingsModalComponent {
       next: (result) => {
         this.testing.set(false);
         if (result.connected) {
+          this.testFailed.set(false);
           this.testStatus.set(`Connected (${result.responseTimeMs}ms)`);
           this.serverStatuses.update(s => ({ ...s, [server.id]: 'online' }));
         } else {
+          this.testFailed.set(true);
           this.testStatus.set(result.error || 'Connection failed');
           this.serverStatuses.update(s => ({ ...s, [server.id]: 'offline' }));
         }
       },
       error: (err) => {
         this.testing.set(false);
+        this.testFailed.set(true);
         this.testStatus.set(err.message || 'Error');
         this.serverStatuses.update(s => ({ ...s, [server.id]: 'offline' }));
       },
@@ -451,7 +480,6 @@ export class SettingsModalComponent {
       rootNodeNs: validServers[0]?.rootNodeNs || 0,
     });
 
-    this.testStatus.set('Saved');
     setTimeout(() => this.closed.emit(), 500);
   }
 
