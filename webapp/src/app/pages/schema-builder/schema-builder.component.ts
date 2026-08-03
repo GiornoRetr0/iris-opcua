@@ -177,10 +177,11 @@ const MAX_DEPTH = 2;
           @if (!columns().length) {
             <div class="flex-1 flex flex-col items-center justify-center py-12 text-on-surface-variant">
               <span class="material-symbols-outlined text-6xl opacity-10 mb-3">view_column</span>
+              <!-- No instruction here any more: the reason you can't save now sits
+                   beside the Save button, which is where you look when the button is
+                   disabled. This copy was the 2.78:1 text ~900px from the control it
+                   was about. -->
               <p class="text-xs text-on-surface-muted">No columns yet</p>
-              @if (!deviceRoot()) {
-                <p class="text-[11px] text-on-surface-muted mt-1">Mark a template device first</p>
-              }
             </div>
           } @else {
             <div class="space-y-1.5 flex-1 overflow-y-auto custom-scrollbar max-h-[24rem]">
@@ -246,9 +247,30 @@ const MAX_DEPTH = 2;
         </div>
 
         <div class="flex items-center justify-between gap-4 pt-5 border-t border-outline-variant/10">
-          <p class="text-xs text-on-surface-variant">
-            @if (fullClassName()) {
-              Will be created as <code class="font-mono text-primary">{{ fullClassName() }}</code>
+          <!-- The reason the button is disabled, beside the button. Bind Devices
+               already does this — it put "Remove SA1 to continue" directly next to
+               its disabled button — while this screen kept its reason in another
+               panel ~900px away, at 2.78:1. Same team, same template, one screen
+               apart; this is that treatment adopted. -->
+          <p class="text-xs">
+            @if (!columns().length) {
+              <span class="text-on-surface-muted flex items-center gap-1.5">
+                <span class="material-symbols-outlined text-sm">block</span>
+                @if (!deviceRoot()) {
+                  Mark a template device, then tick at least one node.
+                } @else {
+                  Tick at least one node inside {{ deviceRoot()!.displayName }}.
+                }
+              </span>
+            } @else if (!schemaName().trim()) {
+              <span class="text-on-surface-muted flex items-center gap-1.5">
+                <span class="material-symbols-outlined text-sm">edit</span>
+                Name the schema to continue.
+              </span>
+            } @else if (fullClassName()) {
+              <span class="text-on-surface-variant">
+                Will be created as <code class="font-mono text-primary">{{ fullClassName() }}</code>
+              </span>
             }
           </p>
           <button (click)="save()"
