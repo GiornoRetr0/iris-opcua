@@ -99,12 +99,12 @@ function defaultPipelineName(schemaShortName: string): string {
           {{ editMode() ? 'Pipelines' : 'Schemas' }}
         </button>
         <h1 class="text-3xl font-semibold text-primary tracking-tight">
-          {{ editMode() ? 'Edit Devices' : 'Bind Devices' }}
+          {{ editMode() ? 'Edit Pipeline' : 'Bind Devices' }}
         </h1>
         <p class="text-on-surface-variant mt-1">
           @if (editMode()) {
-            Change which devices <span class="font-semibold">{{ pipelineName() }}</span> reads.
-            Takes effect without a recompile.
+            Change which devices <span class="font-mono font-semibold">{{ pipelineName() }}</span>
+            reads, or give it a friendlier label. Takes effect without a recompile.
           } @else {
             One row per device, per poll cycle. Nodes are matched by name at connect time.
           }
@@ -368,14 +368,32 @@ function defaultPipelineName(schemaShortName: string): string {
               <div class="sm:col-span-2 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
                 <div class="flex items-center gap-2">
                   <span class="text-xs font-semibold text-on-surface-variant">Name</span>
-                  <span class="font-semibold text-primary">{{ pipelineName() }}</span>
+                  <span class="font-mono font-semibold text-primary">{{ pipelineName() }}</span>
                 </div>
                 <div class="flex items-center gap-2">
                   <span class="text-xs font-semibold text-on-surface-variant">Mode</span>
                   <span class="text-on-surface">{{ mode() }}</span>
                 </div>
                 <p class="text-[11px] text-on-surface-variant basis-full">
-                  To change the name or mode, delete this pipeline and bind the schema again.
+                  This name is the pipeline's identity in InterSystems interoperability —
+                  it appears in the event log and the Management Portal, and cannot be
+                  changed. To change it or the mode, delete this pipeline and bind the
+                  schema again. You can give it a friendlier label below.
+                </p>
+              </div>
+
+              <!-- The label, which *is* editable. Placed in edit mode as well as
+                   deploy because renaming after the fact is the common case: you find
+                   out what a pipeline should be called once it is running. -->
+              <div class="sm:col-span-2">
+                <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Display label</label>
+                <input [ngModel]="displayName()" (ngModelChange)="displayName.set($event)" spellcheck="false"
+                       placeholder="e.g. Air handler, north wing"
+                       class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-muted focus:border-primary focus:ring-1 focus:ring-primary/30" />
+                <p class="text-[11px] text-on-surface-variant mt-1">
+                  Shown in this console and in the Management Portal's Comment column,
+                  alongside <code class="font-mono text-primary">{{ pipelineName() }}</code> —
+                  never instead of it. Clear the field to remove the label.
                 </p>
               </div>
             } @else {
@@ -389,10 +407,25 @@ function defaultPipelineName(schemaShortName: string): string {
                        class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-muted focus:border-primary focus:ring-1 focus:ring-primary/30" />
                 <p class="text-[11px] text-on-surface-variant mt-1">
                   @if (pipelineName().trim()) {
-                    Shown as the production config item.
+                    Shown as the production config item. Permanent once deployed.
                   } @else {
                     Leave empty to use <code class="font-mono text-primary">{{ suggestedName() }}</code>.
                   }
+                </p>
+              </div>
+
+              <!-- Optional from the start, so the permanent identifier can stay
+                   machine-shaped without forcing that on whoever reads the dashboard. -->
+              <div class="sm:col-span-2">
+                <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">
+                  Display label <span class="font-normal text-on-surface-muted">(optional)</span>
+                </label>
+                <input [ngModel]="displayName()" (ngModelChange)="displayName.set($event)" spellcheck="false"
+                       placeholder="e.g. Air handler, north wing"
+                       class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-muted focus:border-primary focus:ring-1 focus:ring-primary/30" />
+                <p class="text-[11px] text-on-surface-variant mt-1">
+                  A friendlier name for the dashboard. Unlike the name above it can be
+                  changed later, and it never replaces the name in the event log.
                 </p>
               </div>
 
@@ -500,9 +533,9 @@ export class DeviceBindingComponent implements OnInit {
    * Editing an existing pipeline rather than creating one.
    *
    * The same screen serves both because they are the same act: choosing which
-   * devices a schema reads. In edit mode the schema and name are already fixed,
-   * so only the device list and strictness can change — which is a settings
-   * update, not a regeneration.
+   * devices a schema reads. In edit mode the schema and the config item name are
+   * already fixed, so only the device list, strictness and display label can change
+   * — which is a settings update, not a regeneration.
    */
   editMode = signal(false);
 
@@ -526,6 +559,21 @@ export class DeviceBindingComponent implements OnInit {
   columnCount = signal(0);
 
   pipelineName = signal('');
+  /**
+   * The optional operator-facing label, kept separate from `pipelineName` because
+   * the two have different lifetimes: the name is the immutable interop identity,
+   * this is a mutable label. Held as the trimmed-on-send raw string so an edit that
+   * empties the field can clear the label — see `savedDisplayName` for why the
+   * original is remembered.
+   */
+  displayName = signal('');
+  /**
+   * What the label was when the pipeline loaded, so a rebind can tell "unchanged"
+   * from "cleared". The backend treats an absent `displayName` as leave-alone and an
+   * empty one as clear, and sending '' unconditionally would wipe the label every
+   * time somebody edited only the device list.
+   */
+  private savedDisplayName = signal<string | null>(null);
   mode = signal<'polling' | 'subscription'>('polling');
   callInterval = signal(5);
   publishingInterval = signal(1000);
@@ -684,6 +732,9 @@ export class DeviceBindingComponent implements OnInit {
         }
 
         this.pipelineName.set(p.name);
+        const label = (p.displayName || '').trim();
+        this.displayName.set(label);
+        this.savedDisplayName.set(label);
         this.deviceText.set(p['deviceNodePaths'] || '');
         if (p.mode === 'subscription') this.mode.set('subscription');
 
@@ -862,10 +913,16 @@ export class DeviceBindingComponent implements OnInit {
     this.deploying.set(true);
     this.error.set('');
 
-    // Editing changes only the binding, so it never regenerates the schema.
+    // Editing changes only the binding and the label, so it never regenerates the
+    // schema.
     if (this.editMode()) {
+      // Send the label only when it actually changed. Sending it unconditionally
+      // would be harmless when set and destructive when empty, since the backend
+      // reads '' as "clear it".
+      const label = this.displayName().trim();
+      const changed = label !== (this.savedDisplayName() ?? '');
       this.api
-        .rebindPipeline(this.pipelineName(), this.deviceText())
+        .rebindPipeline(this.pipelineName(), this.deviceText(), changed ? label : undefined)
         .subscribe({
           next: () => {
             this.deploying.set(false);
@@ -890,6 +947,9 @@ export class DeviceBindingComponent implements OnInit {
     } else {
       params['publishingInterval'] = this.publishingInterval();
     }
+    // Only when given: an empty label is the absence of one, not a value.
+    const label = this.displayName().trim();
+    if (label) params['displayName'] = label;
 
     this.api.deploy(params, this.server()).subscribe({
       next: () => {

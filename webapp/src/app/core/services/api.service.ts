@@ -153,11 +153,19 @@ export class ApiService {
    * The schema is fixed once a pipeline is deployed, so this is what editing a
    * pipeline means: a settings-only update, no regeneration and no recompile.
    */
+  /**
+   * @param displayName omit to leave the label untouched; pass '' to clear it.
+   * The backend distinguishes absent from empty, so this must not be defaulted
+   * to '' — that would silently wipe the label on every device edit.
+   */
   rebindPipeline(
     name: string,
-    devices: string
+    devices: string,
+    displayName?: string
   ): Observable<{ updated: number; name: string; deviceCount: number; restarted?: number }> {
-    return this.post('/pipelines/rebind', { name, devices }, 30000);
+    const body: Record<string, unknown> = { name, devices };
+    if (displayName !== undefined) body['displayName'] = displayName;
+    return this.post('/pipelines/rebind', body, 30000);
   }
 
   // ── Schemas: reusable device types, independent of any pipeline ──

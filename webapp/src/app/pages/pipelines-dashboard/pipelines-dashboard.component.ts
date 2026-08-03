@@ -195,8 +195,18 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
                   <span class="material-symbols-outlined text-2xl">{{ getStatusIcon(pipeline) }}</span>
                 </div>
                 <div class="min-w-0">
-                  <h3 class="text-lg font-semibold"
-                      [class]="isStopped(pipeline) ? 'text-on-surface-variant' : 'text-primary'">{{ pipeline.name }}</h3>
+                  <!-- Both names, whenever they differ. The label is what an operator
+                       chose to call it; the config item name is what Ens_Util.Log and
+                       the Management Portal will show them, so hiding it would leave
+                       them unable to match a log entry to a card. -->
+                  <h3 class="text-lg font-semibold truncate"
+                      [class]="isStopped(pipeline) ? 'text-on-surface-variant' : 'text-primary'">{{ title(pipeline) }}</h3>
+                  @if (hasDisplayName(pipeline)) {
+                    <p class="text-[11px] font-mono text-on-surface-muted truncate"
+                       title="The interop identity — this is the name in the event log and the Management Portal">
+                      {{ pipeline.name }}
+                    </p>
+                  }
                   <div class="flex items-center gap-2">
                     <span class="w-2 h-2 rounded-full" [class]="getStatusDotClass(pipeline)"></span>
                     <span class="text-xs font-bold uppercase tracking-widest" [class]="getStatusTextClass(pipeline)">
@@ -324,7 +334,10 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
                   <div class="rounded-lg px-6 py-4 text-center shadow-lg min-w-[170px]
                               bg-primary text-on-primary border border-primary-container">
                     <p class="text-[0.55rem] font-bold uppercase tracking-widest mb-0.5 text-on-primary-muted">Service</p>
-                    <p class="text-sm font-bold">{{ pipeline.name }}</p>
+                    <!-- The config item name deliberately, not the label: this box
+                         depicts the running business service, and that is the name it
+                         runs under and reports under. -->
+                    <p class="text-sm font-bold" title="The business service's config item name">{{ pipeline.name }}</p>
                     <p class="text-[10px] mt-0.5 text-on-primary-muted">{{ getIntervalLabel(pipeline) }}</p>
                   </div>
                 </div>
@@ -405,7 +418,7 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
 
     @if (pendingDelete()) {
       <app-confirm-dialog
-        [title]="'Delete pipeline &quot;' + pendingDelete()!.name + '&quot;?'"
+        [title]="'Delete pipeline &quot;' + title(pendingDelete()!) + '&quot;?'"
         [detail]="deleteDetail()"
         confirmLabel="Delete pipeline"
         (confirmed)="confirmDelete()"
@@ -455,7 +468,11 @@ export class PipelinesDashboardComponent implements OnInit, OnDestroy {
 
     let list = this.pipelines().filter((p) => {
       if (q) {
-        const haystack = `${p.name} ${this.getSchemaName(p)} ${this.getTableName(p)}`.toLowerCase();
+        // Both names are searchable: someone who renamed a pipeline will search for
+        // the label, someone who came from the event log will search for the
+        // config item name, and neither should come up empty.
+        const haystack =
+          `${p.name} ${p.displayName || ''} ${this.getSchemaName(p)} ${this.getTableName(p)}`.toLowerCase();
         if (!haystack.includes(q)) return false;
       }
       switch (health) {
@@ -478,12 +495,16 @@ export class PipelinesDashboardComponent implements OnInit, OnDestroy {
       }
     };
 
+    // Alphabetical on the *rendered* title, not the config item name — sorting by a
+    // string the user cannot see reads as unsorted.
+    const byTitle = (a: Pipeline, b: Pipeline) => this.title(a).localeCompare(this.title(b));
+
     list = [...list].sort((a, b) => {
       switch (sort) {
-        case 'health': return rank(a) - rank(b) || a.name.localeCompare(b.name);
-        case 'mode': return (a.mode || '').localeCompare(b.mode || '') || a.name.localeCompare(b.name);
-        case 'rows': return (b.rowCount ?? -1) - (a.rowCount ?? -1) || a.name.localeCompare(b.name);
-        default: return a.name.localeCompare(b.name);
+        case 'health': return rank(a) - rank(b) || byTitle(a, b);
+        case 'mode': return (a.mode || '').localeCompare(b.mode || '') || byTitle(a, b);
+        case 'rows': return (b.rowCount ?? -1) - (a.rowCount ?? -1) || byTitle(a, b);
+        default: return byTitle(a, b);
       }
     });
     return list;
@@ -593,14 +614,24 @@ export class PipelinesDashboardComponent implements OnInit, OnDestroy {
    * The consequence, kept verbatim from the native prompt this replaced — the copy
    * was the good part. Says what survives: the schema and its table are kept, so
    * this is not the data-losing operation a bare "Delete pipeline?" implies.
+   *
+   * Names the config item explicitly when a label is hiding it. The heading uses the
+   * friendly name, but this is irreversible and reaches equipment, so the thing
+   * actually being destroyed has to be identified unambiguously.
    */
   deleteDetail(): string {
     const p = this.pendingDelete();
     if (!p) return '';
+    const parts: string[] = [];
+    if (this.hasDisplayName(p)) parts.push(`This is the pipeline "${p.name}".`);
     const schema = this.getSchemaName(p);
-    return schema
-      ? `The "${schema}" schema and its collected data are kept. Delete the schema from the Schemas page if you no longer need it.`
-      : '';
+    if (schema) {
+      parts.push(
+        `The "${schema}" schema and its collected data are kept. ` +
+        `Delete the schema from the Schemas page if you no longer need it.`
+      );
+    }
+    return parts.join(' ');
   }
 
   confirmDelete(): void {
@@ -693,6 +724,21 @@ export class PipelinesDashboardComponent implements OnInit, OnDestroy {
   getFailureHint(p: Pipeline): string {
     if (!this.isFailing(p)) return '';
     return 'The service is retrying but not collecting. Check the event log for the reason.';
+  }
+
+  /**
+   * Whether an operator-chosen label exists and says something the config item name
+   * doesn't. Equal strings mean there is nothing to disambiguate, so showing the
+   * same text twice would be noise.
+   */
+  hasDisplayName(p: Pipeline): boolean {
+    const label = (p.displayName || '').trim();
+    return label !== '' && label !== p.name;
+  }
+
+  /** The label if there is one, else the config item name. */
+  title(p: Pipeline): string {
+    return this.hasDisplayName(p) ? p.displayName!.trim() : p.name;
   }
 
   /**

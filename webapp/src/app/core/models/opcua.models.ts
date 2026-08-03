@@ -41,7 +41,18 @@ export interface NodeReadResult {
 export type PipelineHealth = 'ok' | 'error' | 'starting' | 'disabled' | 'stopped';
 
 export interface Pipeline {
+  /**
+   * The `Ens.Config.Item` name — the interop identity, not a label. It is the
+   * lookup key for toggle/rebind/delete, the key for health telemetry, and the
+   * string an operator sees in `Ens_Util.Log` and the Management Portal. Always
+   * show it somewhere, even when a display name exists.
+   */
   name: string;
+  /**
+   * An optional operator-facing label (the config item's `Comment`). Sugar: it
+   * exists in addition to `name`, never instead of it.
+   */
+  displayName?: string;
   /**
    * Completed cycles, from Ensemble's own per-host counter. Distinguishes a
    * pipeline that has just started from one that has been running dry — `ok`
