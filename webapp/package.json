@@ -4,6 +4,8 @@
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
+    "lint:template": "node tools/check-templates.mjs",
+    "prebuild": "npm run lint:template",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test"
