@@ -3,7 +3,10 @@ import { CommonModule } from '@angular/common';
 import { OpcuaTreeComponent } from '../../shared/opcua-tree/opcua-tree.component';
 import { NodeDetailComponent } from './node-detail/node-detail.component';
 import { ConfigService } from '../../core/services/config.service';
-import { TreeNode } from '../../core/models/opcua.models';
+import { TreeNode, ServerProfile } from '../../core/models/opcua.models';
+
+/** One shared empty array, so "no servers" is always the same reference. */
+const EMPTY_SERVERS: ServerProfile[] = [];
 
 @Component({
   selector: 'app-node-explorer',
@@ -102,8 +105,12 @@ export class NodeExplorerComponent {
    * shows up without a reload. Safe against re-browsing on every unrelated
    * setting change because `ConfigService.save()` spreads the previous config —
    * the `servers` array keeps its reference unless servers themselves changed.
+   *
+   * `EMPTY` is a shared constant rather than a literal `[]` for the same reason:
+   * a fresh array each evaluation would be a new reference every time, which is
+   * the shape that makes a downstream effect re-run forever.
    */
-  servers = computed(() => this.config.config().servers ?? []);
+  servers = computed(() => this.config.config().servers ?? EMPTY_SERVERS);
   sidebarWidth = signal(256);
   private resizing = false;
 
