@@ -8,6 +8,13 @@ Class OPCUA.REST.PipelineService
 /// The shared production class.
 Parameter ProductionClass = "OPCUA.Pipeline.Production";
 
+/// How long a cached row count stays usable, in seconds.
+///
+/// Shorter than the dashboard's own 5s refresh would defeat the purpose; much
+/// longer and a freshly-started pipeline appears to collect nothing. Ten seconds
+/// means at most one table scan per two dashboard refreshes.
+Parameter RowCountTTL = 10;
+
 /// List all pipeline service items with their runtime status.
 ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %Status
 {
@@ -169,13 +176,35 @@ ClassMethod GetHealth(pItemName As %String, pProdRunning As %Boolean, pEnabled A
 	}
 }
 
-/// Get row count for a DataSource table.
+/// Get row count for a DataSource table, cached briefly.
+///
+/// The dashboard refreshes on a 5-second timer and calls this once per pipeline, so
+/// twenty pipelines over large tables was twenty full <tt>SELECT COUNT(*)</tt>
+/// scans every five seconds — a database cost driven entirely by a UI polling
+/// decision. A short TTL collapses that to one scan per table per window while
+/// keeping the number visibly live: rows accumulate over minutes, not milliseconds,
+/// so a few seconds of staleness in a count is not something an operator can
+/// perceive, whereas the scan cost is real.
+///
+/// Cached in <tt>^IRIS.Temp</tt> deliberately — it is derived data that should not
+/// survive a restart or be journalled.
 ClassMethod GetRowCount(pClassName As %String) As %Integer [ Private ]
 {
 	set tCount = 0
 	Try {
 		if pClassName = "" Quit
 		if '##class(%Dictionary.ClassDefinition).%ExistsId(pClassName) Quit
+
+		// $ZH is a monotonic second counter, so this needs no date arithmetic.
+		set tNow = $ZH
+		set tCached = $Get(^IRIS.Temp.OPCUARowCount(pClassName))
+		if tCached '= "" {
+			set tAt = $ListGet(tCached, 1)
+			if (tNow - tAt) < ..#RowCountTTL {
+				set tCount = $ListGet(tCached, 2)
+				Quit
+			}
+		}
 		// SQL schema.table: package becomes schema, last part becomes table
 		set tPkg = $Piece(pClassName, ".", 1, *-1)
 		set tCls = $Piece(pClassName, ".", *)
@@ -183,6 +212,7 @@ ClassMethod GetRowCount(pClassName As %String) As %Integer [ Private ]
 		set tTable = tSchema_"."_tCls
 		set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT COUNT(*) FROM "_tTable)
 		if $IsObject(tRS) && tRS.%Next() set tCount = tRS.%GetData(1)
+		set ^IRIS.Temp.OPCUARowCount(pClassName) = $ListBuild(tNow, tCount)
 	} Catch (e) {
 		// Table might not exist or be empty
 	}
