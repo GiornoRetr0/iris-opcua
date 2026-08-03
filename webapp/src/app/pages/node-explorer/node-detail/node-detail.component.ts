@@ -169,10 +169,13 @@ import { ConfigService } from '../../../core/services/config.service';
               <!-- Bar visualization from history -->
               <div class="w-full h-full px-8 py-4 flex items-end justify-between gap-1">
                 @for (val of telemetryBars(); track $index) {
-                  <div class="w-full rounded-t-sm transition-all duration-300"
+                  <!-- One class attribute, deliberately. Two of them makes Angular keep
+                       the last and drop the first, which is what left these bars with a
+                       colour but no width for as long as the panel has shipped.
+                       tools/check-templates.mjs now fails the build on a repeat. -->
+                  <div class="w-full rounded-t-sm bg-primary transition-all duration-300"
                        [style.height.%]="val"
-                       [style.opacity]="0.1 + (val / 100) * 0.9"
-                       class="bg-primary"></div>
+                       [style.opacity]="0.1 + (val / 100) * 0.9"></div>
                 }
               </div>
               <p class="absolute bottom-4 left-1/2 -translate-x-1/2 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
