@@ -65,6 +65,18 @@ ROUTINE OPCUA.Constants [Type=INC]
 #define OpcuaNodeIdTypeGUID						4
 #define OpcuaNodeIdTypeByteString				5
 
+#; UA_NodeClass. A bitmask in the spec, but a browse reference always carries
+#; exactly one bit, so these compare with = rather than #.
+#define OpcuaNodeClassUnspecified				0
+#define OpcuaNodeClassObject					1
+#define OpcuaNodeClassVariable					2
+#define OpcuaNodeClassMethod					4
+#define OpcuaNodeClassObjectType				8
+#define OpcuaNodeClassVariableType				16
+#define OpcuaNodeClassReferenceType				32
+#define OpcuaNodeClassDataType					64
+#define OpcuaNodeClassView						128
+
 #define OpcuaVariantIsScalar					0
 #define OpcuaVariantIsEmptyScalar				1
 #define OpcuaVariantIsEmptyArray				2

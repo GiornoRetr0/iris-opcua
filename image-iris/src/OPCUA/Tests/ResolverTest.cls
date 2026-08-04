@@ -26,6 +26,9 @@ ClassMethod Run(pURL As %String = "opc.tcp://plc") As %Boolean
     write !, "=== Resolver: nested %SerialObject folders ===", !
     do ..TestNestedResolution(pURL, .tPass, .tFail)
 
+    write !, "=== BrowseService: nodeClass from the C++ layer ===", !
+    do ..TestNodeClass(pURL, .tPass, .tFail)
+
     write !, "-----------------------------------------", !
     write "passed: ", tPass, "   failed: ", tFail, !
     quit (tFail = 0)
@@ -454,6 +457,81 @@ ClassMethod BuildTempSchema(pClassName As %String) As %Status [ Private ]
         set tSC = e.AsStatus()
     }
     Quit tSC
+}
+
+/// The C++ layer exports UA_NodeClass at browse reference position [6], and
+/// <method>BrowseService.ClassifyNode</method> must prefer it over its
+/// TypeDefinition heuristics.
+///
+/// This guards two things a prebuilt binary can silently take away:
+///   1. that position [6] arrives populated at all (an older .so left it empty,
+///      and every Method was then miscategorised as an Object), and
+///   2. that the category derived from it is the one the webapp expects.
+///
+/// The Server object (ns=0;i=2253) is the fixture because it is mandated by the
+/// spec, so every server has it, and it holds Objects, Variables and Methods
+/// side by side -- Methods being the class the heuristics alone cannot see.
+ClassMethod TestNodeClass(pURL As %String, ByRef pPass, ByRef pFail)
+{
+    #dim tClient As OPCUA.Client
+    Try {
+        set tClient = ##class(OPCUA.Client).%New()
+        set tSC = tClient.Initialize()
+        if $$$ISERR(tSC) {
+            set pFail = pFail + 1
+            write "  FAIL client initialize: ", $System.Status.GetOneErrorText(tSC), !
+            quit
+        }
+        do tClient.SetupClient("", 1, "", "", "", "", "")
+        set tSC = tClient.Connect(pURL, "", "")
+        if $$$ISERR(tSC) {
+            set pFail = pFail + 1
+            write "  FAIL connect to ", pURL, ": ", $System.Status.GetOneErrorText(tSC), !
+            quit
+        }
+
+        set tSC = tClient.Browse(.tResults, $LB($$$OpcuaNodeIdTypeNumeric), $LB(0), $LB(2253))
+        do ..Check("browse Server object succeeds", $$$ISOK(tSC), 1, .pPass, .pFail)
+        if $$$ISERR(tSC) quit
+
+        set tCount = ##class(OPCUA.REST.BrowseService).WalkBrowseResults(tResults, .tChildren)
+        do ..Check("Server has children", (tCount > 0), 1, .pPass, .pFail)
+
+        // Tally what came back, keyed by name, plus how many carried a nodeClass.
+        set tWithClass = 0
+        for i=1:1:tCount {
+            set tName = $LI(tChildren(i), 1)
+            set tByName(tName) = $LB($LI(tChildren(i), 6), $LI(tChildren(i), 8))
+            if $LI(tChildren(i), 8) '= "" set tWithClass = tWithClass + 1
+        }
+
+        // (1) Every reference must carry one. An empty here means the loaded
+        //     library predates the nodeClass export in UACExport.cpp.
+        do ..Check("every child reports a nodeClass", tWithClass, tCount, .pPass, .pFail)
+
+        // (2) The spec value must map to the category the webapp switches on.
+        do ..CheckNodeClass("GetMonitoredItems", .tByName, $$$OpcuaNodeClassMethod, "method", .pPass, .pFail)
+        do ..CheckNodeClass("ServerStatus", .tByName, $$$OpcuaNodeClassVariable, "variable", .pPass, .pFail)
+        do ..CheckNodeClass("ServerCapabilities", .tByName, $$$OpcuaNodeClassObject, "object", .pPass, .pFail)
+        do ..CheckNodeClass("NamespaceArray", .tByName, $$$OpcuaNodeClassVariable, "property", .pPass, .pFail)
+
+    } Catch (e) {
+        set pFail = pFail + 1
+        write "  FAIL exception: ", e.DisplayString(), !
+    }
+    if $IsObject($Get(tClient)) do tClient.Disconnect()
+}
+
+/// Assert one browsed child's nodeClass and derived category.
+ClassMethod CheckNodeClass(pName As %String, ByRef pByName, pWantClass As %Integer, pWantCategory As %String, ByRef pPass, ByRef pFail) [ Private ]
+{
+    if '$Data(pByName(pName)) {
+        set pFail = pFail + 1
+        write "  FAIL ", pName, " not found among Server's children", !
+        quit
+    }
+    do ..Check(pName_" nodeClass", $LI(pByName(pName), 2), pWantClass, .pPass, .pFail)
+    do ..Check(pName_" category", $LI(pByName(pName), 1), pWantCategory, .pPass, .pFail)
 }
 
 /// Remove the throwaway schema and its metadata.

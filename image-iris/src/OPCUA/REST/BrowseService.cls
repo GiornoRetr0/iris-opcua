@@ -64,12 +64,13 @@ ClassMethod Browse(pBody As %DynamicObject, Output pResult As %DynamicArray) As 
 ///   [3] nodeId (ExpandedNodeId: ns, id, idType, ...)
 ///   [4] browseName (QualifiedName: name, ns)
 ///   [5] displayName (LocalizedText: text, locale)
-///   [6] nodeClass (empty — not exported by C++)
+///   [6] nodeClass (UA_NodeClass as Int32 — see <method>ClassifyNode</method>)
 ///   [7] typeDefinition (ExpandedNodeId: ns, id, idType, ...)
 ///
-/// Output: pChildren(i) = $LB(browseName, displayName, ns, id, idType, category, refType)
+/// Output: pChildren(i) = $LB(browseName, displayName, ns, id, idType, category, refType, nodeClass)
 /// where browseName and displayName are kept SEPARATE (unlike the JSON view, which
 /// collapses them) because name-based resolution prefers the stable BrowseName.
+/// nodeClass is appended last so existing callers reading positions 1-7 are unaffected.
 ClassMethod WalkBrowseResults(pResults As %List, Output pChildren) As %Integer
 {
 	kill pChildren
@@ -114,6 +115,14 @@ ClassMethod WalkBrowseResults(pResults As %List, Output pChildren) As %Integer
 				if $ListValid($Get(tDisplayInfo)) set tDisplayName = $LI(tDisplayInfo, 1)
 			} Catch (ex) {}
 
+			// --- NodeClass [6]: the server's own answer, when the library gives it ---
+			// Older prebuilt binaries predate the UA2CL_ReferenceDescription export of
+			// this field and leave it empty; ClassifyNode falls back to inference then.
+			set tNodeClass = ""
+			Try {
+				set tNodeClass = $LI(tRef, 6)
+			} Catch (ex) {}
+
 			// --- Type definition (what kind of Object/Variable) ---
 			set tTypeDefNS = ""
 			set tTypeDefId = ""
@@ -125,10 +134,10 @@ ClassMethod WalkBrowseResults(pResults As %List, Output pChildren) As %Integer
 				}
 			} Catch (ex) {}
 
-			set tCategory = ..ClassifyNode(tRefType, tTypeDefNS, tTypeDefId)
+			set tCategory = ..ClassifyNode(tRefType, tTypeDefNS, tTypeDefId, tNodeClass)
 
 			set tCount = tCount + 1
-			set pChildren(tCount) = $LB(tBrowseName, tDisplayName, tChildNS, tChildId, tChildIdType, tCategory, tRefType)
+			set pChildren(tCount) = $LB(tBrowseName, tDisplayName, tChildNS, tChildId, tChildIdType, tCategory, tRefType, tNodeClass)
 			set pChildren(tCount, "typeDefNs") = tTypeDefNS
 			set pChildren(tCount, "typeDefId") = tTypeDefId
 		}
@@ -139,7 +148,7 @@ ClassMethod WalkBrowseResults(pResults As %List, Output pChildren) As %Integer
 }
 
 /// Parse raw browse results from C++ layer into a %DynamicArray of node objects.
-/// Uses the 3-axis classification model: referenceType + typeDefinition + nodeClass(inferred).
+/// Uses the 3-axis classification model: nodeClass + referenceType + typeDefinition.
 /// Decoding is delegated to <method>WalkBrowseResults</method>; this method only
 /// shapes the result as JSON for the REST API.
 ClassMethod ParseBrowseResults(pResults As %List) As %DynamicArray [ Private ]
@@ -167,6 +176,9 @@ ClassMethod ParseBrowseResults(pResults As %List) As %DynamicArray [ Private ]
 			set tNode.nodeIdType = $LI(tChild, 5)
 			set tNode.nodeCategory = tCategory
 			set tNode.referenceType = $LI(tChild, 7)
+			// The raw UA_NodeClass, for callers that want the spec value rather than
+			// this UI's categories. "" when the library did not report one.
+			set tNode.nodeClass = $LI(tChild, 8)
 			set tNode.typeDefNs = tChildren(i, "typeDefNs")
 			set tNode.typeDefId = tChildren(i, "typeDefId")
 			set tNode.hasChildren = ..CategoryHasChildren(tCategory)
@@ -195,8 +207,22 @@ ClassMethod ClassifyReferenceType(pNS As %Integer, pId) As %String [ Private ]
 	Quit "HasComponent"
 }
 
-/// Classify a node into a UI category using referenceType + typeDefinition.
-/// Categories: "folder", "object", "variable", "property", "method", "view"
+/// Classify a node into a UI category using nodeClass + referenceType + typeDefinition.
+/// Categories: "folder", "object", "variable", "property", "method". A View is
+/// reported as "folder", since to a browsing user it behaves as one.
+///
+/// pNodeClass is the server's own UA_NodeClass, and it is authoritative about the
+/// coarse kind — a Method is a Method no matter what references point at it. Where
+/// OPC UA's node classes are coarser than the categories this UI needs, the older
+/// TypeDefinition heuristics still do the refining: Object splits into
+/// folder-vs-object, Variable into variable-vs-property.
+///
+/// It stays optional. Prebuilt binaries older than the
+/// <method>UA2CL_ReferenceDescription</method> nodeClass export send "" here, so
+/// an empty value falls through to inferring the kind exactly as before.
+///
+/// UA_NodeClass values: 1=Object, 2=Variable, 4=Method, 8=ObjectType,
+/// 16=VariableType, 32=ReferenceType, 64=DataType, 128=View
 ///
 /// Key TypeDefinition IDs (ns=0):
 ///   FolderType=61, BaseObjectType=58
@@ -204,8 +230,37 @@ ClassMethod ClassifyReferenceType(pNS As %Integer, pId) As %String [ Private ]
 ///   DataItemType=2365, AnalogItemType=2368, DiscreteItemType=2372
 ///   TwoStateDiscreteType=2373, MultiStateDiscreteType=2376
 ///   See full list in research doc.
-ClassMethod ClassifyNode(pRefType As %String, pTypeDefNS, pTypeDefId) As %String [ Private ]
+ClassMethod ClassifyNode(pRefType As %String, pTypeDefNS, pTypeDefId, pNodeClass As %Integer = "") As %String [ Private ]
 {
+	// --- Node classes the heuristics could never identify on their own ---
+	if pNodeClass = $$$OpcuaNodeClassMethod Quit "method"
+	if pNodeClass = $$$OpcuaNodeClassView Quit "folder"
+
+	// A type-definition node (ObjectType, VariableType, ReferenceType, DataType) is
+	// a schema node, not an instance. Reached only when browsing the type hierarchy,
+	// since WalkBrowseResults drops HasTypeDefinition/HasSubtype references.
+	if (pNodeClass = $$$OpcuaNodeClassObjectType) || (pNodeClass = $$$OpcuaNodeClassVariableType) Quit "object"
+	if (pNodeClass = $$$OpcuaNodeClassReferenceType) || (pNodeClass = $$$OpcuaNodeClassDataType) Quit "object"
+
+	// --- Variable: split into variable vs property ---
+	if pNodeClass = $$$OpcuaNodeClassVariable {
+		if pRefType = "HasProperty" Quit "property"
+		if (pTypeDefNS = 0) && (pTypeDefId = 68) Quit "property"
+		Quit "variable"
+	}
+
+	// --- Object: split into folder vs object ---
+	if pNodeClass = $$$OpcuaNodeClassObject {
+		if (pTypeDefNS = 0) && (pTypeDefId = 61) Quit "folder"
+		// No usable TypeDefinition — Organizes implies a folder-like grouping.
+		if (pTypeDefNS = "") || (pTypeDefId = "") || (pTypeDefId = 0) {
+			if pRefType = "Organizes" Quit "folder"
+		}
+		Quit "object"
+	}
+
+	// --- No nodeClass from the library: infer it, as before ---
+
 	// Properties are always metadata regardless of TypeDefinition
 	if pRefType = "HasProperty" Quit "property"
 
@@ -310,6 +365,9 @@ ClassMethod CategoryHasChildren(pCategory As %String) As %Boolean [ Private ]
 	if (pCategory = "folder") || (pCategory = "object") Quit 1
 	// Variables can have child properties (e.g., EURange under AnalogItemType)
 	if pCategory = "variable" Quit 1
+	// Methods carry InputArguments/OutputArguments as HasProperty children.
+	if pCategory = "method" Quit 1
+	// A property is a leaf.
 	Quit 0
 }
 
