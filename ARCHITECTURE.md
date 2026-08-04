@@ -332,12 +332,14 @@ When you expand a node in a tree view, the frontend calls `/browse` with the nod
 2. Creates a temporary OPC UA client via `ClientManager.Connect()`
 3. Calls `Client.Browse(nodeTypes, namespaces, nodeIds)` -- this calls the C++ library, which sends an OPC UA BrowseRequest to the server
 4. The C++ library returns a list of "references" (children of the browsed node)
-5. `ParseBrowseResults()` classifies each child:
-   - **Is it a folder?** Check if the type definition is FolderType (ID 61), or if the reference type is "Organizes"
-   - **Is it a variable?** (something you can read data from) Check against 52 known OPC UA variable type IDs (BaseVariableType, DataItemType, AnalogItemType, etc.)
-   - **Is it a property?** Check if the reference type is "HasProperty"
-   - **Is it an object?** (a container for other nodes) Everything else
-6. Returns a JSON array with each child's display name, namespace, node ID, category (variable/folder/object/property), and whether it has children of its own
+5. `ParseBrowseResults()` classifies each child. The **`nodeClass` the server itself reports** decides the coarse kind — Object, Variable, Method, View — because that is the server's own answer and no heuristic can beat it. TypeDefinition and reference type then refine it where this UI needs finer categories than OPC UA has:
+   - **Object** → `folder` if the type definition is FolderType (ID 61), or if there's no type definition and the reference is "Organizes"; otherwise `object`
+   - **Variable** → `property` if the reference type is "HasProperty" or the type definition is PropertyType (68); otherwise `variable`
+   - **Method** → `method`. This is the case inference could never get right: methods arrive over ordinary `HasComponent` references, so before nodeClass was available every one of them was mislabelled `object`
+   - **View** → `folder`, since to someone browsing it behaves as one
+6. Returns a JSON array with each child's display name, namespace, node ID, category, raw `nodeClass`, and whether it has children of its own
+
+`nodeClass` is optional, not required. The C++ layer exports it at browse reference position `[6]` (`UACExport::UA2CL_ReferenceDescription`), but prebuilt binaries older than that export send an empty value — so an empty `nodeClass` falls back to the pure TypeDefinition inference, which is what shipped before. `OPCUA.Tests.ResolverTest` asserts both that a live server populates it and that the derived categories are the ones the webapp expects, so a stale `.so` shows up as a test failure rather than as a subtly wrong tree.
 
 The webapp uses this to render the expandable trees: the node explorer, the schema builder's column picker, and the device picker on the binding screen.
 
