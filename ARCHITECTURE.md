@@ -337,7 +337,20 @@ When you expand a node in a tree view, the frontend calls `/browse` with the nod
    - **Variable** → `property` if the reference type is "HasProperty" or the type definition is PropertyType (68); otherwise `variable`
    - **Method** → `method`. This is the case inference could never get right: methods arrive over ordinary `HasComponent` references, so before nodeClass was available every one of them was mislabelled `object`
    - **View** → `folder`, since to someone browsing it behaves as one
-6. Returns a JSON array with each child's display name, namespace, node ID, category, raw `nodeClass`, and whether it has children of its own
+6. **Probes one level ahead** (`ProbeChildCounts()`) to find out which children are actually expandable, then returns a JSON array with each child's display name, namespace, node ID, category, raw `nodeClass`, and `hasChildren`
+
+### Why expandability needs a second browse
+
+A browse response says what a node **is**, never whether it **has children** — so `hasChildren` can only be guessed from the category, and the guess is optimistic: every variable is marked expandable, because some variables genuinely do carry child properties (`EURange` under an `AnalogItemType`). On a server whose tags are bare — which the `plc` mock is — that draws an expand arrow on every leaf, and clicking it opens nothing.
+
+`Client.Browse` takes *lists* of node IDs, so the fix is one extra browse covering **all** the siblings at once: count each one's children, keep the counts, throw the grandchildren away. Cost is **2 round trips per expand, not N+1** (~7 ms for 19 children against the local mock). Depth stays lazy — this looks exactly one level past what's being rendered, never deeper, and never pre-walks the tree.
+
+Two details carry the correctness:
+
+- **The count must apply the same non-child filter as the walk.** Every bare variable carries a `HasTypeDefinition` reference, so a naive count returns 1 and marks every leaf expandable — the original bug, reintroduced. `IsNonChildReference()` exists so `WalkBrowseResults()` and `CountChildReferences()` cannot drift apart.
+- **Results are positional.** If the server returns a count that doesn't match what was asked, the pairing can't be trusted, so every guess is left alone rather than risk mislabelling a different node.
+
+It's best-effort and opt-out (`probeChildren: 0`). When the probe is skipped or fails, `CategoryHasChildren()`'s guess stands — deliberately optimistic, since an arrow that opens to nothing is a smaller failure than a subtree the user cannot open at all.
 
 `nodeClass` is optional, not required. The C++ layer exports it at browse reference position `[6]` (`UACExport::UA2CL_ReferenceDescription`), but prebuilt binaries older than that export send an empty value — so an empty `nodeClass` falls back to the pure TypeDefinition inference, which is what shipped before. `OPCUA.Tests.ResolverTest` asserts both that a live server populates it and that the derived categories are the ones the webapp expects, so a stale `.so` shows up as a test failure rather than as a subtly wrong tree.
 
