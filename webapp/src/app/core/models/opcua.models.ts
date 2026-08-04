@@ -1,13 +1,32 @@
+/** UA_NodeClass, as reported by the server. `nodeClass` on the wire is the raw value. */
+export const NodeClass = {
+  Object: 1,
+  Variable: 2,
+  Method: 4,
+  ObjectType: 8,
+  VariableType: 16,
+  ReferenceType: 32,
+  DataType: 64,
+  View: 128,
+} as const;
+
 export interface OpcuaNode {
   displayName: string;
   nodeNs: number;
   nodeId: string | number;
   nodeIdType: number;
-  nodeCategory: 'folder' | 'object' | 'variable' | 'property' | 'method' | 'view';
+  /**
+   * This UI's categories, which are finer than OPC UA's node classes in places
+   * (Object splits into folder/object, Variable into variable/property) and
+   * coarser in others (a View is presented as a folder, so 'view' never arrives).
+   */
+  nodeCategory: 'folder' | 'object' | 'variable' | 'property' | 'method';
   referenceType: string;
   typeDefNs: number | string;
   typeDefId: number | string;
   hasChildren: boolean;
+  /** Raw UA_NodeClass. '' from binaries that predate the C++ nodeClass export. */
+  nodeClass?: number | '';
 }
 
 export interface TreeNode extends OpcuaNode {

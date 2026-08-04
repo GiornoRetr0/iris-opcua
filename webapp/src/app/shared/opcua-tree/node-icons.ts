@@ -34,6 +34,9 @@ export function nodeIconClass(node: Pick<TreeNode, 'nodeCategory'>, selected = f
     case 'object': return 'text-amber-600';
     case 'variable': return 'text-tertiary';
     case 'property': return 'text-on-surface-muted';
+    // Methods are callable, not readable — deliberately not the variable teal, so
+    // they do not read as pickable columns.
+    case 'method': return 'text-indigo-400';
     default: return 'text-on-surface-muted';
   }
 }
