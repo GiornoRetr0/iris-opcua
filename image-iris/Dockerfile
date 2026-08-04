@@ -13,8 +13,17 @@ USER irisowner
 # Source code
 COPY --chown=irisowner:irisgroup src/ /opt/irisapp/src/
 
-# C++ binaries
-COPY --chown=irisowner:irisgroup uacbin/ /usr/irissys/bin/
+# C++ binaries, per architecture.
+#
+# TARGETARCH is supplied by BuildKit ("amd64" or "arm64"), so an Apple Silicon
+# host gets the native arm64 libraries and an Intel host keeps the x86-64 ones.
+# OPCUA.Utils looks the library up by name in the IRIS bin directory, so nothing
+# in ObjectScript needs to know which architecture it is running on.
+#
+# Rebuild these with opc-ua-master/docker/Dockerfile.linux-arm64 (arm64) or the
+# IrisOPCUA.mak lnxubuntux64 target (amd64).
+ARG TARGETARCH
+COPY --chown=irisowner:irisgroup uacbin/${TARGETARCH}/ /usr/irissys/bin/
 
 # TLS certificates (readable by IRIS process)
 COPY --chown=irisowner:irisgroup certs/secuac.crt.der /usr/irissys/uac/certs/

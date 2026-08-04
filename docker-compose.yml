@@ -1,7 +1,12 @@
 services:
   iris:
+    # No platform pin: the image builds for the host architecture. The base
+    # intersystems/iris-community:2025.3 is multi-arch (amd64 + arm64/v8), and
+    # image-iris/Dockerfile picks the matching uacbin/ set via TARGETARCH, so
+    # Intel and Apple Silicon both build natively. Pinning linux/amd64 forced
+    # emulation, which fails outright under OrbStack/Rosetta because IRIS needs
+    # AVX instructions Rosetta does not translate.
     build: ./image-iris
-    platform: linux/amd64
     depends_on:
       - plc
     hostname: iris
