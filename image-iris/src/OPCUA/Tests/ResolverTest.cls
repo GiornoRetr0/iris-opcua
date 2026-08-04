@@ -29,6 +29,9 @@ ClassMethod Run(pURL As %String = "opc.tcp://plc") As %Boolean
     write !, "=== BrowseService: nodeClass from the C++ layer ===", !
     do ..TestNodeClass(pURL, .tPass, .tFail)
 
+    write !, "=== BrowseService: measured hasChildren ===", !
+    do ..TestChildProbe(pURL, .tPass, .tFail)
+
     write !, "-----------------------------------------", !
     write "passed: ", tPass, "   failed: ", tFail, !
     quit (tFail = 0)
@@ -520,6 +523,76 @@ ClassMethod TestNodeClass(pURL As %String, ByRef pPass, ByRef pFail)
         write "  FAIL exception: ", e.DisplayString(), !
     }
     if $IsObject($Get(tClient)) do tClient.Disconnect()
+}
+
+/// A browse response never says whether a node has children, so BrowseService
+/// probes one level ahead in a single batched browse and replaces the guess with a
+/// count. This asserts the two halves that matter:
+///
+///   1. a bare variable reports hasChildren=false. It carries one
+///      HasTypeDefinition reference, so a count that forgets to filter
+///      non-child references marks every leaf expandable -- the original bug.
+///   2. a node that really does have children still reports true, i.e. the fix
+///      did not simply collapse everything.
+///
+/// The plc mock server is the right fixture precisely because its tags are bare.
+ClassMethod TestChildProbe(pURL As %String, ByRef pPass, ByRef pFail)
+{
+    Try {
+        set tBody = {}
+        set tBody.url = pURL
+        set tBody.nodeNs = 0
+        set tBody.nodeId = 85
+
+        set tSC = ##class(OPCUA.REST.BrowseService).Browse(tBody, .tNodes)
+        do ..Check("browse Objects succeeds", $$$ISOK(tSC), 1, .pPass, .pFail)
+        if $$$ISERR(tSC) quit
+
+        kill tByName
+        for i=0:1:tNodes.%Size()-1 {
+            set tNode = tNodes.%Get(i)
+            set tByName(tNode.displayName) = tNode.hasChildren
+        }
+
+        // (1) The bug: bare tags on the plc server must not look expandable.
+        do ..Check("bare variable SA1 is a leaf", $Get(tByName("SA1")), 0, .pPass, .pFail)
+        do ..Check("bare variable PROG is a leaf", $Get(tByName("PROG")), 0, .pPass, .pFail)
+
+        // (2) The regression guard: a populated node stays expandable.
+        do ..Check("Server object still expandable", $Get(tByName("Server")), 1, .pPass, .pFail)
+
+        // Methods carry InputArguments/OutputArguments, so they are expandable too,
+        // and that is measured here rather than assumed from the category.
+        set tBody.nodeId = 2253
+        set tSC = ##class(OPCUA.REST.BrowseService).Browse(tBody, .tSrv)
+        do ..Check("browse Server succeeds", $$$ISOK(tSC), 1, .pPass, .pFail)
+        if $$$ISOK(tSC) {
+            kill tSrvByName
+            for i=0:1:tSrv.%Size()-1 {
+                set tNode = tSrv.%Get(i)
+                set tSrvByName(tNode.displayName) = tNode.hasChildren
+            }
+            do ..Check("method has argument children", $Get(tSrvByName("GetMonitoredItems")), 1, .pPass, .pFail)
+            do ..Check("bare property is a leaf", $Get(tSrvByName("ServiceLevel")), 0, .pPass, .pFail)
+        }
+
+        // Opting out must restore the guess, so the flag genuinely bypasses the probe.
+        set tBody.nodeId = 85
+        set tBody.probeChildren = 0
+        set tSC = ##class(OPCUA.REST.BrowseService).Browse(tBody, .tUnprobed)
+        if $$$ISOK(tSC) {
+            kill tRaw
+            for i=0:1:tUnprobed.%Size()-1 {
+                set tNode = tUnprobed.%Get(i)
+                set tRaw(tNode.displayName) = tNode.hasChildren
+            }
+            do ..Check("probeChildren=0 keeps the guess", $Get(tRaw("SA1")), 1, .pPass, .pFail)
+        }
+
+    } Catch (e) {
+        set pFail = pFail + 1
+        write "  FAIL exception: ", e.DisplayString(), !
+    }
 }
 
 /// Assert one browsed child's nodeClass and derived category.

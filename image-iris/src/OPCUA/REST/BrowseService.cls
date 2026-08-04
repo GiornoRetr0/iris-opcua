@@ -6,8 +6,13 @@ Class OPCUA.REST.BrowseService
 
 /// Browse children of the specified node.
 /// Input: pBody with url, optional nodeNs (default 0), nodeId (default 84=Root/Objects),
-///        nodeIdType (default 0=numeric)
+///        nodeIdType (default 0=numeric), probeChildren (default 1)
 /// Returns a %DynamicArray of child node objects.
+///
+/// <var>probeChildren</var> spends a second, batched browse to make each child's
+/// <var>hasChildren</var> true rather than guessed -- see
+/// <method>ProbeChildCounts</method>. Pass 0 to skip it when only names and ids
+/// are wanted and a wrong expand arrow costs nothing.
 ClassMethod Browse(pBody As %DynamicObject, Output pResult As %DynamicArray) As %Status
 {
 	#dim tSC As %Status = $$$OK
@@ -42,6 +47,12 @@ ClassMethod Browse(pBody As %DynamicObject, Output pResult As %DynamicArray) As 
 
 		// Parse results into JSON array
 		set pResult = ..ParseBrowseResults(tResults)
+
+		// Turn the guessed expand arrows into measured ones, on the same connection.
+		set tProbeVal = pBody.%Get("probeChildren")
+		if (tProbeVal = "") || (+tProbeVal) {
+			do ..ProbeChildCounts(tClient, pResult)
+		}
 
 	} Catch (e) {
 		set tSC = e.AsStatus()
@@ -88,10 +99,7 @@ ClassMethod WalkBrowseResults(pResults As %List, Output pChildren) As %Integer
 			set tRefTypeNS = $LI(tRefTypeInfo, 1)
 			set tRefTypeId = $LI(tRefTypeInfo, 2)
 
-			// Skip HasTypeDefinition references (ns=0, id=40)
-			if (tRefTypeNS = 0) && (tRefTypeId = 40) continue
-			// Skip HasSubtype references (ns=0, id=45)
-			if (tRefTypeNS = 0) && (tRefTypeId = 45) continue
+			if ..IsNonChildReference(tRefTypeNS, tRefTypeId) continue
 
 			set tRefType = ..ClassifyReferenceType(tRefTypeNS, tRefTypeId)
 
@@ -181,7 +189,9 @@ ClassMethod ParseBrowseResults(pResults As %List) As %DynamicArray [ Private ]
 			set tNode.nodeClass = $LI(tChild, 8)
 			set tNode.typeDefNs = tChildren(i, "typeDefNs")
 			set tNode.typeDefId = tChildren(i, "typeDefId")
-			set tNode.hasChildren = ..CategoryHasChildren(tCategory)
+			// A real JSON boolean, so the probed and unprobed paths agree on type
+			// and the declared TypeScript `hasChildren: boolean` holds either way.
+			do tNode.%Set("hasChildren", ..CategoryHasChildren(tCategory), "boolean")
 
 			do tArray.%Push(tNode)
 		}
@@ -189,6 +199,89 @@ ClassMethod ParseBrowseResults(pResults As %List) As %DynamicArray [ Private ]
 		// Return whatever we have so far
 	}
 	Quit tArray
+}
+
+/// Count the real children in one raw browse result, applying the same
+/// non-child filter as <method>WalkBrowseResults</method>.
+ClassMethod CountChildReferences(pResult As %List) As %Integer [ Private ]
+{
+	set tCount = 0
+	Try {
+		set tRefList = $LI(pResult, 4)
+		for i=1:1:$LL(tRefList) {
+			set tRefTypeInfo = $LI($LI(tRefList, i), 1)
+			if ..IsNonChildReference($LI(tRefTypeInfo, 1), $LI(tRefTypeInfo, 2)) continue
+			set tCount = tCount + 1
+		}
+	} Catch (e) {
+		// An undecodable result counts as unknown, i.e. no children found here.
+	}
+	Quit tCount
+}
+
+/// Replace the guessed <var>hasChildren</var> on each node with the truth.
+///
+/// A browse response says what a node *is*, never whether it has children, so
+/// <method>CategoryHasChildren</method> can only guess from the category -- and it
+/// guesses optimistically, marking every variable expandable because some variables
+/// really do carry child properties (EURange under an AnalogItemType). On a server
+/// whose tags are bare, that draws an expand arrow on every leaf which then opens
+/// to nothing.
+///
+/// The fix is one extra browse, batched: <method>OPCUA.Client.Browse</method> takes
+/// lists, so all N siblings are probed in a single round trip and the grandchildren
+/// are counted and discarded. Cost is 2 round trips per expand instead of 1, not N+1,
+/// and depth stays lazy -- this looks exactly one level past what is being rendered,
+/// never deeper.
+///
+/// Best-effort by design. If the probe fails, or the server returns a result count
+/// that does not line up with what was asked, the guessed values stand: an arrow
+/// that opens to nothing is a smaller failure than a node the user cannot open.
+ClassMethod ProbeChildCounts(pClient As OPCUA.Client, pNodes As %DynamicArray)
+{
+	Try {
+		if pNodes.%Size() = 0 Quit
+
+		set tTypes = "", tNss = "", tIds = ""
+		for i=0:1:pNodes.%Size()-1 {
+			set tNode = pNodes.%Get(i)
+			set tTypes = tTypes _ $LB(tNode.nodeIdType)
+			set tNss = tNss _ $LB(tNode.nodeNs)
+			set tIds = tIds _ $LB(tNode.nodeId)
+		}
+
+		set tSC = pClient.Browse(.tResults, tTypes, tNss, tIds)
+		Quit:$$$ISERR(tSC)
+
+		set tBrowseData = $LI(tResults, 4)
+
+		// Results are positional. A mismatched count means the pairing cannot be
+		// trusted, so leave every guess alone rather than mislabel some other node.
+		Quit:$LL(tBrowseData)'=pNodes.%Size()
+
+		for i=0:1:pNodes.%Size()-1 {
+			set tCount = ..CountChildReferences($LI(tBrowseData, i + 1))
+			do pNodes.%Get(i).%Set("hasChildren", (tCount > 0), "boolean")
+		}
+	} Catch (e) {
+		// Keep the guesses.
+	}
+}
+
+/// Is this reference something other than a child of the browsed node?
+///
+/// HasTypeDefinition (40) points at the node's *type*, and HasSubtype (45) at its
+/// place in a type hierarchy; neither is a child in the tree sense. Every bare
+/// variable carries a HasTypeDefinition, so counting references without this
+/// filter makes every leaf look like it has exactly one child.
+///
+/// Extracted so <method>WalkBrowseResults</method> and
+/// <method>CountChildReferences</method> apply the same rule -- if they disagreed,
+/// the expand arrow would contradict what expanding actually shows.
+ClassMethod IsNonChildReference(pRefTypeNS As %Integer, pRefTypeId) As %Boolean [ Private ]
+{
+	if pRefTypeNS '= 0 Quit 0
+	Quit (pRefTypeId = 40) || (pRefTypeId = 45)
 }
 
 /// Classify the reference type from its NodeId.
@@ -359,7 +452,12 @@ ClassMethod IsVariableTypeDef(pTypeDefId As %Integer) As %Boolean [ Private ]
 	Quit 0
 }
 
-/// Determine if a node category should be expandable in the tree.
+/// Guess whether a node category is expandable, from the category alone.
+///
+/// Optimistic on purpose: it is the value <method>ProbeChildCounts</method>
+/// overwrites with a measured one, and it is what survives when the probe is
+/// switched off or fails. Guessing "expandable" wrongly costs an arrow that opens
+/// to nothing; guessing "leaf" wrongly hides a subtree, which is worse.
 ClassMethod CategoryHasChildren(pCategory As %String) As %Boolean [ Private ]
 {
 	if (pCategory = "folder") || (pCategory = "object") Quit 1
