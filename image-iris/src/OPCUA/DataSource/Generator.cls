@@ -7,6 +7,21 @@ Include (OPCUA.Constants, Ensemble)
 /// (integer, double, boolean, timestamp, string, or array variants).
 /// Review the generated file and adjust any types that could not be determined.
 ///
+/// <b>Terminal-only, and not part of the pipeline path.</b> This writes a
+/// <class>OPCUA.DataSource.Definition</class> subclass to a .cls file for a human
+/// to review and import -- the declarative style the Examples and Tests use. It is
+/// not how pipelines are built: <class>OPCUA.REST.SchemaService</class> generates
+/// a <class>OPCUA.DataSource.DeviceSchema</class> subclass through the %Dictionary
+/// API and compiles it in place, with no file and no manual step. The `/generate`
+/// REST endpoint that used to expose this was removed with the Chrome extension,
+/// its only consumer.
+///
+/// Two of its helpers are still on the live path and must not be moved:
+/// <method>InferTypeFromValue</method> (used by <class>OPCUA.REST.ReadService</class>
+/// to type a column) and <method>SanitizePropertyName</method> (used by
+/// <class>OPCUA.REST.SchemaService</class> to turn OPC UA names into legal
+/// property identifiers).
+///
 /// Example usage:
 /// <example>
 /// do ##class(OPCUA.DataSource.Generator).Generate(

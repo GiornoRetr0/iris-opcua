@@ -268,7 +268,6 @@ The Angular web app (the OPC UA console) communicates with IRIS through a REST A
 | `/ping` | GET | Health check -- returns timestamp |
 | `/browse` | GET/POST | Browse OPC UA server nodes |
 | `/read` | GET/POST | Read a single node's value (and infer its type) |
-| `/generate` | GET/POST | Generate a DataSource class from selected nodes |
 | `/test` | GET/POST | Test connection to an OPC UA server |
 | `/schemas` | GET | List device schemas, with the pipelines using each |
 | `/schemas` | POST | Create a device schema (no production side effects) |

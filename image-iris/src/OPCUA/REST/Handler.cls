@@ -5,7 +5,9 @@ Include %occInclude
 Class OPCUA.REST.Handler Extends %CSP.REST
 {
 
-/// Enable CORS for Chrome extension access.
+/// Enable CORS. The Angular console is served from a different origin than IRIS
+/// (localhost:4200 in development, and any static host in production), so every
+/// call it makes is cross-origin. Required, not vestigial.
 Parameter HandleCorsRequest = 1;
 
 /// Stateless REST — no CSP session.
@@ -21,8 +23,12 @@ ClassMethod Login(skipRights As %Boolean = 1) As %Status
 }
 
 /// Route map — endpoints accept both GET and POST.
-/// GET with query parameters is convenient for simple testing;
-/// POST with JSON body is used by the Chrome extension.
+/// POST with a JSON body is what the webapp uses, and the only practical way to
+/// pass a nested payload such as a schema's column list. GET with query
+/// parameters is kept because it makes an endpoint testable from a browser or
+/// curl without composing a body.
+/// `/schemas` is the exception: it uses real verbs, GET/POST/DELETE meaning
+/// list/create/delete on the same URL.
 XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
 {
 <Routes>
@@ -31,8 +37,6 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/browse" Method="POST" Call="Browse" />
   <Route Url="/read" Method="GET" Call="Read" />
   <Route Url="/read" Method="POST" Call="Read" />
-<Route Url="/generate" Method="GET" Call="Generate" />
-  <Route Url="/generate" Method="POST" Call="Generate" />
   <Route Url="/test" Method="GET" Call="Test" />
   <Route Url="/test" Method="POST" Call="Test" />
   <Route Url="/deploy" Method="POST" Call="Deploy" />
@@ -87,25 +91,6 @@ ClassMethod Read() As %Status
 		Quit:$$$ISERR(tSC)
 
 		set tSC = ##class(OPCUA.REST.ReadService).Read(tBody, .tResult)
-		Quit:$$$ISERR(tSC)
-	} Catch (e) {
-		set tSC = e.AsStatus()
-	}
-	if $$$ISERR(tSC) {
-		Quit ..SendError($System.Status.GetErrorText(tSC))
-	}
-	Quit ..SendOK(tResult)
-}
-
-/// Generate a DataSource class.
-ClassMethod Generate() As %Status
-{
-	#dim tSC As %Status = $$$OK
-	Try {
-		set tSC = ..GetRequestParams(.tBody)
-		Quit:$$$ISERR(tSC)
-
-		set tSC = ##class(OPCUA.REST.GenerateService).Generate(tBody, .tResult)
 		Quit:$$$ISERR(tSC)
 	} Catch (e) {
 		set tSC = e.AsStatus()

@@ -400,7 +400,7 @@ Phases 1–4 deliver everything the supervisor asked for. Phase 5 is the ergonom
 - Any change to the C++ library (`opc-ua-master`) — `Browse` and `ReadBulkSetupC` already provide everything needed.
 - The v1 declarative path (Examples, `OPCUA.Tests`) keeps working unchanged; it is the type-marshalling test harness and must not regress.
 - Write support, subscription semantics, and security/certificate handling.
-- Chrome extension.
+- Chrome extension. *(Since deleted from the repo, along with the `/generate` endpoint it was the only consumer of.)*
 
 ---
 

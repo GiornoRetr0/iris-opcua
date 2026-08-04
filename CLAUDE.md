@@ -58,7 +58,6 @@ printf 'zn "OPCUA"\nset rs=##class(%%SQL.Statement).%%ExecDirect(,"SELECT TOP 10
 | `webapp/src/app/pages/device-binding/` | Bind devices to a schema; also serves pipeline edit |
 | `webapp/src/app/shared/opcua-tree/` | Embeddable single-server address-space browser |
 | `webapp/src/app/core/services/api.service.ts` | REST client (browse, deploy, editPipeline, listPipelines) |
-| `chrome-extension/` | Chrome extension — auto-detects API URL from page URL |
 | `certgen/` | OpenSSL configs + `certgen.bash` |
 | `windows/bin/` | Prebuilt Windows DLLs |
 | `windows/Studio/` | Studio project XML for native Windows IRIS install |

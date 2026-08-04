@@ -322,25 +322,6 @@ Examples.OPCUA.SecureWrite.Run() procedure is invoked; the value
 one-second period after the invocation of the procedure. Otherwise,
 the values in "TheAnswer_Value" column should be "42" instead. 
 
-## Chrome Extension (OPC UA Browser)
-
-A Chrome browser extension is included in the `chrome-extension/` directory that provides a graphical interface for browsing OPC UA server nodes through the IRIS REST API.
-
-### Features
-- Connect to OPC UA servers via the IRIS REST API
-- Browse the node hierarchy of any accessible OPC UA server
-- Read individual node values
-- Generate DataSource classes from selected nodes
-
-### Installation
-1. Open Chrome and navigate to `chrome://extensions/`
-2. Enable "Developer mode" (toggle in the top right)
-3. Click "Load unpacked" and select the `chrome-extension/` directory
-4. The extension icon will appear in the Chrome toolbar
-
-### Usage
-The extension communicates with the IRIS OPC UA REST API (see the `/browse`, `/read`, and `/generate` endpoints). Configure the API base URL in the extension popup to point to your IRIS instance.
-
 ## Future Work
 
 TBD
