@@ -1,0 +1,32 @@
+# The iris image builds with the repository root as its context (see
+# docker-compose.yml), so everything not needed inside the image is excluded here.
+# Without this, `docker compose build` uploads webapp/node_modules — several
+# hundred megabytes — to the daemon on every build.
+
+.git
+.claude
+.DS_Store
+**/.DS_Store
+
+# The Angular console is served separately and is not part of the IRIS image.
+webapp
+
+# Docs and design notes
+docs
+*.md
+!src/**/*.md
+LICENSE
+
+# The other image's build tree
+docker/certified-server
+
+# Certificate generation working directory. The generated certs the image needs
+# are copied into docker/iris/certs, which is deliberately not excluded.
+tools/certgen/temp
+
+# Windows artefacts are for native installs, not the Linux image
+bin/windows
+tools/windows-studio
+
+# Mock server data is bind-mounted into the plc containers at run time
+fixtures

@@ -1,10 +1,19 @@
 #!/bin/bash
 
+# Run this before the first `docker compose build`: the certificates it generates
+# are gitignored, so a fresh clone has none and the iris image build fails on its
+# certs/ COPY without them.
 
 echo "generating certificates/credentials..."
 
+# Resolve paths from this script's own location rather than the caller's working
+# directory. This script used to sit at the repository root and assumed it was run
+# from there; now it lives in tools/certgen and is expected to work from anywhere.
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+repo_root=$(cd "$script_dir/../.." && pwd)
+
 curdir=$(pwd)
-cd certgen
+cd "$script_dir"
 
 bash certgen.bash
 if [ "$?" -ne "0" ]; then
@@ -24,10 +33,10 @@ else
 
     echo "finished generating certificates/credentials; copying results..."
 
-    dir=certgen/temp
+    dir=$script_dir/temp
 
-    server_image_certs_dir=image-opcua-certified-server/certs
-    iris_image_certs_dir=image-iris/certs
+    server_image_certs_dir=$repo_root/docker/certified-server/certs
+    iris_image_certs_dir=$repo_root/docker/iris/certs
 
     mkdir -p $server_image_certs_dir
     mkdir -p $iris_image_certs_dir

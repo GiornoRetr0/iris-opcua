@@ -2,11 +2,17 @@ services:
   iris:
     # No platform pin: the image builds for the host architecture. The base
     # intersystems/iris-community:2025.3 is multi-arch (amd64 + arm64/v8), and
-    # image-iris/Dockerfile picks the matching uacbin/ set via TARGETARCH, so
+    # docker/iris/Dockerfile picks the matching bin/unix/ set via TARGETARCH, so
     # Intel and Apple Silicon both build natively. Pinning linux/amd64 forced
     # emulation, which fails outright under OrbStack/Rosetta because IRIS needs
     # AVX instructions Rosetta does not translate.
-    build: ./image-iris
+    #
+    # The context is the repository root, not docker/iris: the image needs
+    # src/objectscript/ and bin/unix/, and Docker cannot COPY from outside its
+    # context. .dockerignore keeps that context small.
+    build:
+      context: .
+      dockerfile: docker/iris/Dockerfile
     depends_on:
       - plc
     hostname: iris
@@ -23,7 +29,7 @@ services:
       - "10000:4840"
     volumes:
       - type: bind
-        source: ./mocksvr-data/
+        source: ./fixtures/mocksvr-data/
         target: /app/data
 
   plc2:
@@ -34,11 +40,11 @@ services:
       - "10002:4840"
     volumes:
       - type: bind
-        source: ./mocksvr-data/
+        source: ./fixtures/mocksvr-data/
         target: /app/data
 
   certified-server:
-    build: ./image-opcua-certified-server
+    build: ./docker/certified-server
     hostname: certified-server
     init: true
     ports:

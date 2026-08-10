@@ -1,7 +1,7 @@
 .vscode/*
 .DS_Store
 **/.DS_Store
-certgen/temp
+tools/certgen/temp
 **/certs/
 
 # Python
@@ -15,7 +15,12 @@ build/
 *.whl
 .eggs/
 *.so
-!image-iris/uacbin/*.so
+# The prebuilt adapter libraries are committed artefacts, not Python build output.
+# These need the ** and the .so.N suffixes: the old `!image-iris/uacbin/*.so` rule
+# matched neither the per-architecture subdirectories nor libopen62541.so.0, which
+# is why arm64/irisopcua.so was never committed.
+!bin/unix/**/*.so
+!bin/unix/**/*.so.*
 .venv/
 venv/
 env/
@@ -31,5 +36,4 @@ webapp/dist/
 .angular/
 
 # Working notes (not for the open-source repo)
-OBJECTSCRIPT-AUDIT.md
-INHERITED-VS-ADDED.md
+docs/notes/

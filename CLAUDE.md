@@ -2,13 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **Detailed architecture, ObjectScript gotchas, C++ bridge, REST API, globals, security, and the schema + device-binding model are documented in `ARCHITECTURE.md` in this directory. The parent `CLAUDE.md` (loaded automatically) consolidates all of that for Claude.**
+> **Detailed architecture, ObjectScript gotchas, C++ bridge, REST API, globals, security, and the schema + device-binding model are documented in `docs/architecture.md`. The parent `CLAUDE.md` (loaded automatically) consolidates all of that for Claude.**
 
 ## Quick Command Reference
 
 ### Docker environment
 ```bash
-./generate_certificates.sh          # Generate TLS certs (required before first build)
+./tools/certgen/generate.sh          # Generate TLS certs (required before first build)
 docker compose up                    # Start all containers (iris, plc, plc2, certified-server)
 docker compose build                 # Rebuild iris + certified-server images after source changes
 ```
@@ -42,26 +42,29 @@ printf 'zn "OPCUA"\ndo ##class(Ens.Director).GetProductionStatus(.p,.s) write p,
 printf 'zn "OPCUA"\nset rs=##class(%%SQL.Statement).%%ExecDirect(,"SELECT TOP 10 Type,ConfigName,$extract(Text,1,200) FROM Ens_Util.Log ORDER BY ID DESC") while rs.%%Next() { write rs.Type," | ",rs.ConfigName," | ",rs.%%GetData(3),! }\nhalt\n' | docker exec -i iris-opcua-iris-1 iris session iris
 ```
 
-> **Source changes in `image-iris/src/` require rebuilding the Docker image** (`docker compose build`) to take effect — edits on disk are not hot-reloaded.
+> **Source changes in `src/objectscript/` require rebuilding the Docker image** (`docker compose build`) to take effect — edits on disk are not hot-reloaded.
 
 ## Repository Layout (what lives where)
 
 | Path | Contents |
 |------|----------|
-| `image-iris/src/OPCUA/` | All production ObjectScript: Client, Adapters, Services, REST, DataSource, Types, Tests |
-| `image-iris/src/Examples/` | Demo Business Services (PollingExample, SubscriptionExample, SecureExample, ArrayExample, etc.) |
-| `image-iris/src/IRISConfig/` | `Installer.cls` — namespace/DB setup run during Docker build |
-| `image-iris/uacbin/` | Prebuilt Unix shared objects (`.so`) |
+| `src/objectscript/OPCUA/` | All production ObjectScript: Client, Adapters, Services, REST, DataSource, Types, Tests |
+| `src/objectscript/Examples/` | Demo Business Services (PollingExample, SubscriptionExample, SecureExample, ArrayExample, etc.) |
+| `src/objectscript/IRISConfig/` | `Installer.cls` — namespace/DB setup run during Docker build |
+| `bin/unix/{amd64,arm64}/` | Prebuilt Unix shared objects (`.so`), picked by `TARGETARCH` |
 | `webapp/src/app/` | Angular 19 console (standalone components, signals, Tailwind) |
 | `webapp/src/app/core/models/opcua.models.ts` | All TypeScript interfaces (`TreeNode`, `Schema`, `DeviceValidation`, `PipelineHealth`, etc.) |
 | `webapp/src/app/pages/schema-library/`, `schema-builder/` | Schema list + creation |
 | `webapp/src/app/pages/device-binding/` | Bind devices to a schema; also serves pipeline edit |
 | `webapp/src/app/shared/opcua-tree/` | Embeddable single-server address-space browser |
 | `webapp/src/app/core/services/api.service.ts` | REST client (browse, deploy, editPipeline, listPipelines) |
-| `certgen/` | OpenSSL configs + `certgen.bash` |
-| `windows/bin/` | Prebuilt Windows DLLs |
-| `windows/Studio/` | Studio project XML for native Windows IRIS install |
-| `mocksvr-data/data.csv` | Data served by the `plc` mock OPC UA server |
+| `tools/certgen/` | OpenSSL configs, `certgen.bash`, and `generate.sh` |
+| `bin/windows/` | Prebuilt Windows DLLs |
+| `tools/windows-studio/` | Studio project XML for native Windows IRIS install |
+| `fixtures/mocksvr-data/data.csv` | Data served by the `plc` and `plc2` mock OPC UA servers |
+| `docker/iris/` | IRIS image Dockerfile + install script; builds with the **repo root** as context |
+| `docker/certified-server/` | OPC Foundation certified server image |
+| `docs/` | `architecture.md`, `workflow.md`, `decisions/` |
 
 ## Docker Services
 
