@@ -1,7 +1,11 @@
 .vscode/*
 .DS_Store
 **/.DS_Store
-tools/certgen/temp
+# certgen's scratch directory, wherever it sits. Not anchored to tools/certgen on
+# purpose: a checkout made before certgen moved keeps its old, untracked temp/ on
+# disk (git does not remove ignored files when branches move it), and an anchored
+# rule would stop covering it and surface every generated key as untracked.
+**/certgen/temp/
 **/certs/
 
 # Python
