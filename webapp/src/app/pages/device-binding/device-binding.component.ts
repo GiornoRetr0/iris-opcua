@@ -96,10 +96,10 @@ function defaultPipelineName(schemaShortName: string): string {
         <button (click)="back()"
                 class="text-xs font-bold uppercase tracking-widest text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1 mb-3">
           <span class="material-symbols-outlined text-base">arrow_back</span>
-          {{ editMode() ? 'Pipelines' : 'Schemas' }}
+          {{ editMode() ? 'Business Services' : 'Schemas' }}
         </button>
         <h1 class="text-3xl font-semibold text-primary tracking-tight">
-          {{ editMode() ? 'Edit Pipeline' : 'Bind Devices' }}
+          {{ editMode() ? 'Edit Business Service' : 'Bind Devices' }}
         </h1>
         <p class="text-on-surface-variant mt-1">
           @if (editMode()) {
@@ -354,17 +354,17 @@ function defaultPipelineName(schemaShortName: string): string {
             </div>
           }
         </section>
-        <!-- Step 4: pipeline settings -->
+        <!-- Step 4: business service settings -->
         <section class="bg-surface-container-lowest border border-outline-variant/10 rounded-xl p-6 mb-6 shadow-sm">
           <div class="flex items-center gap-3 mb-5">
             <span class="h-7 w-7 rounded-full bg-primary text-on-primary text-xs font-black flex items-center justify-center">3</span>
-            <h2 class="text-sm font-bold uppercase tracking-widest text-on-surface-variant">Pipeline</h2>
+            <h2 class="text-sm font-bold uppercase tracking-widest text-on-surface-variant">Business Service</h2>
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
             @if (editMode()) {
               <!-- Name and transport are fixed once deployed: changing them would
-                   mean a different config item, i.e. a different pipeline. -->
+                   mean a different config item, i.e. a different business service. -->
               <div class="sm:col-span-2 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
                 <div class="flex items-center gap-2">
                   <span class="text-xs font-semibold text-on-surface-variant">Name</span>
@@ -375,16 +375,16 @@ function defaultPipelineName(schemaShortName: string): string {
                   <span class="text-on-surface">{{ mode() }}</span>
                 </div>
                 <p class="text-[11px] text-on-surface-variant basis-full">
-                  This name is the pipeline's identity in InterSystems interoperability —
+                  This name is the service's identity in InterSystems interoperability —
                   it appears in the event log and the Management Portal, and cannot be
-                  changed. To change it or the mode, delete this pipeline and bind the
+                  changed. To change it or the mode, delete this service and bind the
                   schema again. You can give it a friendlier label below.
                 </p>
               </div>
 
               <!-- The label, which *is* editable. Placed in edit mode as well as
                    deploy because renaming after the fact is the common case: you find
-                   out what a pipeline should be called once it is running. -->
+                   out what a service should be called once it is running. -->
               <div class="sm:col-span-2">
                 <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Display label</label>
                 <input [ngModel]="displayName()" (ngModelChange)="displayName.set($event)" spellcheck="false"
@@ -398,7 +398,7 @@ function defaultPipelineName(schemaShortName: string): string {
               </div>
             } @else {
               <div>
-                <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Pipeline name</label>
+                <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Service name</label>
                 <!-- The suggestion is a placeholder, not a value: it stays grey and
                      out of the way until the user types over it. Leaving the field
                      empty deploys under it. -->
@@ -495,7 +495,7 @@ function defaultPipelineName(schemaShortName: string): string {
                    not read as "go live now". -->
               <span class="text-on-surface-variant flex items-center gap-1.5">
                 <span class="material-symbols-outlined text-sm">pause_circle</span>
-                Created stopped — review it, then press play on Pipelines.
+                Created stopped — review it, then press play on Business Services.
               </span>
             }
           </p>
@@ -511,7 +511,7 @@ function defaultPipelineName(schemaShortName: string): string {
             @if (editMode()) {
               {{ deploying() ? 'Saving...' : 'Save Devices' }}
             } @else {
-              {{ deploying() ? 'Creating...' : 'Create Pipeline' }}
+              {{ deploying() ? 'Creating...' : 'Create Business Service' }}
             }
           </button>
         </div>
@@ -726,7 +726,7 @@ export class DeviceBindingComponent implements OnInit {
       next: (pipelines) => {
         const p = pipelines.find((x) => x.name === name);
         if (!p) {
-          this.error.set(`Pipeline '${name}' not found`);
+          this.error.set(`Business service '${name}' not found`);
           this.loadingSchema.set(false);
           return;
         }
@@ -745,7 +745,7 @@ export class DeviceBindingComponent implements OnInit {
 
         const cls: string = p['dataSourceClass'] || '';
         if (!cls) {
-          this.error.set('This pipeline has no schema class');
+          this.error.set('This business service has no schema class');
           this.loadingSchema.set(false);
           return;
         }

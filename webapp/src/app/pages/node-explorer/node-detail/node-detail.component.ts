@@ -74,7 +74,7 @@ import { severityOf, statusText, statusDetail } from '../../../core/opcua-status
 
             <!-- The failure is surfaced on the card that owns the value, not only on
                  the nav-rail dot on its independent 15s timer. Vocabulary mirrors the
-                 pipeline side, which names the consequence rather than the mechanism. -->
+                 business service side, which names the consequence rather than the mechanism. -->
             @if (isStale()) {
               <div class="flex items-start gap-2.5 rounded-lg px-3 py-2.5 mt-4 border"
                    [class]="freshness() === 'disconnected'
@@ -386,7 +386,7 @@ export class NodeDetailComponent implements OnDestroy {
   }
 
   /**
-   * The banner text. Mirrors the pipeline side's vocabulary, which already gets
+   * The banner text. Mirrors the business service side's vocabulary, which already gets
    * this right: name the consequence, not the mechanism.
    */
   stalenessMessage(): string {

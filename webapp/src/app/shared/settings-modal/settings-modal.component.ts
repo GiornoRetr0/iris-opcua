@@ -309,11 +309,11 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
                            class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
                     <!-- The min/max already existed (C4); it just was not communicated.
                          Naming the two screens it governs also separates it from the
-                         per-pipeline poll interval, which is a different concept with an
+                         per-service poll interval, which is a different concept with an
                          overlapping name. -->
                     <p class="text-[11px] text-on-surface-muted mt-1">
-                      Between 1 and 60. Applies to the node explorer and the pipelines
-                      list — not to how often a pipeline polls its server.
+                      Between 1 and 60. Applies to the node explorer and the business
+                      services list — not to how often a service polls its server.
                     </p>
                   </div>
                 </div>

@@ -20,7 +20,7 @@ import { CommonModule } from '@angular/common';
           <h1 class="text-4xl md:text-5xl font-bold tracking-tight text-blue-950 mb-6">OPC UA Console Guide</h1>
           <p class="text-lg text-on-surface-variant leading-relaxed mb-12">
             Learn how to connect to OPC UA servers, browse industrial address spaces, deploy data collection
-            pipelines, and monitor real-time telemetry from your devices.
+            business services, and monitor real-time telemetry from your devices.
           </p>
 
           <!-- Architecture Overview Section -->
@@ -30,7 +30,7 @@ import { CommonModule } from '@angular/common';
                 <h2 class="text-xl font-semibold mb-4 text-blue-900">How It Works</h2>
                 <p class="text-sm text-on-surface-variant leading-relaxed">
                   The console connects to any OPC UA server, lets you browse its address space,
-                  select nodes of interest, and deploy pipelines that continuously poll or subscribe
+                  select nodes of interest, and deploy business services that continuously poll or subscribe
                   to data — storing it in IRIS tables for analytics and monitoring.
                 </p>
               </div>
@@ -57,7 +57,7 @@ import { CommonModule } from '@angular/common';
               <h2 class="text-2xl font-bold text-on-surface">Getting Started</h2>
             </div>
             <p class="text-on-surface-variant mb-6 leading-relaxed">
-              Before browsing nodes or creating pipelines, configure your connection to an OPC UA server.
+              Before browsing nodes or creating business services, configure your connection to an OPC UA server.
             </p>
             <div class="bg-[#1e1e1e] rounded-xl p-6 shadow-2xl relative group overflow-hidden mb-8">
               <div class="flex justify-between items-center mb-4">
@@ -164,16 +164,16 @@ import { CommonModule } from '@angular/common';
             </div>
           </section>
 
-          <!-- Creating Pipelines -->
+          <!-- Creating Business Services -->
           <section class="mb-16" id="creating-pipelines">
             <div class="flex items-center space-x-3 mb-6">
               <span class="inline-block px-3 py-1 bg-tertiary-container text-on-tertiary-container rounded-full text-[10px] font-bold tracking-tighter uppercase">Step 3</span>
-              <h2 class="text-2xl font-bold text-on-surface">Creating Pipelines</h2>
+              <h2 class="text-2xl font-bold text-on-surface">Creating Business Services</h2>
             </div>
             <p class="text-on-surface-variant mb-6 leading-relaxed">
-              Pipelines continuously collect data from OPC UA nodes and store it in IRIS tables.
-              A pipeline is a <em>schema</em> — a reusable device type — bound to a list of devices.
-              The two halves are created separately, so one schema can back several pipelines.
+              Business services continuously collect data from OPC UA nodes and store it in IRIS tables.
+              A business service is a <em>schema</em> — a reusable device type — bound to a list of devices.
+              The two halves are created separately, so one schema can back several services.
             </p>
             <div class="bg-[#1e1e1e] rounded-xl p-6 shadow-2xl relative group overflow-hidden mb-8">
               <div class="flex justify-between items-center mb-4">
@@ -181,8 +181,8 @@ import { CommonModule } from '@angular/common';
               </div>
               <pre class="font-mono text-sm leading-6 text-slate-300"><code><span class="text-blue-400">1. Build a schema</span>   Pick columns off one template device
 <span class="text-blue-400">2. Bind devices</span>     Each is checked against the schema as you add it
-<span class="text-blue-400">3. Create</span>           The pipeline is created <span class="text-amber-400">stopped</span> — nothing is polled yet
-<span class="text-blue-400">4. Press play</span>       Start it from Pipelines when you're ready</code></pre>
+<span class="text-blue-400">3. Create</span>           The service is created <span class="text-amber-400">stopped</span> — nothing is polled yet
+<span class="text-blue-400">4. Press play</span>       Start it from Business Services when you're ready</code></pre>
               <div class="absolute top-0 right-0 w-32 h-full bg-gradient-to-l from-primary/10 to-transparent pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"></div>
             </div>
 
@@ -221,17 +221,17 @@ import { CommonModule } from '@angular/common';
             </div>
           </section>
 
-          <!-- Managing Pipelines -->
+          <!-- Managing Business Services -->
           <section class="mb-16" id="managing-pipelines">
             <div class="flex items-center space-x-3 mb-6">
               <span class="inline-block px-3 py-1 bg-tertiary-container text-on-tertiary-container rounded-full text-[10px] font-bold tracking-tighter uppercase">Step 4</span>
-              <h2 class="text-2xl font-bold text-on-surface">Managing Pipelines</h2>
+              <h2 class="text-2xl font-bold text-on-surface">Managing Business Services</h2>
             </div>
             <p class="text-on-surface-variant mb-6 leading-relaxed">
-              The Pipelines dashboard shows all deployed pipelines with their status, row counts, and data flow visualization.
+              The Business Services dashboard shows all deployed services with their status, row counts, and data flow visualization.
             </p>
 
-            <h3 class="text-lg font-bold text-on-surface mb-6">Pipeline Actions</h3>
+            <h3 class="text-lg font-bold text-on-surface mb-6">Service Actions</h3>
             <div class="overflow-x-auto">
               <table class="w-full text-left border-collapse">
                 <thead>
@@ -245,17 +245,17 @@ import { CommonModule } from '@angular/common';
                   <tr class="border-b border-outline-variant/10">
                     <td class="py-4 font-mono text-primary font-semibold">Start / Stop</td>
                     <td class="py-4"><span class="material-symbols-outlined text-tertiary text-base">play_circle</span> / <span class="material-symbols-outlined text-error text-base">stop_circle</span></td>
-                    <td class="py-4 text-on-surface-variant">Begin or halt collection. A newly created pipeline is stopped, so this is what puts it to work</td>
+                    <td class="py-4 text-on-surface-variant">Begin or halt collection. A newly created service is stopped, so this is what puts it to work</td>
                   </tr>
                   <tr class="border-b border-outline-variant/10">
                     <td class="py-4 font-mono text-primary font-semibold">Edit</td>
                     <td class="py-4"><span class="material-symbols-outlined text-primary text-base">edit_square</span></td>
-                    <td class="py-4 text-on-surface-variant">Add or remove nodes and row sources from an existing pipeline</td>
+                    <td class="py-4 text-on-surface-variant">Add or remove nodes and row sources from an existing service</td>
                   </tr>
                   <tr class="border-b border-outline-variant/10">
                     <td class="py-4 font-mono text-primary font-semibold">Delete</td>
                     <td class="py-4"><span class="material-symbols-outlined text-error text-base">delete</span></td>
-                    <td class="py-4 text-on-surface-variant">Remove the pipeline (only when stopped). Its schema and collected data are kept</td>
+                    <td class="py-4 text-on-surface-variant">Remove the service (only when stopped). Its schema and collected data are kept</td>
                   </tr>
                 </tbody>
               </table>
@@ -292,10 +292,10 @@ import { CommonModule } from '@angular/common';
                    (click)="scrollTo('node-explorer')">Node Explorer</a>
                 <a class="block text-xs pl-4 transition-colors cursor-pointer"
                    [class]="activeSection() === 'creating-pipelines' ? 'text-primary font-bold border-l-2 border-primary' : 'text-on-surface-variant hover:text-primary'"
-                   (click)="scrollTo('creating-pipelines')">Creating Pipelines</a>
+                   (click)="scrollTo('creating-pipelines')">Creating Business Services</a>
                 <a class="block text-xs pl-4 transition-colors cursor-pointer"
                    [class]="activeSection() === 'managing-pipelines' ? 'text-primary font-bold border-l-2 border-primary' : 'text-on-surface-variant hover:text-primary'"
-                   (click)="scrollTo('managing-pipelines')">Managing Pipelines</a>
+                   (click)="scrollTo('managing-pipelines')">Managing Business Services</a>
               </nav>
             </div>
 
@@ -316,7 +316,7 @@ import { CommonModule } from '@angular/common';
               <div class="relative">
                 <span class="inline-block px-2 py-1 bg-tertiary-fixed text-on-tertiary-fixed text-[8px] font-black tracking-widest uppercase rounded mb-3">OPC UA</span>
                 <h5 class="text-white text-sm font-bold mb-2 leading-snug">Multiple Device Support</h5>
-                <p class="text-blue-200 text-[10px] mb-4">Select sibling devices with matching attributes — they merge into one pipeline automatically.</p>
+                <p class="text-blue-200 text-[10px] mb-4">Select sibling devices with matching attributes — they merge into one business service automatically.</p>
                 <a class="text-white text-[10px] font-bold uppercase tracking-widest flex items-center hover:translate-x-1 transition-transform cursor-pointer"
                    (click)="scrollTo('creating-pipelines')">
                   Learn More

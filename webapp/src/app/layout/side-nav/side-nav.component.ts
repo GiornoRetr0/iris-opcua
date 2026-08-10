@@ -60,7 +60,7 @@ import { ServerProfile } from '../../core/models/opcua.models';
              : 'text-slate-600 hover:bg-slate-200/50'">
           <span class="material-symbols-outlined text-xl"
                 [class.filled]="pipelinesLink.isActive">sync_alt</span>
-          <span class="text-sm font-medium">Pipelines</span>
+          <span class="text-sm font-medium">Business Services</span>
         </a>
       </nav>
 

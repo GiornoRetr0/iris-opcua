@@ -16,7 +16,7 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
       <!-- Page Header -->
       <div class="flex justify-between items-end mb-10">
         <div class="space-y-1">
-          <h1 class="text-3xl font-semibold text-primary tracking-tight">Pipelines</h1>
+          <h1 class="text-3xl font-semibold text-primary tracking-tight">Business Services</h1>
           <p class="text-on-surface-variant">Monitor and orchestrate your OPC UA data streams in real-time.</p>
         </div>
       </div>
@@ -73,7 +73,7 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
         <div class="bg-white p-6 rounded-2xl shadow-[0_2px_12px_-2px_rgba(19,28,121,0.08),0_4px_6px_-2px_rgba(19,28,121,0.04)] border border-slate-200/60 relative overflow-hidden group">
           <span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 text-slate-300/25 group-hover:text-slate-300/40 transition-colors" style="font-size:56px">account_tree</span>
           <div class="relative z-10">
-            <div class="text-[0.65rem] font-bold text-on-surface-muted uppercase tracking-widest mb-3">Total Pipelines</div>
+            <div class="text-[0.65rem] font-bold text-on-surface-muted uppercase tracking-widest mb-3">Total Services</div>
             <div class="flex items-baseline gap-2">
               <span class="text-4xl font-black text-primary">{{ pipelines().length }}</span>
               <span class="text-sm font-bold text-on-surface-muted">Deployed</span>
@@ -137,16 +137,16 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
         @if (loading()) {
           <div class="flex items-center justify-center py-20 text-on-surface-variant">
             <span class="material-symbols-outlined text-2xl animate-spin mr-3">progress_activity</span>
-            Loading pipelines...
+            Loading business services...
           </div>
         }
 
         @if (!loading() && pipelines().length === 0) {
           <div class="flex flex-col items-center justify-center py-20 text-on-surface-variant">
             <span class="material-symbols-outlined text-8xl opacity-10 mb-4">account_tree</span>
-            <h2 class="text-xl font-semibold text-primary mb-2">No Pipelines Yet</h2>
+            <h2 class="text-xl font-semibold text-primary mb-2">No Business Services Yet</h2>
             <p class="text-sm text-on-surface-muted mb-6">
-              A pipeline is a schema bound to a list of devices. Start by choosing a schema.
+              A business service is a schema bound to a list of devices. Start by choosing a schema.
             </p>
             <button (click)="createPipeline()"
                     class="px-6 py-3 bg-primary text-on-primary font-bold rounded-lg shadow-xl shadow-primary/30 flex items-center gap-2 hover:brightness-110 active:scale-95 transition-all">
@@ -159,7 +159,7 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
         @if (pipelines().length && !visiblePipelines().length) {
           <div class="flex flex-col items-center justify-center py-16 text-on-surface-variant">
             <span class="material-symbols-outlined text-5xl text-on-surface-muted mb-3">filter_alt_off</span>
-            <p class="text-sm">No pipeline matches this filter.</p>
+            <p class="text-sm">No business service matches this filter.</p>
             <button (click)="clearFilters()"
                     class="mt-3 text-xs font-bold uppercase tracking-wider text-primary hover:underline">
               Clear filters
@@ -418,9 +418,9 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
 
     @if (pendingDelete()) {
       <app-confirm-dialog
-        [title]="'Delete pipeline &quot;' + title(pendingDelete()!) + '&quot;?'"
+        [title]="'Delete business service &quot;' + title(pendingDelete()!) + '&quot;?'"
         [detail]="deleteDetail()"
-        confirmLabel="Delete pipeline"
+        confirmLabel="Delete business service"
         (confirmed)="confirmDelete()"
         (cancelled)="pendingDelete.set(null)" />
     }
@@ -613,7 +613,7 @@ export class PipelinesDashboardComponent implements OnInit, OnDestroy {
   /**
    * The consequence, kept verbatim from the native prompt this replaced — the copy
    * was the good part. Says what survives: the schema and its table are kept, so
-   * this is not the data-losing operation a bare "Delete pipeline?" implies.
+   * this is not the data-losing operation a bare "Delete business service?" implies.
    *
    * Names the config item explicitly when a label is hiding it. The heading uses the
    * friendly name, but this is irreversible and reaches equipment, so the thing
@@ -623,7 +623,7 @@ export class PipelinesDashboardComponent implements OnInit, OnDestroy {
     const p = this.pendingDelete();
     if (!p) return '';
     const parts: string[] = [];
-    if (this.hasDisplayName(p)) parts.push(`This is the pipeline "${p.name}".`);
+    if (this.hasDisplayName(p)) parts.push(`This is the business service "${p.name}".`);
     const schema = this.getSchemaName(p);
     if (schema) {
       parts.push(

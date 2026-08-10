@@ -10,7 +10,7 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
  *
  * A schema is a device *type* — its columns and the OPC UA node names they
  * resolve against — with no device binding. This page exists because that is now
- * a first-class artifact you can create, keep and reuse without any pipeline.
+ * a first-class artifact you can create, keep and reuse without any business service.
  */
 @Component({
   selector: 'app-schema-library',
@@ -128,7 +128,7 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
                       @if (schema.usedBy.length) {
                         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-tertiary-fixed/25 text-[10px] font-bold uppercase tracking-wider text-tertiary">
                           <span class="material-symbols-outlined text-[12px]">link</span>
-                          {{ schema.usedBy.length }} pipeline{{ schema.usedBy.length === 1 ? '' : 's' }}
+                          {{ schema.usedBy.length }} service{{ schema.usedBy.length === 1 ? '' : 's' }}
                         </span>
                       } @else {
                         <span class="px-2 py-0.5 rounded-full bg-surface-container-highest text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
@@ -141,7 +141,7 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
 
                 <div class="flex items-center gap-2 shrink-0">
                   <button (click)="bindDevices(schema)"
-                          title="Create a pipeline from this schema"
+                          title="Create a business service from this schema"
                           class="px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider text-primary hover:bg-primary-fixed/30 transition-colors flex items-center gap-1.5">
                     <span class="material-symbols-outlined text-lg">device_hub</span>
                     Bind Devices
@@ -299,7 +299,7 @@ export class SchemaLibraryComponent implements OnInit {
   }
 
   /**
-   * Deleting a schema *is* the data-losing operation — unlike deleting a pipeline,
+   * Deleting a schema *is* the data-losing operation — unlike deleting a business service,
    * which keeps both. Name the table, since that is what goes.
    */
   deleteDetail(): string {
