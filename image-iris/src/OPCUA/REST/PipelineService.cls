@@ -542,6 +542,10 @@ ClassMethod UpdateDeviceNodePaths(pItemName As %String, pValue As %String) As %S
 				set tSetting.Value = pValue
 				do tItem.Settings.Insert(tSetting)
 			}
+			// A rebind is the one moment an existing pipeline is rewritten, so use it
+			// to backfill Portal categories on pipelines deployed before they were
+			// stamped. EnsureCategories keeps whatever is already there.
+			do ##class(OPCUA.REST.DeployService).EnsureCategories(tItem, ..GetSettingValue(tItem, "DataSourceClass"))
 			set tFound = 1
 		}
 

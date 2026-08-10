@@ -20,6 +20,10 @@ Class OPCUA.REST.DeployService
 /// The shared production class that holds all pipeline service items.
 Parameter ProductionClass = "OPCUA.Pipeline.Production";
 
+/// The Portal category every pipeline we create belongs to, alongside the short
+/// name of its schema. See <method>EnsureCategories</method>.
+Parameter PipelineCategory = "OPCUA";
+
 /// Deploy a pipeline: <tt>{schemaClass, devices, ...}</tt>.
 /// See <method>BindExistingSchema</method>.
 ClassMethod Deploy(pBody As %DynamicObject, Output pResult As %DynamicObject) As %Status
@@ -197,6 +201,12 @@ ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDS
 		// shows, so both views agree on what a pipeline is called.
 		set tItem.Comment = pBody.%Get("displayName")
 		set tItem.PoolSize = 1
+		// Portal categories: every pipeline we create carries "OPCUA" plus the
+		// short name of its schema, so the Production Configuration page groups
+		// our pipelines away from the hand-authored Examples, and groups the
+		// pipelines sharing a schema together. Purely organisational — nothing
+		// reads these back.
+		do ..EnsureCategories(tItem, pDSClassName)
 		// Created switched off. Deploying is configuring; polling a live server and
 		// writing rows is a separate, explicit act — so the operator gets a chance
 		// to review the pipeline before it touches anything.
@@ -256,6 +266,45 @@ ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDS
 	Quit tSC
 }
 
+
+/// Stamp a config item's Portal categories: <tt>OPCUA</tt> plus the short name of
+/// the schema it is bound to.
+///
+/// <tt>Ens.Config.Item.Category</tt> is a comma-delimited string, and
+/// <tt>Ens.Config.Production:EnumerateCategories</tt> strips whitespace around each
+/// piece — so the Portal's category filter sees these as two separate groups.
+/// Categories are organisational only; nothing in the runtime reads them back, so a
+/// missing category is cosmetic rather than a broken pipeline.
+///
+/// Existing categories are kept, and neither name is added twice, so this is safe
+/// to call on an item that has already been stamped.
+ClassMethod EnsureCategories(pItem As Ens.Config.Item, pSchemaClass As %String)
+{
+	set tSchemaName = $Piece(pSchemaClass, ".", *)
+	set tWanted = $LB(..#PipelineCategory)
+	// A schema class is always present on a deploy, but do not stamp an empty
+	// piece if one ever is not — an empty category is dropped by the Portal anyway.
+	if tSchemaName '= "" set tWanted = tWanted_$LB(tSchemaName)
+
+	// Index what is already there, case-insensitively: the Portal treats
+	// categories as display strings, so "opcua" and "OPCUA" would show as two
+	// groups meaning one thing.
+	set tExisting = pItem.Category
+	for i=1:1:$Length(tExisting, ",") {
+		set tCat = $ZStrip($Piece(tExisting, ",", i), "<>WC")
+		continue:tCat=""
+		set tHave($ZConvert(tCat, "U")) = ""
+	}
+
+	for i=1:1:$ListLength(tWanted) {
+		set tCat = $ListGet(tWanted, i)
+		continue:$Data(tHave($ZConvert(tCat, "U")))
+		set tExisting = $Select(tExisting="":tCat, 1:tExisting_","_tCat)
+		set tHave($ZConvert(tCat, "U")) = ""
+	}
+
+	set pItem.Category = tExisting
+}
 
 /// Add a setting to a config item.
 ClassMethod AddSetting(pItem As Ens.Config.Item, pTarget As %String, pName As %String, pValue As %String) [ Private ]
