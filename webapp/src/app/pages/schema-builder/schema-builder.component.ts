@@ -106,21 +106,18 @@ const MAX_DEPTH = 2;
             <h2 class="text-sm font-bold uppercase tracking-widest text-on-surface-variant">Template Device</h2>
           </div>
 
-          <div class="flex gap-2 mb-4">
-            <select [ngModel]="serverId()" (ngModelChange)="serverId.set($event)"
-                    class="flex-1 rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary/30">
+          <!-- Switching the server browses it, with no separate Browse press. The
+               device-binding screen already worked this way, via the shared tree's
+               server input; having one of the two ask for a second click was just an
+               inconsistency. The URL is in the label here too, since picking the
+               right endpoint is the whole job of this control. -->
+          <div class="mb-4">
+            <select [ngModel]="serverId()" (ngModelChange)="onServerChange($event)"
+                    class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary/30">
               @for (srv of servers(); track srv.id) {
-                <option [value]="srv.id">{{ srv.name }}</option>
+                <option [value]="srv.id">{{ srv.name }} — {{ srv.url }}</option>
               }
             </select>
-            <button (click)="loadRoot()"
-                    [disabled]="!serverId() || browsing()"
-                    class="px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider bg-surface-container text-primary hover:bg-primary-fixed/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5">
-              <span class="material-symbols-outlined text-lg" [class.animate-spin]="browsing()">
-                {{ browsing() ? 'progress_activity' : 'travel_explore' }}
-              </span>
-              Browse
-            </button>
           </div>
 
           <!-- A persistent slot for the template device, filled or empty.
@@ -159,10 +156,30 @@ const MAX_DEPTH = 2;
           }
 
           <div class="border border-outline-variant/15 rounded-lg bg-surface-container-low/30 max-h-[26rem] overflow-y-auto custom-scrollbar p-2">
-            @if (!roots().length && !browsing()) {
-              <p class="text-xs text-on-surface-variant text-center py-8">
-                Browse a server, mark one device, then tick the nodes that make up its type.
-              </p>
+            <!-- The spinner used to live on the Browse button. With the button gone
+                 this is the only feedback that a switch is in flight, so it has to be
+                 here or the panel just looks empty for a second. -->
+            @if (browsing()) {
+              <div class="flex items-center justify-center gap-2 py-8 text-on-surface-variant">
+                <span class="material-symbols-outlined text-lg animate-spin">progress_activity</span>
+                <span class="text-xs">Browsing {{ serverName() }}...</span>
+              </div>
+            } @else if (!roots().length) {
+              <div class="flex flex-col items-center gap-2 py-8 px-4 text-center">
+                <p class="text-xs text-on-surface-variant">
+                  @if (error()) {
+                    Could not browse {{ serverName() }}.
+                  } @else {
+                    Mark one device, then tick the nodes that make up its type.
+                  }
+                </p>
+                <!-- Retry, because removing the Browse button also removed the only
+                     way to ask again after a failed or since-recovered endpoint. -->
+                <button (click)="loadRoot()"
+                        class="text-[11px] font-bold uppercase tracking-wider text-primary hover:underline">
+                  {{ error() ? 'Retry' : 'Browse again' }}
+                </button>
+              </div>
             }
             @for (node of roots(); track nodeKey(node)) {
               <ng-container *ngTemplateOutlet="treeTpl; context: { $implicit: node, level: 0 }" />
@@ -409,6 +426,25 @@ export class SchemaBuilderComponent implements OnInit {
 
   private server(): ServerProfile | undefined {
     return this.servers().find((s) => s.id === this.serverId());
+  }
+
+  /** Public for the template, which cannot read `server()`. */
+  serverName(): string {
+    return this.server()?.name || 'this server';
+  }
+
+  /**
+   * Switching server browses it immediately.
+   *
+   * The guard is not just an optimisation: `loadRoot()` discards the template device
+   * and every column, since both are measured against the old root and neither
+   * survives a re-browse. Re-selecting the server already chosen would throw that
+   * work away for nothing.
+   */
+  onServerChange(id: string): void {
+    if (id === this.serverId()) return;
+    this.serverId.set(id);
+    this.loadRoot();
   }
 
   loadRoot(): void {
