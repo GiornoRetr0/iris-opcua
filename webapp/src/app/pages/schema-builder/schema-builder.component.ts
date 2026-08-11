@@ -263,8 +263,8 @@ const MAX_DEPTH = 2;
         </div>
 
         <div class="flex items-center justify-between gap-4 pt-5 border-t border-outline-variant/10">
-          <!-- The reason the button is disabled, beside the button. Bind Devices
-               already does this — it put "Remove SA1 to continue" directly next to
+          <!-- The reason the button is disabled, beside the button. The device-binding
+               screen already does this — it put "Remove SA1 to continue" directly next to
                its disabled button — while this screen kept its reason in another
                panel ~900px away, at 2.78:1. Same team, same template, one screen
                apart; this is that treatment adopted. -->

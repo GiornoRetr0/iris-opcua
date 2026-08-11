@@ -99,7 +99,7 @@ function defaultPipelineName(schemaShortName: string): string {
           {{ editMode() ? 'Business Services' : 'Schemas' }}
         </button>
         <h1 class="text-3xl font-semibold text-primary tracking-tight">
-          {{ editMode() ? 'Edit Business Service' : 'Bind Devices' }}
+          {{ editMode() ? 'Edit Business Service' : 'Create Business Service' }}
         </h1>
         <p class="text-on-surface-variant mt-1">
           @if (editMode()) {

@@ -26,14 +26,22 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
             Reusable device types. Define the columns once, bind any number of devices to them.
           </p>
         </div>
-        <button (click)="createSchema()"
-                class="px-5 py-2.5 bg-primary text-on-primary font-bold rounded-lg shadow-xl shadow-primary/25 flex items-center gap-2 hover:brightness-110 active:scale-95 transition-all">
-          <span class="material-symbols-outlined text-xl">add</span>
-          <span class="text-sm tracking-wide">New Schema</span>
-        </button>
+        <!-- Suppressed while the library is empty: the empty state below already
+             offers this action as its primary call, and two buttons for one
+             action reads as two different actions. -->
+        @if (schemas().length) {
+          <button (click)="createSchema()"
+                  class="px-5 py-2.5 bg-primary text-on-primary font-bold rounded-lg shadow-xl shadow-primary/25 flex items-center gap-2 hover:brightness-110 active:scale-95 transition-all">
+            <span class="material-symbols-outlined text-xl">add</span>
+            <span class="text-sm tracking-wide">New Schema</span>
+          </button>
+        }
       </div>
 
-      <!-- Summary tiles -->
+      <!-- Summary tiles.
+           Skipped entirely with no schemas: three zeros say nothing the empty
+           state below doesn't say better. -->
+      @if (schemas().length) {
       <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
         <div class="bg-white p-6 rounded-2xl shadow-[0_2px_12px_-2px_rgba(19,28,121,0.08),0_4px_6px_-2px_rgba(19,28,121,0.04)] border border-slate-200/60 relative overflow-hidden group">
           <span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 opacity-40 text-slate-300/40 group-hover:text-slate-300/60 transition-colors" style="font-size:80px">schema</span>
@@ -66,6 +74,7 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
           </div>
         </div>
       </div>
+      }
 
       @if (error()) {
         <div class="mb-6 flex items-start gap-3 bg-error-container/40 border border-error/20 rounded-xl px-4 py-3">
@@ -141,10 +150,10 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
 
                 <div class="flex items-center gap-2 shrink-0">
                   <button (click)="bindDevices(schema)"
-                          title="Create a business service from this schema"
+                          title="Bind devices to this schema and create a business service from it"
                           class="px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider text-primary hover:bg-primary-fixed/30 transition-colors flex items-center gap-1.5">
                     <span class="material-symbols-outlined text-lg">device_hub</span>
-                    Bind Devices
+                    Create Business Service
                   </button>
                   <button (click)="toggleDetail(schema)"
                           [title]="expanded() === schema.schemaClass ? 'Hide columns' : 'Show columns'"
