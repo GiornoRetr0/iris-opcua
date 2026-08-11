@@ -472,6 +472,65 @@ function defaultPipelineName(schemaShortName: string): string {
               }
             }
 
+            <!-- Categories, shared by both modes: they are editable before and after
+                 deploy, unlike the name and transport, so there is no reason to
+                 present them differently. -->
+            <div class="sm:col-span-2">
+              <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">
+                Categories <span class="font-normal text-on-surface-muted">(optional)</span>
+              </label>
+
+              <div class="flex flex-wrap items-center gap-2 mb-2">
+                @for (cat of categories(); track cat) {
+                  <span class="inline-flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-full bg-primary-fixed/40 text-xs font-semibold text-primary">
+                    {{ cat }}
+                    <button type="button" (click)="removeCategory(cat)"
+                            [attr.aria-label]="'Remove category ' + cat"
+                            [title]="'Remove ' + cat"
+                            class="rounded-full p-0.5 hover:bg-primary/20 transition-colors">
+                      <span class="material-symbols-outlined text-[14px] leading-none">close</span>
+                    </button>
+                  </span>
+                }
+                @if (!categories().length) {
+                  <span class="text-xs text-on-surface-muted italic">
+                    None — the service will be ungrouped in the Management Portal.
+                  </span>
+                }
+              </div>
+
+              <div class="flex items-center gap-2">
+                <!-- Enter adds, because a chip editor that only responds to a button
+                     click makes adding three categories feel like three forms. -->
+                <input [ngModel]="newCategory()" (ngModelChange)="newCategory.set($event)"
+                       (keydown.enter)="addCategory()" spellcheck="false"
+                       placeholder="Add a category, e.g. Plant A"
+                       class="flex-1 rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-muted focus:border-primary focus:ring-1 focus:ring-primary/30" />
+                <button type="button" (click)="addCategory()"
+                        [disabled]="!newCategory().trim()"
+                        class="px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors"
+                        [class]="newCategory().trim()
+                          ? 'text-primary hover:bg-primary-fixed/30'
+                          : 'text-on-surface-muted cursor-not-allowed'">
+                  Add
+                </button>
+                @if (!categoriesAreDefault()) {
+                  <button type="button" (click)="resetCategories()"
+                          title="Back to OPCUA plus the schema name"
+                          class="px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider text-on-surface-variant hover:text-primary hover:bg-primary-fixed/20 transition-colors">
+                    Reset
+                  </button>
+                }
+              </div>
+
+              <p class="text-[11px] text-on-surface-variant mt-1">
+                Groups this service on the Management Portal's Production Configuration
+                page. Prefilled with <code class="font-mono text-primary">OPCUA</code> and the
+                schema name; change or remove either. Organisational only — categories
+                never affect what is collected.
+              </p>
+            </div>
+
           </div>
         </section>
 
@@ -574,6 +633,24 @@ export class DeviceBindingComponent implements OnInit {
    * time somebody edited only the device list.
    */
   private savedDisplayName = signal<string | null>(null);
+
+  /**
+   * Portal categories. Prefilled with what the backend would have chosen on its
+   * own — `OPCUA` plus the schema's short name — but fully the user's to change,
+   * including removing `OPCUA`. They group the Production Configuration page and
+   * nothing reads them back, so there is no list a service could be broken by.
+   */
+  categories = signal<string[]>([]);
+  /** The pending entry in the add-category field. */
+  newCategory = signal('');
+  /**
+   * What the categories were when an existing service loaded, so a rebind can tell
+   * "untouched" from "emptied" — same absent-vs-empty contract as the label, and
+   * the same hazard: sending [] unconditionally would strip every category off a
+   * service whose devices were the only thing edited.
+   */
+  private savedCategories = signal<string[] | null>(null);
+
   mode = signal<'polling' | 'subscription'>('polling');
   callInterval = signal(5);
   publishingInterval = signal(1000);
@@ -735,6 +812,9 @@ export class DeviceBindingComponent implements OnInit {
         const label = (p.displayName || '').trim();
         this.displayName.set(label);
         this.savedDisplayName.set(label);
+        const cats = p.categories ?? [];
+        this.categories.set([...cats]);
+        this.savedCategories.set([...cats]);
         this.deviceText.set(p['deviceNodePaths'] || '');
         if (p.mode === 'subscription') this.mode.set('subscription');
 
@@ -764,6 +844,9 @@ export class DeviceBindingComponent implements OnInit {
       next: (s) => {
         this.schema.set(s);
         if (then) then(s);
+        // Only in create mode: edit mode already carries the service's own
+        // categories, and defaulting after that would overwrite them with a guess.
+        if (!this.editMode()) this.categories.set(this.defaultCategories());
         this.loadingSchema.set(false);
         // Edit mode arrives with devices already listed, and coverage needs the
         // schema, so this is the earliest point they can be checked.
@@ -897,6 +980,58 @@ export class DeviceBindingComponent implements OnInit {
     });
   }
 
+  // ── Categories ────────────────────────────────────────────────────────────
+
+  /**
+   * What the backend stamps when nobody says otherwise: `OPCUA` plus the schema's
+   * short name. Derived from `schemaClass`'s last segment rather than `name` so it
+   * matches `DeployService.DefaultCategories` character for character — a prefill
+   * that disagreed with the fallback would quietly change behaviour just by the
+   * editor being on screen.
+   */
+  defaultCategories(): string[] {
+    const cls = this.schema()?.schemaClass || '';
+    const short = cls.split('.').pop() || '';
+    return short ? ['OPCUA', short] : ['OPCUA'];
+  }
+
+  /**
+   * Mirrors the server's normalising so the chips show what will actually be
+   * stored: trimmed, no blanks, no case-insensitive duplicates, and no commas —
+   * `Ens.Config.Item.Category` is comma-delimited, so an entry containing one
+   * would split into two categories behind the user's back.
+   */
+  private cleanCategory(raw: string): string {
+    return (raw || '').replace(/,/g, '').trim();
+  }
+
+  addCategory(): void {
+    const cat = this.cleanCategory(this.newCategory());
+    if (!cat) return;
+    const exists = this.categories().some((c) => c.toLowerCase() === cat.toLowerCase());
+    if (!exists) this.categories.update((list) => [...list, cat]);
+    // Cleared either way: leaving a duplicate in the box reads as "not accepted",
+    // when the truth is it is already there.
+    this.newCategory.set('');
+  }
+
+  removeCategory(name: string): void {
+    this.categories.update((list) => list.filter((c) => c !== name));
+  }
+
+  /** Offered only once the list differs, so it is never a no-op button. */
+  categoriesAreDefault(): boolean {
+    return this.sameCategories(this.categories(), this.defaultCategories());
+  }
+
+  resetCategories(): void {
+    this.categories.set(this.defaultCategories());
+  }
+
+  private sameCategories(a: string[], b: string[]): boolean {
+    return a.length === b.length && a.every((c, i) => c === b[i]);
+  }
+
   /** Coverage for one device row, once known. */
   coverageOf(key: string): DeviceValidation | undefined {
     return this.coverage().get(key);
@@ -921,8 +1056,18 @@ export class DeviceBindingComponent implements OnInit {
       // reads '' as "clear it".
       const label = this.displayName().trim();
       const changed = label !== (this.savedDisplayName() ?? '');
+      // Same reasoning for categories: only when they actually differ, or a
+      // device-only edit would re-send — and on an older backend that ignores the
+      // field, silently look like it had saved them.
+      const cats = this.categories();
+      const catsChanged = !this.sameCategories(cats, this.savedCategories() ?? []);
       this.api
-        .rebindPipeline(this.pipelineName(), this.deviceText(), changed ? label : undefined)
+        .rebindPipeline(
+          this.pipelineName(),
+          this.deviceText(),
+          changed ? label : undefined,
+          catsChanged ? cats : undefined
+        )
         .subscribe({
           next: () => {
             this.deploying.set(false);
@@ -950,6 +1095,10 @@ export class DeviceBindingComponent implements OnInit {
     // Only when given: an empty label is the absence of one, not a value.
     const label = this.displayName().trim();
     if (label) params['displayName'] = label;
+    // Always sent, even when empty: the editor was on screen, so the list shown is
+    // the user's decision. Omitting it would hand the choice back to the backend's
+    // default and re-add categories somebody had just removed.
+    params['categories'] = this.categories();
 
     this.api.deploy(params, this.server()).subscribe({
       next: () => {

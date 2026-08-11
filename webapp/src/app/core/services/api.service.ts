@@ -157,14 +157,18 @@ export class ApiService {
    * @param displayName omit to leave the label untouched; pass '' to clear it.
    * The backend distinguishes absent from empty, so this must not be defaulted
    * to '' — that would silently wipe the label on every device edit.
+   * @param categories same contract: omit to leave them alone, pass [] to clear
+   * them. Defaulting to [] would strip every category on a device-only edit.
    */
   rebindPipeline(
     name: string,
     devices: string,
-    displayName?: string
+    displayName?: string,
+    categories?: string[]
   ): Observable<{ updated: number; name: string; deviceCount: number; restarted?: number }> {
     const body: Record<string, unknown> = { name, devices };
     if (displayName !== undefined) body['displayName'] = displayName;
+    if (categories !== undefined) body['categories'] = categories;
     return this.post('/pipelines/rebind', body, 30000);
   }
 

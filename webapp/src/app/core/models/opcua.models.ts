@@ -73,6 +73,12 @@ export interface Pipeline {
    */
   displayName?: string;
   /**
+   * Portal categories (`Ens.Config.Item.Category`), already split and trimmed by
+   * the backend. Organisational only — the Production Configuration page groups
+   * by them and nothing in the runtime reads them back.
+   */
+  categories?: string[];
+  /**
    * Completed cycles, from Ensemble's own per-host counter. Distinguishes a
    * pipeline that has just started from one that has been running dry — `ok`
    * health with zero rows means different things at 1 cycle and at 50.

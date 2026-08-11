@@ -206,7 +206,17 @@ ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDS
 		// our pipelines away from the hand-authored Examples, and groups the
 		// pipelines sharing a schema together. Purely organisational — nothing
 		// reads these back.
-		do ..EnsureCategories(tItem, pDSClassName)
+		//
+		// A caller that sends "categories" owns the list outright, including the
+		// right to drop "OPCUA" or to send none at all — hence %IsDefined rather
+		// than a truth test, which would silently re-add the defaults to an
+		// intentionally empty list. Absent means "decide for me", which is what
+		// the Portal-only path and older clients rely on.
+		if pBody.%IsDefined("categories") {
+			set tItem.Category = ..NormalizeCategories(pBody.%Get("categories"))
+		} else {
+			do ..EnsureCategories(tItem, pDSClassName)
+		}
 		// Created switched off. Deploying is configuring; polling a live server and
 		// writing rows is a separate, explicit act — so the operator gets a chance
 		// to review the pipeline before it touches anything.
@@ -266,6 +276,57 @@ ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDS
 	Quit tSC
 }
 
+
+/// Turn a caller-supplied category list into the comma-delimited string
+/// <tt>Ens.Config.Item.Category</tt> expects.
+///
+/// Accepts either a JSON array (what the console sends) or an already-joined
+/// comma string, so a hand-rolled request works too. Entries are trimmed, blanks
+/// dropped, and duplicates removed case-insensitively — the Portal treats
+/// categories as display strings, so "opcua" and "OPCUA" would otherwise show as
+/// two groups meaning one thing. The first spelling of a repeated name wins.
+///
+/// Commas inside a single entry are the one thing that cannot survive: the field
+/// is comma-delimited, so an entry containing one would silently split into two
+/// categories. They are stripped rather than escaped, because a category is a
+/// short label and there is nothing to escape *to*.
+ClassMethod NormalizeCategories(pValue) As %String
+{
+	set tOut = ""
+	if '$IsObject(pValue) {
+		// Comma string (or empty): reuse the same splitting path as an array by
+		// walking the pieces.
+		for i=1:1:$Length(pValue, ",") {
+			set tCat = $ZStrip($Piece(pValue, ",", i), "<>WC")
+			continue:tCat=""
+			continue:$Data(tSeen($ZConvert(tCat, "U")))
+			set tSeen($ZConvert(tCat, "U")) = ""
+			set tOut = $Select(tOut="":tCat, 1:tOut_","_tCat)
+		}
+		Quit tOut
+	}
+
+	set tIter = pValue.%GetIterator()
+	while tIter.%GetNext(.tKey, .tVal) {
+		set tCat = $ZStrip($Translate($Get(tVal), ","), "<>WC")
+		continue:tCat=""
+		continue:$Data(tSeen($ZConvert(tCat, "U")))
+		set tSeen($ZConvert(tCat, "U")) = ""
+		set tOut = $Select(tOut="":tCat, 1:tOut_","_tCat)
+	}
+	Quit tOut
+}
+
+/// The categories a freshly deployed pipeline gets when the caller does not name
+/// them: <tt>OPCUA</tt> plus the schema's short name. Exposed so the console can
+/// prefill its editor with exactly what the backend would have chosen.
+ClassMethod DefaultCategories(pSchemaClass As %String) As %String
+{
+	set tSchemaName = $Piece(pSchemaClass, ".", *)
+	set tOut = ..#PipelineCategory
+	if tSchemaName '= "" set tOut = tOut_","_tSchemaName
+	Quit tOut
+}
 
 /// Stamp a config item's Portal categories: <tt>OPCUA</tt> plus the short name of
 /// the schema it is bound to.

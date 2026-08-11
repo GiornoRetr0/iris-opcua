@@ -45,6 +45,16 @@ ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %S
 			// means the Portal shows the same label, so the two views agree.
 			set tItem.displayName = tCfgItem.Comment
 
+			// Portal categories, as an array rather than the stored comma string:
+			// the console edits them as discrete chips, and splitting on the client
+			// would duplicate the trimming rules that already live server-side.
+			set tItem.categories = []
+			for c=1:1:$Length(tCfgItem.Category, ",") {
+				set tCat = $ZStrip($Piece(tCfgItem.Category, ",", c), "<>WC")
+				continue:tCat=""
+				do tItem.categories.%Push(tCat)
+			}
+
 			// Determine mode and pipeline version from service class
 			if tItem.className = "OPCUA.Service.TCPSubscriptionRowSourceService" {
 				set tItem.mode = "subscription"
@@ -447,6 +457,17 @@ ClassMethod Rebind(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 			Quit:$$$ISERR(tSC)
 		}
 
+		// Categories ride along on the same terms: absent leaves them alone, an
+		// empty array clears them. Organisational only, so an odd list cannot break
+		// collection — which is why this is a plain overwrite with no validation
+		// beyond normalising the delimiter.
+		if pBody.%IsDefined("categories") {
+			set tSC = ..UpdateCategories(
+				tName,
+				##class(OPCUA.REST.DeployService).NormalizeCategories(pBody.%Get("categories")))
+			Quit:$$$ISERR(tSC)
+		}
+
 		// The adapter re-resolves on every (re)connect, so restarting the item is
 		// all that is needed for the new device list to take effect.
 		do ##class(Ens.Director).GetProductionStatus(.tRunning, .tRunState)
@@ -542,10 +563,14 @@ ClassMethod UpdateDeviceNodePaths(pItemName As %String, pValue As %String) As %S
 				set tSetting.Value = pValue
 				do tItem.Settings.Insert(tSetting)
 			}
-			// A rebind is the one moment an existing pipeline is rewritten, so use it
-			// to backfill Portal categories on pipelines deployed before they were
-			// stamped. EnsureCategories keeps whatever is already there.
-			do ##class(OPCUA.REST.DeployService).EnsureCategories(tItem, ..GetSettingValue(tItem, "DataSourceClass"))
+			// Deliberately does *not* touch categories. This used to backfill them via
+			// EnsureCategories, on the reasoning that a rebind is the one moment an
+			// existing pipeline gets rewritten — harmless while they were derived.
+			// Now that they are the user's to edit it actively fought them: remove
+			// "OPCUA", change a device, and it came straight back, because an
+			// explicitly-empty list and a never-stamped one are both just "".
+			// Categories now move only when a request says so; an unstamped pipeline
+			// shows "None" in the editor with Reset one click away.
 			set tFound = 1
 		}
 
@@ -574,6 +599,29 @@ ClassMethod UpdateDeviceNodePaths(pItemName As %String, pValue As %String) As %S
 /// matters.
 ClassMethod UpdateDisplayName(pItemName As %String, pValue As %String) As %Status [ Private ]
 {
+	Quit ..UpdateItemField(pItemName, "Comment", pValue)
+}
+
+/// Set a pipeline's Portal categories, as a comma-delimited string.
+///
+/// Categories are organisational only — the Production Configuration page groups
+/// by them and nothing in the runtime reads them back — so this overwrites
+/// whatever was there without validating the names. Pass "" to leave the item
+/// ungrouped. Callers should run the value through
+/// <method>OPCUA.REST.DeployService.NormalizeCategories</method> first.
+ClassMethod UpdateCategories(pItemName As %String, pValue As %String) As %Status [ Private ]
+{
+	Quit ..UpdateItemField(pItemName, "Category", pValue)
+}
+
+/// Set one field on a pipeline's config item and persist the production.
+///
+/// Both saves are required and in this order: <tt>%Save</tt> writes the stored
+/// production definition, <tt>SaveToClass</tt> regenerates the production class
+/// from it. Skipping the second leaves the change invisible to a restart, which is
+/// the failure mode this helper exists to stop being retyped per field.
+ClassMethod UpdateItemField(pItemName As %String, pField As %String, pValue As %String) As %Status [ Private ]
+{
 	#dim tSC As %Status = $$$OK
 	Try {
 		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
@@ -586,7 +634,7 @@ ClassMethod UpdateDisplayName(pItemName As %String, pValue As %String) As %Statu
 		for i=1:1:tProd.Items.Count() {
 			set tItem = tProd.Items.GetAt(i)
 			continue:tItem.Name'=pItemName
-			set tItem.Comment = pValue
+			set $Property(tItem, pField) = pValue
 			set tFound = 1
 		}
 
