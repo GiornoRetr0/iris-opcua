@@ -89,8 +89,10 @@ import { Schema } from '../../core/models/opcua.models';
                   <span class="material-symbols-outlined text-2xl">schema</span>
                 </div>
                 <div class="min-w-0">
-                  <h3 class="text-lg font-semibold text-primary truncate">{{ schema.name }}</h3>
-                  <p class="text-[11px] font-mono text-on-surface-variant truncate">{{ schema.schemaClass }}</p>
+                  <!-- No class name, matching the library: beside the table name it
+                       read as the same string twice. -->
+                  <h3 class="text-lg font-semibold text-primary truncate"
+                      [title]="schema.schemaClass">{{ schema.name }}</h3>
                   <div class="flex items-center gap-3 mt-2 flex-wrap">
                     <span class="inline-flex items-center gap-1 text-xs text-on-surface-variant">
                       <span class="material-symbols-outlined text-sm">view_column</span>

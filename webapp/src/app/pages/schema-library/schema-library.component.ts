@@ -123,8 +123,13 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
                     <span class="material-symbols-outlined text-2xl">schema</span>
                   </div>
                   <div class="min-w-0">
-                    <h3 class="text-lg font-semibold text-primary truncate">{{ schema.name }}</h3>
-                    <p class="text-[11px] font-mono text-on-surface-variant truncate">{{ schema.schemaClass }}</p>
+                    <!-- The class name used to sit here, and read as the table name
+                         printed twice: OPCUA.DS.AirCon against OPCUA_DS.AirCon differ
+                         by one character. The table name is the one worth the space —
+                         it is what you type to query the data — and the title already
+                         carries the short name. -->
+                    <h3 class="text-lg font-semibold text-primary truncate"
+                        [title]="schema.schemaClass">{{ schema.name }}</h3>
                     <div class="flex items-center gap-3 mt-2 flex-wrap">
                       <span class="inline-flex items-center gap-1 text-xs text-on-surface-variant">
                         <span class="material-symbols-outlined text-sm">view_column</span>
