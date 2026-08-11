@@ -541,25 +541,9 @@ function defaultPipelineName(schemaShortName: string): string {
         Categories <span class="font-normal text-on-surface-muted">(optional)</span>
       </label>
 
-      <div class="flex flex-wrap items-center gap-2 mb-2">
-        @for (cat of categories(); track cat) {
-          <span class="inline-flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-full bg-primary-fixed/40 text-xs font-semibold text-primary">
-            {{ cat }}
-            <button type="button" (click)="removeCategory(cat)"
-                    [attr.aria-label]="'Remove category ' + cat"
-                    [title]="'Remove ' + cat"
-                    class="rounded-full p-0.5 hover:bg-primary/20 transition-colors">
-              <span class="material-symbols-outlined text-[14px] leading-none">close</span>
-            </button>
-          </span>
-        }
-        @if (!categories().length) {
-          <span class="text-xs text-on-surface-muted italic">None — this service will be ungrouped.</span>
-        }
-      </div>
-
-      <!-- Wraps: this now lives in a half-width column, so the three controls will
-           not always fit on one line. -->
+      <!-- Input first, chips under it. Chips above would push this box below the
+           service-name box it shares a row with, and two text fields side by side
+           at different heights is the kind of misalignment you cannot unsee. -->
       <div class="flex flex-wrap items-center gap-2">
         <!-- Enter adds, because a chip editor that only responds to a button click
              makes adding three categories feel like three forms. -->
@@ -584,9 +568,28 @@ function defaultPipelineName(schemaShortName: string): string {
         }
       </div>
 
+      <div class="flex flex-wrap items-center gap-1.5 mt-2">
+        @for (cat of categories(); track cat) {
+          <span class="inline-flex items-center gap-0.5 pl-2.5 pr-1 py-0.5 rounded-full bg-primary-fixed/40 text-xs font-semibold text-primary">
+            {{ cat }}
+            <!-- Inline font-size, as everywhere else icons are sized here: the
+                 Material Symbols stylesheet sets 24px on the class itself, which a
+                 Tailwind text-* utility does not reliably beat. -->
+            <button type="button" (click)="removeCategory(cat)"
+                    [attr.aria-label]="'Remove category ' + cat"
+                    [title]="'Remove ' + cat"
+                    class="rounded-full p-0.5 leading-none hover:bg-primary/20 transition-colors">
+              <span class="material-symbols-outlined block" style="font-size:14px">close</span>
+            </button>
+          </span>
+        }
+        @if (!categories().length) {
+          <span class="text-xs text-on-surface-muted italic">None — this service will be ungrouped.</span>
+        }
+      </div>
+
       <p class="text-[11px] text-on-surface-variant mt-1">
-        Groups this service in the Management Portal. Organisational only — never
-        affects what is collected.
+        Groups this service in the Management Portal. Never affects what is collected.
       </p>
     </ng-template>
   `,
