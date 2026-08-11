@@ -29,9 +29,11 @@ import { CommonModule } from '@angular/common';
               <div>
                 <h2 class="text-xl font-semibold mb-4 text-blue-900">How It Works</h2>
                 <p class="text-sm text-on-surface-variant leading-relaxed">
-                  The console connects to any OPC UA server, lets you browse its address space,
-                  select nodes of interest, and deploy business services that continuously poll or subscribe
-                  to data — storing it in IRIS tables for analytics and monitoring.
+                  You describe one device type once — that's a <em>schema</em> — then bind any
+                  number of matching devices to it. A business service collects them on a timer
+                  or on change, writing one row per device per cycle into a single IRIS table.
+                  Nodes are matched by name each time the service connects, so a device is a
+                  line of configuration rather than generated code.
                 </p>
               </div>
               <div class="h-48 rounded-lg bg-surface-container-lowest shadow-sm flex items-center justify-center p-4 border border-outline-variant/10">
@@ -57,20 +59,33 @@ import { CommonModule } from '@angular/common';
               <h2 class="text-2xl font-bold text-on-surface">Getting Started</h2>
             </div>
             <p class="text-on-surface-variant mb-6 leading-relaxed">
-              Before browsing nodes or creating business services, configure your connection to an OPC UA server.
+              Before browsing nodes or creating business services, add at least one OPC UA server.
+              You can keep several — each screen that browses lets you pick which one, and the nav
+              rail shows a status dot per connection.
             </p>
             <div class="bg-[#1e1e1e] rounded-xl p-6 shadow-2xl relative group overflow-hidden mb-8">
               <div class="flex justify-between items-center mb-4">
                 <span class="text-[10px] text-slate-500 font-mono tracking-widest uppercase">Configuration Steps</span>
               </div>
-              <pre class="font-mono text-sm leading-6 text-slate-300"><code>1. Click <span class="text-blue-400">Settings</span> in the sidebar
-2. Enter your OPC UA Server URL
+              <pre class="font-mono text-sm leading-6 text-slate-300"><code>1. Click the <span class="text-blue-400">gear</span> in the top right
+2. Under <span class="text-blue-400">OPC UA Servers</span>, pick a connection or <span class="text-blue-400">Add Server</span>
+3. Give it a display name and a URL
    e.g. <span class="text-green-400">opc.tcp://your-server:4840</span>
-3. Choose Security Mode (None or Sign & Encrypt)
-4. If using certificates, fill in the Certificates tab
+4. Choose Security Mode (None or Sign &amp; Encrypt)
+   Sign &amp; Encrypt reveals the certificate fields below it
 5. Click <span class="text-blue-400">Test Connection</span> to verify
 6. Click <span class="text-blue-400">Save Changes</span></code></pre>
               <div class="absolute top-0 right-0 w-32 h-full bg-gradient-to-l from-primary/10 to-transparent pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"></div>
+            </div>
+
+            <div class="flex items-start gap-3 mb-8 rounded-xl border border-outline-variant/20 bg-surface-container-low px-4 py-3">
+              <span class="material-symbols-outlined text-on-surface-variant text-xl shrink-0">info</span>
+              <p class="text-sm text-on-surface-variant leading-relaxed">
+                Settings are stored in this browser only, including passwords. They don't follow you
+                to another machine, and anyone using this browser profile can read them. The
+                <strong class="font-semibold">IRIS API Gateway</strong> tab holds the REST endpoint
+                this console talks to — separate from the OPC UA servers it collects from.
+              </p>
             </div>
 
             <!-- Settings Table -->
@@ -96,14 +111,29 @@ import { CommonModule } from '@angular/common';
                     <td class="py-4 text-on-surface-variant">None (unencrypted) or Sign & Encrypt (mutual TLS)</td>
                   </tr>
                   <tr class="border-b border-outline-variant/10">
-                    <td class="py-4 font-mono text-primary font-semibold">API Base URL</td>
-                    <td class="py-4"><span class="px-2 py-0.5 bg-surface-container rounded text-[10px] font-bold">YES</span></td>
-                    <td class="py-4 text-on-surface-variant">REST API endpoint for the IRIS backend</td>
-                  </tr>
-                  <tr class="border-b border-outline-variant/10">
                     <td class="py-4 font-mono text-primary font-semibold">Certificates</td>
                     <td class="py-4"><span class="px-2 py-0.5 bg-surface-container rounded text-[10px] font-bold">IF SECURE</span></td>
-                    <td class="py-4 text-on-surface-variant">Client cert, private key, trust list, and CRL for Sign & Encrypt mode</td>
+                    <td class="py-4 text-on-surface-variant">
+                      Client certificate, private key, trust list, CRL directory and client URI.
+                      Shown only for Sign &amp; Encrypt; the URI must match the certificate's
+                      subjectAltName or the handshake fails
+                    </td>
+                  </tr>
+                  <tr class="border-b border-outline-variant/10">
+                    <td class="py-4 font-mono text-primary font-semibold">Root Node</td>
+                    <td class="py-4"><span class="px-2 py-0.5 bg-surface-container rounded text-[10px] font-bold">NO</span></td>
+                    <td class="py-4 text-on-surface-variant">
+                      Where browsing starts. Defaults to node 84 in namespace 0, the standard
+                      OPC UA root
+                    </td>
+                  </tr>
+                  <tr class="border-b border-outline-variant/10">
+                    <td class="py-4 font-mono text-primary font-semibold">API Base URL</td>
+                    <td class="py-4"><span class="px-2 py-0.5 bg-surface-container rounded text-[10px] font-bold">YES</span></td>
+                    <td class="py-4 text-on-surface-variant">
+                      On the IRIS API Gateway tab: the REST endpoint of the IRIS backend, with its
+                      credentials and the console's auto-refresh interval
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -149,42 +179,66 @@ import { CommonModule } from '@angular/common';
                 <tbody class="text-sm">
                   <tr class="border-b border-outline-variant/10">
                     <td class="py-4 font-mono text-primary font-semibold">Live Read</td>
-                    <td class="py-4 text-on-surface-variant">Click any variable node to read its current value, timestamps, and status</td>
+                    <td class="py-4 text-on-surface-variant">Click any variable node to read its current value, timestamps, data type and status code</td>
                   </tr>
                   <tr class="border-b border-outline-variant/10">
                     <td class="py-4 font-mono text-primary font-semibold">Auto-Refresh</td>
-                    <td class="py-4 text-on-surface-variant">Enable automatic polling at a configurable interval (1-60 seconds)</td>
+                    <td class="py-4 text-on-surface-variant">
+                      Re-reads the open node on a timer. The interval is the console-wide one set
+                      on the IRIS API Gateway tab (1&ndash;60 seconds)
+                    </td>
                   </tr>
                   <tr class="border-b border-outline-variant/10">
-                    <td class="py-4 font-mono text-primary font-semibold">Telemetry Chart</td>
-                    <td class="py-4 text-on-surface-variant">Visual bar chart showing the last 10 values for trend analysis</td>
+                    <td class="py-4 font-mono text-primary font-semibold">Staleness</td>
+                    <td class="py-4 text-on-surface-variant">
+                      If a refresh stops succeeding the value is flagged rather than left looking
+                      current — the number on screen says when it was last actually read
+                    </td>
+                  </tr>
+                  <tr class="border-b border-outline-variant/10">
+                    <td class="py-4 font-mono text-primary font-semibold">Multiple Servers</td>
+                    <td class="py-4 text-on-surface-variant">Every configured server appears as its own expandable root, so you can browse them side by side</td>
                   </tr>
                 </tbody>
               </table>
             </div>
           </section>
 
-          <!-- Creating Business Services -->
-          <section class="mb-16" id="creating-pipelines">
+          <!-- Schemas -->
+          <section class="mb-16" id="schemas">
             <div class="flex items-center space-x-3 mb-6">
               <span class="inline-block px-3 py-1 bg-tertiary-container text-on-tertiary-container rounded-full text-[10px] font-bold tracking-tighter uppercase">Step 3</span>
-              <h2 class="text-2xl font-bold text-on-surface">Creating Business Services</h2>
+              <h2 class="text-2xl font-bold text-on-surface">Schemas</h2>
             </div>
             <p class="text-on-surface-variant mb-6 leading-relaxed">
-              Business services continuously collect data from OPC UA nodes and store it in IRIS tables.
-              A business service is a <em>schema</em> — a reusable device type — bound to a list of devices.
-              The two halves are created separately, so one schema can back several services.
+              A schema is a device <em>type</em>: the columns one device contributes, and the OPC UA
+              node names they resolve against. It owns an IRIS table and nothing else — creating one
+              starts no collection and stores no device. Schemas are reusable, so several business
+              services can share one, and a schema outlives any service built on it.
             </p>
             <div class="bg-[#1e1e1e] rounded-xl p-6 shadow-2xl relative group overflow-hidden mb-8">
               <div class="flex justify-between items-center mb-4">
-                <span class="text-[10px] text-slate-500 font-mono tracking-widest uppercase">Steps</span>
+                <span class="text-[10px] text-slate-500 font-mono tracking-widest uppercase">Building One</span>
               </div>
-              <pre class="font-mono text-sm leading-6 text-slate-300"><code><span class="text-blue-400">1. Build a schema</span>   Pick columns off one template device
-<span class="text-blue-400">2. Bind devices</span>     Each is checked against the schema as you add it
-<span class="text-blue-400">3. Create</span>           The service is created <span class="text-amber-400">stopped</span> — nothing is polled yet
-<span class="text-blue-400">4. Press play</span>       Start it from Business Services when you're ready</code></pre>
+              <pre class="font-mono text-sm leading-6 text-slate-300"><code><span class="text-blue-400">1. Pick a server</span>    Switching it browses immediately
+<span class="text-blue-400">2. Set device</span>       Mark the node that represents <span class="text-amber-400">one</span> device
+<span class="text-blue-400">3. Tick nodes</span>       Each becomes a column, named relative to that device
+<span class="text-blue-400">4. Save Schema</span>      Names the class and creates the table</code></pre>
               <div class="absolute top-0 right-0 w-32 h-full bg-gradient-to-l from-primary/10 to-transparent pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"></div>
             </div>
+            <p class="text-on-surface-variant mb-8 leading-relaxed">
+              The device you browse is only a <strong class="font-semibold">template</strong>. Its node
+              IDs are never stored — they exist to tell the console what this type of device looks
+              like. Column types are inferred by reading each node once, and ticking nodes inside a
+              sub-folder produces nested <code class="font-mono text-primary text-sm">Parent_Child</code>
+              columns in SQL.
+            </p>
+            <p class="text-on-surface-variant mb-8 leading-relaxed">
+              Columns cannot be changed afterwards. Adding one means creating a new schema, because
+              the alternative is rewriting a table that already holds rows. Deleting a schema
+              <strong class="font-semibold">drops its table and every row in it</strong>, and is
+              refused outright while any business service still references it.
+            </p>
 
             <h3 class="text-lg font-bold text-on-surface mb-6">Key Concepts</h3>
             <div class="overflow-x-auto">
@@ -197,24 +251,103 @@ import { CommonModule } from '@angular/common';
                 </thead>
                 <tbody class="text-sm">
                   <tr class="border-b border-outline-variant/10">
-                    <td class="py-4 font-mono text-primary font-semibold">Row Source</td>
-                    <td class="py-4 text-on-surface-variant">A parent device node (e.g., AirConditioner_1) that produces one row per poll cycle</td>
+                    <td class="py-4 font-mono text-primary font-semibold">Schema</td>
+                    <td class="py-4 text-on-surface-variant">A device type and its table. Reusable, and independent of any business service</td>
+                  </tr>
+                  <tr class="border-b border-outline-variant/10">
+                    <td class="py-4 font-mono text-primary font-semibold">Template Device</td>
+                    <td class="py-4 text-on-surface-variant">
+                      The node you measure columns against while building. Its own name never becomes
+                      part of a column, and its node IDs are not saved
+                    </td>
                   </tr>
                   <tr class="border-b border-outline-variant/10">
                     <td class="py-4 font-mono text-primary font-semibold">Columns</td>
-                    <td class="py-4 text-on-surface-variant">The child attributes selected as data columns (e.g., Temperature, Humidity)</td>
+                    <td class="py-4 text-on-surface-variant">The child nodes selected as data columns (e.g., Temperature, Humidity). Matched by <em>name</em> on every device</td>
                   </tr>
                   <tr class="border-b border-outline-variant/10">
                     <td class="py-4 font-mono text-primary font-semibold">NodePath</td>
-                    <td class="py-4 text-on-surface-variant">Auto-generated column identifying which device produced each row</td>
+                    <td class="py-4 text-on-surface-variant">A column added for you, recording which device produced each row</td>
+                  </tr>
+                  <tr class="border-b border-outline-variant/10">
+                    <td class="py-4 font-mono text-primary font-semibold">Table</td>
+                    <td class="py-4 text-on-surface-variant">
+                      The SQL name to query, e.g. <span class="font-mono">OPCUA_DS.AirCon</span>. The
+                      package's dots become an underscore, since a SQL name holds only one
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- Creating Business Services -->
+          <section class="mb-16" id="creating-pipelines">
+            <div class="flex items-center space-x-3 mb-6">
+              <span class="inline-block px-3 py-1 bg-tertiary-container text-on-tertiary-container rounded-full text-[10px] font-bold tracking-tighter uppercase">Step 4</span>
+              <h2 class="text-2xl font-bold text-on-surface">Creating Business Services</h2>
+            </div>
+            <p class="text-on-surface-variant mb-6 leading-relaxed">
+              A business service is a schema bound to a list of devices. It is one InterSystems
+              interoperability config item — the same thing the Management Portal calls a business
+              service — and it produces one row per device per cycle in the schema's table.
+            </p>
+            <div class="bg-[#1e1e1e] rounded-xl p-6 shadow-2xl relative group overflow-hidden mb-8">
+              <div class="flex justify-between items-center mb-4">
+                <span class="text-[10px] text-slate-500 font-mono tracking-widest uppercase">Steps</span>
+              </div>
+              <pre class="font-mono text-sm leading-6 text-slate-300"><code><span class="text-blue-400">1. New Business Service</span>  From the dashboard, then choose a schema
+<span class="text-blue-400">2. Bind devices</span>         Click them in the tree, or paste a list as text
+<span class="text-blue-400">3. Check the coverage</span>   Each device reports how many columns it has
+<span class="text-blue-400">4. Create</span>               Created <span class="text-amber-400">stopped</span> — nothing is polled yet
+<span class="text-blue-400">5. Press play</span>           Start it from Business Services when ready</code></pre>
+              <div class="absolute top-0 right-0 w-32 h-full bg-gradient-to-l from-primary/10 to-transparent pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"></div>
+            </div>
+            <p class="text-on-surface-variant mb-8 leading-relaxed">
+              Devices are checked against the schema as you add them, before anything is deployed —
+              a device reporting <span class="font-mono">3/4</span> columns will store NULL for the
+              one it lacks, and a device resolving nothing at all cannot be bound. Because nodes are
+              matched by name on every connect, a device that is offline when the service starts
+              begins reporting on its own once it is reachable.
+            </p>
+
+            <h3 class="text-lg font-bold text-on-surface mb-6">Settings</h3>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="border-b border-outline-variant/20">
+                    <th class="py-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Setting</th>
+                    <th class="py-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Description</th>
+                  </tr>
+                </thead>
+                <tbody class="text-sm">
+                  <tr class="border-b border-outline-variant/10">
+                    <td class="py-4 font-mono text-primary font-semibold">Service name</td>
+                    <td class="py-4 text-on-surface-variant">
+                      The interop identity — what appears in the event log and the Management Portal.
+                      <strong class="font-semibold">Permanent once created</strong>; to change it,
+                      delete the service and bind the schema again
+                    </td>
+                  </tr>
+                  <tr class="border-b border-outline-variant/10">
+                    <td class="py-4 font-mono text-primary font-semibold">Display label</td>
+                    <td class="py-4 text-on-surface-variant">Optional friendlier name for this console and the Portal's Comment column. Editable later, and never replaces the name</td>
+                  </tr>
+                  <tr class="border-b border-outline-variant/10">
+                    <td class="py-4 font-mono text-primary font-semibold">Categories</td>
+                    <td class="py-4 text-on-surface-variant">
+                      How the service is grouped in the Management Portal. Prefilled with
+                      <span class="font-mono">OPCUA</span> and the schema name; change or remove
+                      either. Organisational only
+                    </td>
                   </tr>
                   <tr class="border-b border-outline-variant/10">
                     <td class="py-4 font-mono text-primary font-semibold">Polling</td>
-                    <td class="py-4 text-on-surface-variant">Reads all nodes at a fixed interval (e.g., every 5 seconds)</td>
+                    <td class="py-4 text-on-surface-variant">Reads every device on a fixed timer. Predictable load; a row per device per cycle even when nothing changed</td>
                   </tr>
                   <tr class="border-b border-outline-variant/10">
                     <td class="py-4 font-mono text-primary font-semibold">Subscription</td>
-                    <td class="py-4 text-on-surface-variant">Event-driven: server pushes updates when values change</td>
+                    <td class="py-4 text-on-surface-variant">The server pushes values as they change. Lighter on the PLC for values that rarely move, and rows appear only on change</td>
                   </tr>
                 </tbody>
               </table>
@@ -224,12 +357,56 @@ import { CommonModule } from '@angular/common';
           <!-- Managing Business Services -->
           <section class="mb-16" id="managing-pipelines">
             <div class="flex items-center space-x-3 mb-6">
-              <span class="inline-block px-3 py-1 bg-tertiary-container text-on-tertiary-container rounded-full text-[10px] font-bold tracking-tighter uppercase">Step 4</span>
+              <span class="inline-block px-3 py-1 bg-tertiary-container text-on-tertiary-container rounded-full text-[10px] font-bold tracking-tighter uppercase">Step 5</span>
               <h2 class="text-2xl font-bold text-on-surface">Managing Business Services</h2>
             </div>
             <p class="text-on-surface-variant mb-6 leading-relaxed">
-              The Business Services dashboard shows all deployed services with their status, row counts, and data flow visualization.
+              The dashboard shows every service with its health, row count and flow diagram, and
+              re-fetches on a timer so what's on screen stays true. Expand a card for the diagram,
+              or collapse them all once the list is long enough that height is the problem.
             </p>
+
+            <h3 class="text-lg font-bold text-on-surface mb-6">Health</h3>
+            <p class="text-on-surface-variant mb-6 leading-relaxed">
+              Status is the adapter's own verdict, not merely whether the service is switched on —
+              enabled and failing are different things, and a card that looked healthy while its
+              table stayed empty was the thing this replaced.
+            </p>
+            <div class="overflow-x-auto mb-12">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="border-b border-outline-variant/20">
+                    <th class="py-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">State</th>
+                    <th class="py-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Meaning</th>
+                  </tr>
+                </thead>
+                <tbody class="text-sm">
+                  <tr class="border-b border-outline-variant/10">
+                    <td class="py-4 font-mono text-primary font-semibold">Running</td>
+                    <td class="py-4 text-on-surface-variant">Connected and collecting</td>
+                  </tr>
+                  <tr class="border-b border-outline-variant/10">
+                    <td class="py-4 font-mono text-primary font-semibold">Starting</td>
+                    <td class="py-4 text-on-surface-variant">Enabled, first cycles not finished yet</td>
+                  </tr>
+                  <tr class="border-b border-outline-variant/10">
+                    <td class="py-4 font-mono text-primary font-semibold">Not collecting</td>
+                    <td class="py-4 text-on-surface-variant">Enabled but no data is landing — check the event log for the reason</td>
+                  </tr>
+                  <tr class="border-b border-outline-variant/10">
+                    <td class="py-4 font-mono text-primary font-semibold">Running, no rows yet</td>
+                    <td class="py-4 text-on-surface-variant">
+                      Cycling without errors and still nothing stored. Usually the bound devices
+                      don't expose the schema's columns — Edit shows the coverage
+                    </td>
+                  </tr>
+                  <tr class="border-b border-outline-variant/10">
+                    <td class="py-4 font-mono text-primary font-semibold">Stopped</td>
+                    <td class="py-4 text-on-surface-variant">Switched off, or the production isn't running</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
 
             <h3 class="text-lg font-bold text-on-surface mb-6">Service Actions</h3>
             <div class="overflow-x-auto">
@@ -250,12 +427,19 @@ import { CommonModule } from '@angular/common';
                   <tr class="border-b border-outline-variant/10">
                     <td class="py-4 font-mono text-primary font-semibold">Edit</td>
                     <td class="py-4"><span class="material-symbols-outlined text-primary text-base">edit_square</span></td>
-                    <td class="py-4 text-on-surface-variant">Add or remove nodes and row sources from an existing service</td>
+                    <td class="py-4 text-on-surface-variant">
+                      Change which devices it reads, its display label and its categories. The
+                      schema and the transport are fixed, so its columns cannot change here.
+                      Takes effect without a recompile
+                    </td>
                   </tr>
                   <tr class="border-b border-outline-variant/10">
                     <td class="py-4 font-mono text-primary font-semibold">Delete</td>
                     <td class="py-4"><span class="material-symbols-outlined text-error text-base">delete</span></td>
-                    <td class="py-4 text-on-surface-variant">Remove the service (only when stopped). Its schema and collected data are kept</td>
+                    <td class="py-4 text-on-surface-variant">
+                      Remove the service, only when stopped. Its schema and every collected row are
+                      kept — deleting a service is not how you delete data
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -291,6 +475,9 @@ import { CommonModule } from '@angular/common';
                    [class]="activeSection() === 'node-explorer' ? 'text-primary font-bold border-l-2 border-primary' : 'text-on-surface-variant hover:text-primary'"
                    (click)="scrollTo('node-explorer')">Node Explorer</a>
                 <a class="block text-xs pl-4 transition-colors cursor-pointer"
+                   [class]="activeSection() === 'schemas' ? 'text-primary font-bold border-l-2 border-primary' : 'text-on-surface-variant hover:text-primary'"
+                   (click)="scrollTo('schemas')">Schemas</a>
+                <a class="block text-xs pl-4 transition-colors cursor-pointer"
                    [class]="activeSection() === 'creating-pipelines' ? 'text-primary font-bold border-l-2 border-primary' : 'text-on-surface-variant hover:text-primary'"
                    (click)="scrollTo('creating-pipelines')">Creating Business Services</a>
                 <a class="block text-xs pl-4 transition-colors cursor-pointer"
@@ -302,8 +489,9 @@ import { CommonModule } from '@angular/common';
             <div class="p-6 bg-primary-container/10 rounded-xl">
               <h4 class="text-[10px] font-bold uppercase tracking-[0.2em] text-primary mb-2">Quick Tip</h4>
               <p class="text-xs text-primary leading-relaxed opacity-80">
-                Checking a device node (like AirConditioner_1) in the wizard auto-selects all its
-                child attributes as columns. You can uncheck any you don't need.
+                Mark the template device before ticking nodes. Columns are named relative to it, so
+                the device's own name never becomes part of a column — which is what lets the same
+                schema fit AC1, AC2 and AC3.
               </p>
             </div>
 
@@ -315,8 +503,11 @@ import { CommonModule } from '@angular/common';
               </div>
               <div class="relative">
                 <span class="inline-block px-2 py-1 bg-tertiary-fixed text-on-tertiary-fixed text-[8px] font-black tracking-widest uppercase rounded mb-3">OPC UA</span>
-                <h5 class="text-white text-sm font-bold mb-2 leading-snug">Multiple Device Support</h5>
-                <p class="text-blue-200 text-[10px] mb-4">Select sibling devices with matching attributes — they merge into one business service automatically.</p>
+                <h5 class="text-white text-sm font-bold mb-2 leading-snug">One Schema, Many Devices</h5>
+                <p class="text-blue-200 text-[10px] mb-4">
+                  Bind as many matching devices as you like to a single schema. They share one table,
+                  one row each per cycle — and adding another later is one line of configuration.
+                </p>
                 <a class="text-white text-[10px] font-bold uppercase tracking-widest flex items-center hover:translate-x-1 transition-transform cursor-pointer"
                    (click)="scrollTo('creating-pipelines')">
                   Learn More
@@ -333,7 +524,13 @@ import { CommonModule } from '@angular/common';
 export class DocumentationComponent implements OnInit, OnDestroy {
   activeSection = signal('getting-started');
   private observer: IntersectionObserver | null = null;
-  private sectionIds = ['getting-started', 'node-explorer', 'creating-pipelines', 'managing-pipelines'];
+  private sectionIds = [
+    'getting-started',
+    'node-explorer',
+    'schemas',
+    'creating-pipelines',
+    'managing-pipelines',
+  ];
 
   ngOnInit(): void {
     this.observer = new IntersectionObserver(
