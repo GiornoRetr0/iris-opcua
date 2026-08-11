@@ -69,9 +69,9 @@ const EMPTY_SERVERS: ServerProfile[] = [];
     } @else {
       <!-- Normal explorer -->
       <div class="flex min-h-screen">
-        <aside class="fixed left-64 top-16 bottom-0 bg-slate-50 border-r border-slate-200/20 overflow-y-auto custom-scrollbar p-4 z-30"
+        <aside class="fixed left-64 top-16 bottom-0 bg-slate-50 border-r border-slate-200/20 overflow-y-auto custom-scrollbar px-4 pb-4 pt-7 z-30"
                [style.width.px]="sidebarWidth()">
-          <p class="px-1 mb-2 text-[10px] font-bold uppercase tracking-widest text-on-surface-muted">
+          <p class="px-1 mb-3 text-[10px] font-bold uppercase tracking-widest text-on-surface-muted">
             Address Space
           </p>
           <!-- The shared tree in single-select mode. This was app-node-tree, a near
