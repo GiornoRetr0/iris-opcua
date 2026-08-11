@@ -150,8 +150,8 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
             </p>
             <button (click)="createPipeline()"
                     class="px-6 py-3 bg-primary text-on-primary font-bold rounded-lg shadow-xl shadow-primary/30 flex items-center gap-2 hover:brightness-110 active:scale-95 transition-all">
-              <span class="material-symbols-outlined">schema</span>
-              Choose a Schema
+              <span class="material-symbols-outlined">add_circle</span>
+              Create Business Service
             </button>
           </div>
         }
@@ -588,9 +588,9 @@ export class PipelinesDashboardComponent implements OnInit, OnDestroy {
     });
   }
 
-  /** Creating a pipeline starts by picking the schema to bind devices to. */
+  /** Creating a business service starts by picking the schema to bind devices to. */
   createPipeline(): void {
-    this.router.navigate(['/schemas']);
+    this.router.navigate(['/pipelines/new']);
   }
 
   togglePipeline(pipeline: Pipeline): void {

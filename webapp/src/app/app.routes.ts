@@ -51,9 +51,14 @@ export const routes: Routes = [
       ),
   },
   {
-    // Creating a pipeline starts from a schema, so send people to pick one.
+    // Creating a business service starts from a schema, so this is the picker.
+    // It used to redirect to the Schemas library, which is a management page —
+    // people arrived to choose one and got delete buttons instead.
     path: 'pipelines/new',
-    redirectTo: 'schemas',
+    loadComponent: () =>
+      import('./pages/service-schema-picker/service-schema-picker.component').then(
+        (m) => m.ServiceSchemaPickerComponent
+      ),
   },
   {
     path: 'docs',
