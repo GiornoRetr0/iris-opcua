@@ -14,7 +14,16 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
     <div class="fixed inset-0 z-[100] flex items-center justify-center bg-[#2e3132]/40 backdrop-blur-sm p-4"
          (click)="onOverlayClick($event)">
       <!-- Main Settings Modal -->
-      <div class="bg-surface-container-lowest w-full max-w-4xl rounded-xl shadow-[0_20px_40px_rgba(25,28,29,0.06)] overflow-hidden flex flex-col md:flex-row max-h-[90vh]">
+      <!-- Fixed height, not content height. The two tabs hold different amounts, so
+           a content-sized dialog resized as you switched — the sidebar you are aiming
+           at moves under the cursor, and the whole thing reflows for a change that was
+           meant to be a navigation. Pinned to the taller of the two, the servers form,
+           so nothing has to shrink to fit.
+           47rem is that form's measured height. The body already scrolls, so anything
+           taller than the box (Sign & Encrypt reveals four more fields) scrolls inside
+           it rather than growing it — which is the same resize by another route.
+           max-h-[90vh] still wins on a short viewport. -->
+      <div class="bg-surface-container-lowest w-full max-w-4xl rounded-xl shadow-[0_20px_40px_rgba(25,28,29,0.06)] overflow-hidden flex flex-col md:flex-row h-[47rem] max-h-[90vh]">
         <!-- Left Sidebar -->
         <div class="hidden md:flex flex-col w-72 bg-surface-container-low p-6 border-r border-outline-variant/10">
           <!-- Says what this dialog is, rather than repeating the brand lockup that
