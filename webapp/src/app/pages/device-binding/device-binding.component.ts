@@ -385,7 +385,7 @@ function defaultPipelineName(schemaShortName: string): string {
               <!-- The label, which *is* editable. Placed in edit mode as well as
                    deploy because renaming after the fact is the common case: you find
                    out what a service should be called once it is running. -->
-              <div class="sm:col-span-2">
+              <div>
                 <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Display label</label>
                 <input [ngModel]="displayName()" (ngModelChange)="displayName.set($event)" spellcheck="false"
                        placeholder="e.g. Air handler, north wing"
@@ -395,6 +395,12 @@ function defaultPipelineName(schemaShortName: string): string {
                   alongside <code class="font-mono text-primary">{{ pipelineName() }}</code> —
                   never instead of it. Clear the field to remove the label.
                 </p>
+              </div>
+
+              <!-- Beside the label rather than below it: the two editable fields on
+                   this screen sit side by side, mirroring create mode. -->
+              <div>
+                <ng-container [ngTemplateOutlet]="categoriesTpl"></ng-container>
               </div>
             } @else {
               <div>
@@ -412,6 +418,13 @@ function defaultPipelineName(schemaShortName: string): string {
                     Leave empty to use <code class="font-mono text-primary">{{ suggestedName() }}</code>.
                   }
                 </p>
+              </div>
+
+              <!-- Fills the column beside the name, which was empty. Both fields
+                   describe how this service is identified and filed, so they read as
+                   a pair. -->
+              <div>
+                <ng-container [ngTemplateOutlet]="categoriesTpl"></ng-container>
               </div>
 
               <!-- Optional from the start, so the permanent identifier can stay
@@ -472,65 +485,6 @@ function defaultPipelineName(schemaShortName: string): string {
               }
             }
 
-            <!-- Categories, shared by both modes: they are editable before and after
-                 deploy, unlike the name and transport, so there is no reason to
-                 present them differently. -->
-            <div class="sm:col-span-2">
-              <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">
-                Categories <span class="font-normal text-on-surface-muted">(optional)</span>
-              </label>
-
-              <div class="flex flex-wrap items-center gap-2 mb-2">
-                @for (cat of categories(); track cat) {
-                  <span class="inline-flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-full bg-primary-fixed/40 text-xs font-semibold text-primary">
-                    {{ cat }}
-                    <button type="button" (click)="removeCategory(cat)"
-                            [attr.aria-label]="'Remove category ' + cat"
-                            [title]="'Remove ' + cat"
-                            class="rounded-full p-0.5 hover:bg-primary/20 transition-colors">
-                      <span class="material-symbols-outlined text-[14px] leading-none">close</span>
-                    </button>
-                  </span>
-                }
-                @if (!categories().length) {
-                  <span class="text-xs text-on-surface-muted italic">
-                    None — the service will be ungrouped in the Management Portal.
-                  </span>
-                }
-              </div>
-
-              <div class="flex items-center gap-2">
-                <!-- Enter adds, because a chip editor that only responds to a button
-                     click makes adding three categories feel like three forms. -->
-                <input [ngModel]="newCategory()" (ngModelChange)="newCategory.set($event)"
-                       (keydown.enter)="addCategory()" spellcheck="false"
-                       placeholder="Add a category, e.g. Plant A"
-                       class="flex-1 rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-muted focus:border-primary focus:ring-1 focus:ring-primary/30" />
-                <button type="button" (click)="addCategory()"
-                        [disabled]="!newCategory().trim()"
-                        class="px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors"
-                        [class]="newCategory().trim()
-                          ? 'text-primary hover:bg-primary-fixed/30'
-                          : 'text-on-surface-muted cursor-not-allowed'">
-                  Add
-                </button>
-                @if (!categoriesAreDefault()) {
-                  <button type="button" (click)="resetCategories()"
-                          title="Back to OPCUA plus the schema name"
-                          class="px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider text-on-surface-variant hover:text-primary hover:bg-primary-fixed/20 transition-colors">
-                    Reset
-                  </button>
-                }
-              </div>
-
-              <p class="text-[11px] text-on-surface-variant mt-1">
-                Groups this service on the Management Portal's Production Configuration
-                page. Prefilled with <code class="font-mono text-primary">OPCUA</code> and the
-                schema name; change or remove either. Organisational only — categories
-                never affect what is collected.
-              </p>
-            </div>
-
           </div>
         </section>
 
@@ -576,6 +530,65 @@ function defaultPipelineName(schemaShortName: string): string {
         </div>
       }
     </div>
+
+    <!-- Categories, defined once and placed by both modes.
+         An ng-template rather than a shared block at the end of the grid, because
+         where it goes is the point: create mode wants it in the empty column beside
+         the service name, edit mode beside the label, and neither position can be
+         reached from outside the two branches. -->
+    <ng-template #categoriesTpl>
+      <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">
+        Categories <span class="font-normal text-on-surface-muted">(optional)</span>
+      </label>
+
+      <div class="flex flex-wrap items-center gap-2 mb-2">
+        @for (cat of categories(); track cat) {
+          <span class="inline-flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-full bg-primary-fixed/40 text-xs font-semibold text-primary">
+            {{ cat }}
+            <button type="button" (click)="removeCategory(cat)"
+                    [attr.aria-label]="'Remove category ' + cat"
+                    [title]="'Remove ' + cat"
+                    class="rounded-full p-0.5 hover:bg-primary/20 transition-colors">
+              <span class="material-symbols-outlined text-[14px] leading-none">close</span>
+            </button>
+          </span>
+        }
+        @if (!categories().length) {
+          <span class="text-xs text-on-surface-muted italic">None — this service will be ungrouped.</span>
+        }
+      </div>
+
+      <!-- Wraps: this now lives in a half-width column, so the three controls will
+           not always fit on one line. -->
+      <div class="flex flex-wrap items-center gap-2">
+        <!-- Enter adds, because a chip editor that only responds to a button click
+             makes adding three categories feel like three forms. -->
+        <input [ngModel]="newCategory()" (ngModelChange)="newCategory.set($event)"
+               (keydown.enter)="addCategory()" spellcheck="false"
+               placeholder="Add a category"
+               class="flex-1 min-w-[8rem] rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-muted focus:border-primary focus:ring-1 focus:ring-primary/30" />
+        <button type="button" (click)="addCategory()"
+                [disabled]="!newCategory().trim()"
+                class="px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors shrink-0"
+                [class]="newCategory().trim()
+                  ? 'text-primary hover:bg-primary-fixed/30'
+                  : 'text-on-surface-muted cursor-not-allowed'">
+          Add
+        </button>
+        @if (!categoriesAreDefault()) {
+          <button type="button" (click)="resetCategories()"
+                  title="Back to OPCUA plus the schema name"
+                  class="px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider text-on-surface-variant hover:text-primary hover:bg-primary-fixed/20 transition-colors shrink-0">
+            Reset
+          </button>
+        }
+      </div>
+
+      <p class="text-[11px] text-on-surface-variant mt-1">
+        Groups this service in the Management Portal. Organisational only — never
+        affects what is collected.
+      </p>
+    </ng-template>
   `,
 })
 export class DeviceBindingComponent implements OnInit {
