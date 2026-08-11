@@ -5,6 +5,7 @@ import { Router, ActivatedRoute } from '@angular/router';
 import { ApiService } from '../../core/services/api.service';
 import { ConfigService } from '../../core/services/config.service';
 import { OpcuaTreeComponent } from '../../shared/opcua-tree/opcua-tree.component';
+import { FieldHintComponent } from '../../shared/field-hint/field-hint.component';
 import { Schema, ServerProfile, DeviceValidation, TreeNode } from '../../core/models/opcua.models';
 
 /** One line of the device list, decoded for display. */
@@ -88,7 +89,7 @@ function defaultPipelineName(schemaShortName: string): string {
 @Component({
   selector: 'app-device-binding',
   standalone: true,
-  imports: [CommonModule, FormsModule, OpcuaTreeComponent],
+  imports: [CommonModule, FormsModule, OpcuaTreeComponent, FieldHintComponent],
   template: `
     <div class="p-8 max-w-5xl mx-auto">
       <!-- Header -->
@@ -366,35 +367,37 @@ function defaultPipelineName(schemaShortName: string): string {
               <!-- Name and transport are fixed once deployed: changing them would
                    mean a different config item, i.e. a different business service. -->
               <div class="sm:col-span-2 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-1.5">
                   <span class="text-xs font-semibold text-on-surface-variant">Name</span>
-                  <span class="font-mono font-semibold text-primary">{{ pipelineName() }}</span>
+                  <app-field-hint>
+                    This name is the service's identity in InterSystems interoperability —
+                    it appears in the event log and the Management Portal, and cannot be
+                    changed. To change it or the mode, delete this service and bind the
+                    schema again. You can give it a friendlier label instead.
+                  </app-field-hint>
+                  <span class="font-mono font-semibold text-primary ml-0.5">{{ pipelineName() }}</span>
                 </div>
                 <div class="flex items-center gap-2">
                   <span class="text-xs font-semibold text-on-surface-variant">Mode</span>
                   <span class="text-on-surface">{{ mode() }}</span>
                 </div>
-                <p class="text-[11px] text-on-surface-variant basis-full">
-                  This name is the service's identity in InterSystems interoperability —
-                  it appears in the event log and the Management Portal, and cannot be
-                  changed. To change it or the mode, delete this service and bind the
-                  schema again. You can give it a friendlier label below.
-                </p>
               </div>
 
               <!-- The label, which *is* editable. Placed in edit mode as well as
                    deploy because renaming after the fact is the common case: you find
                    out what a service should be called once it is running. -->
               <div>
-                <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Display label</label>
+                <div class="flex items-center gap-1.5 mb-1.5">
+                  <label class="block text-xs font-semibold text-on-surface-variant">Display label</label>
+                  <app-field-hint>
+                    Shown in this console and in the Management Portal's Comment column,
+                    alongside <code class="font-mono">{{ pipelineName() }}</code> — never
+                    instead of it. Clear the field to remove the label.
+                  </app-field-hint>
+                </div>
                 <input [ngModel]="displayName()" (ngModelChange)="displayName.set($event)" spellcheck="false"
                        placeholder="e.g. Air handler, north wing"
                        class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-muted focus:border-primary focus:ring-1 focus:ring-primary/30" />
-                <p class="text-[11px] text-on-surface-variant mt-1">
-                  Shown in this console and in the Management Portal's Comment column,
-                  alongside <code class="font-mono text-primary">{{ pipelineName() }}</code> —
-                  never instead of it. Clear the field to remove the label.
-                </p>
               </div>
 
               <!-- Beside the label rather than below it: the two editable fields on
@@ -404,20 +407,22 @@ function defaultPipelineName(schemaShortName: string): string {
               </div>
             } @else {
               <div>
-                <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Service name</label>
+                <div class="flex items-center gap-1.5 mb-1.5">
+                  <label class="block text-xs font-semibold text-on-surface-variant">Service name</label>
+                  <app-field-hint>
+                    @if (pipelineName().trim()) {
+                      Shown as the production config item. Permanent once deployed.
+                    } @else {
+                      Leave empty to use <code class="font-mono">{{ suggestedName() }}</code>.
+                    }
+                  </app-field-hint>
+                </div>
                 <!-- The suggestion is a placeholder, not a value: it stays grey and
                      out of the way until the user types over it. Leaving the field
                      empty deploys under it. -->
                 <input [ngModel]="pipelineName()" (ngModelChange)="pipelineName.set($event)" spellcheck="false"
                        [placeholder]="suggestedName()"
                        class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-muted focus:border-primary focus:ring-1 focus:ring-primary/30" />
-                <p class="text-[11px] text-on-surface-variant mt-1">
-                  @if (pipelineName().trim()) {
-                    Shown as the production config item. Permanent once deployed.
-                  } @else {
-                    Leave empty to use <code class="font-mono text-primary">{{ suggestedName() }}</code>.
-                  }
-                </p>
               </div>
 
               <!-- Fills the column beside the name, which was empty. Both fields
@@ -430,20 +435,35 @@ function defaultPipelineName(schemaShortName: string): string {
               <!-- Optional from the start, so the permanent identifier can stay
                    machine-shaped without forcing that on whoever reads the dashboard. -->
               <div class="sm:col-span-2">
-                <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">
-                  Display label <span class="font-normal text-on-surface-muted">(optional)</span>
-                </label>
+                <div class="flex items-center gap-1.5 mb-1.5">
+                  <label class="block text-xs font-semibold text-on-surface-variant">
+                    Display label <span class="font-normal text-on-surface-muted">(optional)</span>
+                  </label>
+                  <app-field-hint>
+                    A friendlier name for the dashboard. Unlike the name above it can be
+                    changed later, and it never replaces the name in the event log.
+                  </app-field-hint>
+                </div>
                 <input [ngModel]="displayName()" (ngModelChange)="displayName.set($event)" spellcheck="false"
                        placeholder="e.g. Air handler, north wing"
                        class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-muted focus:border-primary focus:ring-1 focus:ring-primary/30" />
-                <p class="text-[11px] text-on-surface-variant mt-1">
-                  A friendlier name for the dashboard. Unlike the name above it can be
-                  changed later, and it never replaces the name in the event log.
-                </p>
               </div>
 
               <div>
-                <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">Mode</label>
+                <div class="flex items-center gap-1.5 mb-1.5">
+                  <label class="block text-xs font-semibold text-on-surface-variant">Mode</label>
+                  <!-- The highest-impact performance decision on the screen, and its
+                       cost lands on the PLC — so it stays explained, just on demand. -->
+                  <app-field-hint>
+                    @if (mode() === 'polling') {
+                      Reads every device on a fixed timer. Predictable load; one row per
+                      device per cycle even when nothing changed.
+                    } @else {
+                      The server pushes values as they change. Lighter on the PLC for
+                      values that rarely move, and rows appear only on change.
+                    }
+                  </app-field-hint>
+                </div>
                 <div class="flex bg-surface-container p-1 rounded-lg">
                   <button (click)="mode.set('polling')"
                           class="flex-1 px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider transition-all"
@@ -456,18 +476,6 @@ function defaultPipelineName(schemaShortName: string): string {
                     Subscription
                   </button>
                 </div>
-                <!-- The mechanics were already right; only the explanation was missing.
-                     This is the highest-impact performance decision on the screen and
-                     its cost lands on the PLC, so it should not be silent. -->
-                <p class="text-[11px] text-on-surface-muted mt-1.5">
-                  @if (mode() === 'polling') {
-                    Reads every device on a fixed timer. Predictable load; one row per
-                    device per cycle even when nothing changed.
-                  } @else {
-                    The server pushes values as they change. Lighter on the PLC for
-                    values that rarely move, and rows appear only on change.
-                  }
-                </p>
               </div>
 
               @if (mode() === 'polling') {
@@ -537,9 +545,16 @@ function defaultPipelineName(schemaShortName: string): string {
          the service name, edit mode beside the label, and neither position can be
          reached from outside the two branches. -->
     <ng-template #categoriesTpl>
-      <label class="block text-xs font-semibold text-on-surface-variant mb-1.5">
-        Categories <span class="font-normal text-on-surface-muted">(optional)</span>
-      </label>
+      <div class="flex items-center gap-1.5 mb-1.5">
+        <label class="block text-xs font-semibold text-on-surface-variant">
+          Categories <span class="font-normal text-on-surface-muted">(optional)</span>
+        </label>
+        <app-field-hint>
+          Groups this service in the Management Portal. Prefilled with
+          <code class="font-mono">OPCUA</code> and the schema name; change or remove
+          either. Organisational only — never affects what is collected.
+        </app-field-hint>
+      </div>
 
       <!-- Input first, chips under it. Chips above would push this box below the
            service-name box it shares a row with, and two text fields side by side
@@ -588,9 +603,6 @@ function defaultPipelineName(schemaShortName: string): string {
         }
       </div>
 
-      <p class="text-[11px] text-on-surface-variant mt-1">
-        Groups this service in the Management Portal. Never affects what is collected.
-      </p>
     </ng-template>
   `,
 })
