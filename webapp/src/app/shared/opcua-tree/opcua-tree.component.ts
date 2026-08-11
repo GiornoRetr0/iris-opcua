@@ -32,13 +32,22 @@ import { nodeIcon, nodeIconClass, nodeCategoryLabel } from './node-icons';
   selector: 'app-opcua-tree',
   standalone: true,
   imports: [CommonModule, FormsModule],
+  // The host is the flex column the layout below assumes; given a definite height
+  // by its container it hands that height to the scroll area, and given none it
+  // simply grows and the page scrolls instead.
+  styles: [':host { display: flex; flex-direction: column; min-height: 0; }'],
   template: `
-    <div class="text-sm">
+    <div class="flex flex-col flex-1 min-h-0 text-sm">
       <!-- Search + bulk expand. Justified without field research: the default root
            is 84, so a fresh install lands beside the full OPC UA Types hierarchy —
-           thousands of nodes before any vendor content. -->
+           thousands of nodes before any vendor content.
+
+           Outside the scroll area below, so panning a wide tree sideways never
+           carries the filter box off-screen. sticky would not do it: the row's
+           containing block is only as wide as the pane, which is exactly the range
+           sticky is allowed to move within. -->
       @if (showSearch() && hasAnyNodes()) {
-        <div class="flex items-center gap-1.5 mb-2 px-1">
+        <div class="shrink-0 flex items-center gap-1.5 mb-2 px-1">
           <div class="relative flex-1 min-w-0">
             <span class="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-base text-on-surface-muted pointer-events-none">search</span>
             <input type="text" [ngModel]="query()" (ngModelChange)="query.set($event)"
@@ -61,13 +70,18 @@ import { nodeIcon, nodeIconClass, nodeCategoryLabel } from './node-icons';
         @if (query()) {
           <!-- The address space is browsed lazily, so a filter can only see what has
                been expanded. Saying so beats implying a whole-tree search. -->
-          <p class="px-1 mb-2 text-[11px] text-on-surface-muted">
+          <p class="shrink-0 px-1 mb-2 text-[11px] text-on-surface-muted">
             {{ matchCount() }} of {{ loadedCount() }} loaded
             node{{ loadedCount() === 1 ? '' : 's' }} match. Expand a folder to search deeper.
           </p>
         }
       }
 
+      <!-- The rows scroll on both axes. Vertically for the obvious reason;
+           horizontally because indentation is unbounded — a node ten levels deep
+           used to have its name ellipsised or pushed past the pane's border, and
+           panning to it beats losing it. -->
+      <div class="flex-1 min-h-0 overflow-auto custom-scrollbar">
       @if (!server() && !servers().length) {
         <p class="text-xs text-on-surface-variant text-center py-8">Select a server to browse.</p>
       } @else if (loading() && !roots().length && !serverRoots().length) {
@@ -85,16 +99,22 @@ import { nodeIcon, nodeIconClass, nodeCategoryLabel } from './node-icons';
           </button>
         </div>
       } @else if (serverRoots().length) {
-        <!-- Multi-server form: one collapsible root per configured server. -->
+        <!-- Multi-server form: one collapsible root per configured server.
+             The min-w-max wrapper covers only the row lists, never the empty and
+             error states: a row is one unbreakable line whose width the pane should
+             follow, whereas a long error message should wrap rather than force a
+             sideways scroll. -->
+        <div class="min-w-max">
         @for (sr of serverRoots(); track sr.server.id) {
           <div class="flex items-center gap-1.5 rounded-md transition-colors hover:bg-surface-variant/40">
             <button (click)="toggleServerRoot(sr)"
-                    class="flex items-center gap-1.5 min-w-0 flex-1 text-left px-2 py-1.5">
+                    data-tree-row
+                    class="flex items-center gap-1.5 text-left px-2 py-1.5">
               <span class="material-symbols-outlined text-sm text-on-surface-muted shrink-0">
                 {{ sr.loading ? 'progress_activity' : (sr.expanded ? 'arrow_drop_down' : 'arrow_right') }}
               </span>
               <span class="material-symbols-outlined text-lg text-primary shrink-0">dns</span>
-              <span class="font-medium text-on-surface truncate flex-1" [title]="sr.server.url">{{ sr.server.name }}</span>
+              <span class="font-medium text-on-surface whitespace-nowrap" [title]="sr.server.url">{{ sr.server.name }}</span>
               <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold shrink-0"
                     [class]="sr.server.securityMode === 3
                       ? 'bg-emerald-50 text-emerald-700'
@@ -122,16 +142,20 @@ import { nodeIcon, nodeIconClass, nodeCategoryLabel } from './node-icons';
             }
           }
         }
+        </div>
       } @else if (!roots().length) {
         <p class="text-xs text-on-surface-variant text-center py-8">No nodes found at the server root.</p>
       } @else {
+        <div class="min-w-max">
         @for (node of visible(roots()); track nodeKey(node)) {
           <ng-container *ngTemplateOutlet="tpl; context: { $implicit: node, level: 0 }" />
         }
+        </div>
         @if (!visible(roots()).length) {
           <p class="px-2 py-4 text-[11px] text-on-surface-muted italic text-center">No loaded node matches.</p>
         }
       }
+      </div>
     </div>
 
     <ng-template #tpl let-node let-level="level">
@@ -156,14 +180,18 @@ import { nodeIcon, nodeIconClass, nodeCategoryLabel } from './node-icons';
             <span class="w-[18px] shrink-0"></span>
           }
 
+          <!-- Content-width rather than flex-1: the pane scrolls sideways, so a deep
+               or long-named node extends its row instead of ellipsising a name the
+               user needs to read. -->
           <button (click)="onRowClick(node)"
                   (keydown)="onRowKeydown(node, $event)"
                   [title]="rowTitle(node)"
-                  class="flex items-center gap-1.5 min-w-0 flex-1 text-left cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded">
+                  data-tree-row
+                  class="flex items-center gap-1.5 text-left cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded">
             <span class="material-symbols-outlined text-lg shrink-0"
                   [class]="iconClass(node)"
                   [class.filled]="node.nodeCategory === 'folder'">{{ icon(node) }}</span>
-            <span class="truncate"
+            <span class="whitespace-nowrap"
                   [class]="isSelected(node) ? 'font-semibold text-primary' : 'text-on-surface'">
               {{ node.displayName }}
             </span>
@@ -175,16 +203,19 @@ import { nodeIcon, nodeIconClass, nodeCategoryLabel } from './node-icons';
                     [title]="childCount(node) + ' children'">({{ childCount(node) }})</span>
             }
 
+            <!-- ml-1, not ml-auto: the row is content-width now, so there is no free
+                 space to push into and a right-pinned marker would drift to the far
+                 edge of the widest row, off-screen. -->
             @if (mode() === 'multi') {
               @if (isSelected(node)) {
-                <span class="material-symbols-outlined text-base text-primary ml-auto shrink-0">check_circle</span>
+                <span class="material-symbols-outlined text-base text-primary ml-1 shrink-0">check_circle</span>
               } @else {
                 <!-- Always visible, not hover-gated. Touch fires neither hover nor
                      focus, and a keyboard user had to tab blindly to find it. -->
-                <span class="material-symbols-outlined text-base text-on-surface-variant/40 ml-auto shrink-0 group-hover:text-primary transition-colors">add_circle</span>
+                <span class="material-symbols-outlined text-base text-on-surface-variant/40 ml-1 shrink-0 group-hover:text-primary transition-colors">add_circle</span>
               }
             } @else if (isSelected(node)) {
-              <span class="material-symbols-outlined text-base text-primary ml-auto shrink-0">check_circle</span>
+              <span class="material-symbols-outlined text-base text-primary ml-1 shrink-0">check_circle</span>
             }
           </button>
         </div>
@@ -445,11 +476,14 @@ export class OpcuaTreeComponent {
    * Move focus by DOM order rather than by walking the model — the rendered rows
    * are exactly the navigable ones, including across server roots, so the DOM is
    * the more faithful source here.
+   *
+   * Rows are marked with `data-tree-row`; this used to select `button.flex-1`, which
+   * tied keyboard navigation to a layout class the rows no longer carry.
    */
   private focusRow(delta: number, event: KeyboardEvent): void {
     const current = event.target as HTMLElement;
     const container = current.closest('app-opcua-tree') ?? document;
-    const rows = [...container.querySelectorAll<HTMLElement>('button.flex-1')];
+    const rows = [...container.querySelectorAll<HTMLElement>('[data-tree-row]')];
     const i = rows.indexOf(current);
     if (i === -1) return;
     rows[Math.max(0, Math.min(rows.length - 1, i + delta))]?.focus();

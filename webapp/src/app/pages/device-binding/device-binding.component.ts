@@ -182,8 +182,12 @@ function defaultPipelineName(schemaShortName: string): string {
               <p class="text-xs font-semibold text-on-surface-variant mb-2">
                 Click a node to bind it as a device
               </p>
-              <div class="border border-outline-variant/15 rounded-lg bg-surface-container-low/30 h-[19rem] overflow-y-auto custom-scrollbar p-1.5">
+              <!-- The tree scrolls itself, on both axes, so this box only bounds it:
+                   rows are content-width now, and a deep node is panned to rather
+                   than ellipsised. -->
+              <div class="border border-outline-variant/15 rounded-lg bg-surface-container-low/30 h-[19rem] flex flex-col overflow-hidden p-1.5">
                 <app-opcua-tree [server]="server()"
+                                class="flex-1 min-h-0"
                                 [selectedKeys]="selectedKeys()"
                                 (nodeToggled)="toggleDevice($event)" />
               </div>

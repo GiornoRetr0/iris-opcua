@@ -110,8 +110,12 @@ body {
 }
 
 /* Custom scrollbar per design */
+/* `height` as well as `width`: containers that scroll on both axes (the node
+   tree) would otherwise pair a 4px vertical bar with a default-height horizontal
+   one. */
 .custom-scrollbar::-webkit-scrollbar {
   width: 4px;
+  height: 4px;
 }
 .custom-scrollbar::-webkit-scrollbar-track {
   background: transparent;

@@ -69,15 +69,19 @@ const EMPTY_SERVERS: ServerProfile[] = [];
     } @else {
       <!-- Normal explorer -->
       <div class="flex min-h-screen">
-        <aside class="fixed left-64 top-16 bottom-0 bg-slate-50 border-r border-slate-200/20 overflow-y-auto custom-scrollbar px-4 pb-4 pt-7 z-30"
+        <!-- A flex column that does not scroll itself: the heading stays put and the
+             tree scrolls inside its own area, so panning a deeply nested branch
+             sideways leaves the heading and filter row where they were. -->
+        <aside class="fixed left-64 top-16 bottom-0 flex flex-col bg-slate-50 border-r border-slate-200/20 overflow-hidden px-4 pb-4 pt-7 z-30"
                [style.width.px]="sidebarWidth()">
-          <p class="px-1 mb-3 text-[10px] font-bold uppercase tracking-widest text-on-surface-muted">
+          <p class="shrink-0 px-1 mb-3 text-[10px] font-bold uppercase tracking-widest text-on-surface-muted">
             Address Space
           </p>
           <!-- The shared tree in single-select mode. This was app-node-tree, a near
                duplicate of this component with its own icon map (Objects was blue
                here, amber everywhere else) and a div-with-click for the row. -->
           <app-opcua-tree mode="single"
+                          class="flex-1 min-h-0"
                           [servers]="servers()"
                           (nodeSelected)="onNodeSelected($event)" />
         </aside>
