@@ -41,47 +41,51 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
             </div>
           </nav>
 
-          <!-- Server list (when servers tab active) -->
-          @if (activeTab() === 'servers') {
-            <div class="flex-1 overflow-y-auto custom-scrollbar space-y-1">
-              <p class="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-2 px-1">Connections</p>
-              @for (server of servers(); track server.id) {
-                <div (click)="selectServer(server)"
-                     class="flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-colors group"
-                     [class]="selectedServerId() === server.id ? 'bg-primary/10 text-primary' : 'text-on-surface-variant hover:bg-surface-variant/50'">
-                  <span class="relative flex h-2 w-2 shrink-0">
-                    <span class="relative inline-flex rounded-full h-2 w-2"
-                          [class]="serverStatuses()[server.id] === 'online' ? 'bg-emerald-500' : serverStatuses()[server.id] === 'testing' ? 'bg-amber-400 animate-pulse' : 'bg-slate-300'"></span>
-                  </span>
-                  <div class="flex-1 min-w-0">
-                    <p class="text-xs font-semibold truncate">{{ server.name }}</p>
-                    <p class="text-[10px] font-mono text-on-surface-muted truncate">{{ server.url }}</p>
-                    <!-- The mode in words under the URL, so the list itself says which
-                         connections are unsecured without opening each one. -->
-                    <p class="flex items-center gap-1 text-[10px] font-semibold"
-                       [class]="server.securityMode === 3 ? 'text-emerald-700' : 'text-amber-700'">
-                      <span class="material-symbols-outlined text-[11px]">
-                        {{ server.securityMode === 3 ? 'lock' : 'lock_open' }}
-                      </span>
-                      {{ server.securityMode === 3 ? 'Sign & Encrypt' : 'Unsecured' }}
-                    </p>
-                  </div>
-                  <!-- Always visible. Not one of the audit's three, but the same defect:
-                       a remove control that touch can never reveal. -->
-                  <button (click)="removeServer(server.id, $event)"
-                          [title]="'Remove ' + (server.name || 'this server')"
-                          class="text-on-surface-variant hover:text-error focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition-colors p-0.5 rounded shrink-0">
-                    <span class="material-symbols-outlined text-sm">close</span>
-                  </button>
+          <!-- Always shown, on both tabs. The list is the sidebar's contents, not the
+               servers tab's: hiding it made the pane look like the connections had
+               gone, and left no way to reach one without first going back. Clicking a
+               row switches to the servers tab, so it works as a jump from either. -->
+          <div class="flex-1 overflow-y-auto custom-scrollbar space-y-1">
+            <p class="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-2 px-1">Connections</p>
+            @for (server of servers(); track server.id) {
+              <!-- Highlighted only while the servers tab is showing it: on the
+                   gateway tab the selection is not what the right pane is editing,
+                   and saying otherwise would be a lie about where you are. -->
+              <div (click)="selectServer(server)"
+                   class="flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-colors group"
+                   [class]="activeTab() === 'servers' && selectedServerId() === server.id ? 'bg-primary/10 text-primary' : 'text-on-surface-variant hover:bg-surface-variant/50'">
+                <span class="relative flex h-2 w-2 shrink-0">
+                  <span class="relative inline-flex rounded-full h-2 w-2"
+                        [class]="serverStatuses()[server.id] === 'online' ? 'bg-emerald-500' : serverStatuses()[server.id] === 'testing' ? 'bg-amber-400 animate-pulse' : 'bg-slate-300'"></span>
+                </span>
+                <div class="flex-1 min-w-0">
+                  <p class="text-xs font-semibold truncate">{{ server.name }}</p>
+                  <p class="text-[10px] font-mono text-on-surface-muted truncate">{{ server.url }}</p>
+                  <!-- The mode in words under the URL, so the list itself says which
+                       connections are unsecured without opening each one. -->
+                  <p class="flex items-center gap-1 text-[10px] font-semibold"
+                     [class]="server.securityMode === 3 ? 'text-emerald-700' : 'text-amber-700'">
+                    <span class="material-symbols-outlined text-[11px]">
+                      {{ server.securityMode === 3 ? 'lock' : 'lock_open' }}
+                    </span>
+                    {{ server.securityMode === 3 ? 'Sign & Encrypt' : 'Unsecured' }}
+                  </p>
                 </div>
-              }
-              <button (click)="addNewServer()"
-                      class="flex items-center gap-2 px-3 py-2 w-full rounded-lg text-primary hover:bg-primary/5 transition-colors mt-1">
-                <span class="material-symbols-outlined text-lg">add_circle</span>
-                <span class="text-xs font-semibold">Add Server</span>
-              </button>
-            </div>
-          }
+                <!-- Always visible. Not one of the audit's three, but the same defect:
+                     a remove control that touch can never reveal. -->
+                <button (click)="removeServer(server.id, $event)"
+                        [title]="'Remove ' + (server.name || 'this server')"
+                        class="text-on-surface-variant hover:text-error focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition-colors p-0.5 rounded shrink-0">
+                  <span class="material-symbols-outlined text-sm">close</span>
+                </button>
+              </div>
+            }
+            <button (click)="addNewServer()"
+                    class="flex items-center gap-2 px-3 py-2 w-full rounded-lg text-primary hover:bg-primary/5 transition-colors mt-1">
+              <span class="material-symbols-outlined text-lg">add_circle</span>
+              <span class="text-xs font-semibold">Add Server</span>
+            </button>
+          </div>
 
           <!-- Only rendered once a test has actually run. Its resting state used to be
                a hardcoded 'Ready' — the most saturated colour in the palette, in the
@@ -439,11 +443,19 @@ export class SettingsModalComponent {
     }
   }
 
-  selectServer(server: ServerProfile): void {
+  /**
+   * @param switchTab true for a user clicking a row — the servers form is what they
+   * are asking for, and on the gateway tab selecting one invisibly would look like
+   * the click did nothing. False when the selection is a consequence rather than a
+   * request, e.g. falling back to another server after a removal, where yanking the
+   * tab out from under someone editing the gateway would be the surprise.
+   */
+  selectServer(server: ServerProfile, switchTab = true): void {
     this.selectedServerId.set(server.id);
     // Find mutable reference from our servers list
     const found = this.servers().find(s => s.id === server.id);
     this.editingServer.set(found || null);
+    if (switchTab) this.activeTab.set('servers');
   }
 
   addNewServer(): void {
@@ -474,7 +486,7 @@ export class SettingsModalComponent {
     if (this.selectedServerId() === id) {
       const remaining = this.servers();
       if (remaining.length > 0) {
-        this.selectServer(remaining[0]);
+        this.selectServer(remaining[0], false);
       } else {
         this.selectedServerId.set(null);
         this.editingServer.set(null);
