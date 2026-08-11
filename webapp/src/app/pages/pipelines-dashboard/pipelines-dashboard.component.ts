@@ -19,6 +19,16 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
           <h1 class="text-3xl font-semibold text-primary tracking-tight">Business Services</h1>
           <p class="text-on-surface-variant">Monitor and orchestrate your OPC UA data streams in real-time.</p>
         </div>
+        <!-- Suppressed while the list is empty, matching the Schemas header: the empty
+             state already offers this as its primary call, and creating the second
+             service otherwise meant detouring through Schemas to find the action. -->
+        @if (pipelines().length) {
+          <button (click)="createPipeline()"
+                  class="px-5 py-2.5 bg-primary text-on-primary font-bold rounded-lg shadow-xl shadow-primary/25 flex items-center gap-2 hover:brightness-110 active:scale-95 transition-all">
+            <span class="material-symbols-outlined text-xl">add</span>
+            <span class="text-sm tracking-wide">New Business Service</span>
+          </button>
+        }
       </div>
 
       <!-- Sort and filter. This is the slot the inert ARCHIVED control used to
