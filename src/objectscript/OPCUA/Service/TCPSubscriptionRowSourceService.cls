@@ -34,8 +34,9 @@ Method OnProcessInput(ByRef pInputAsList As %RegisteredObject, Output pOutput As
 		set tPaths = ..Adapter.RowSourcePaths
 		set tResultIdx = 1
 		for iRS=1:1:$LL(tMasks) {
-			set tSC = ..RowWriter.BuildRow(.pInputAsList, $LI(tMasks, iRS), $LI(tPaths, iRS), .tResultIdx, .tRowData)
+			set tSC = ..RowWriter.BuildRow(.pInputAsList, $LI(tMasks, iRS), $LI(tPaths, iRS), .tResultIdx, .tRowData, .tQualityChanges)
 			Quit:$$$ISERR(tSC)
+			do ..RowWriter.LogQualityChanges($LI(tPaths, iRS), tQualityChanges)
 			set tSC = $CLASSMETHOD(..Adapter.DataSourceClass, "SaveSourcedData", .tRowData)
 			if $$$ISERR(tSC) {
 				$$$LOGERROR("Failed to save device "_iRS_" ("_$LI(tPaths, iRS)_"): "_$System.Status.GetErrorText(tSC))

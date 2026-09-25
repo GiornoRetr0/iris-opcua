@@ -35,6 +35,12 @@ ClassMethod Run(pURL As %String = "opc.tcp://plc") As %Boolean
     write !, "=== Legacy plain schema still writes (offline) ===", !
     do ..TestLegacyPlainRow(.tPass, .tFail)
 
+    write !, "=== Bad reading keeps its status (offline) ===", !
+    do ..TestBadReading(.tPass, .tFail)
+
+    write !, "=== Reading quality changes (offline) ===", !
+    do ..TestQualityChanges(.tPass, .tFail)
+
     write !, "=== Live poll against ", pURL, " ===", !
     do ..TestLiveRow(pURL, .tPass, .tFail)
 
@@ -355,6 +361,148 @@ ClassMethod TestNestedRow(ByRef pPass, ByRef pFail)
 
 /// A schema already deployed with plain columns and a row-level timestamp pair
 /// must keep writing exactly as before — the change must not strand it.
+/// A Bad reading carries a status and timestamps but no value:
+/// $LB(sourceTS, serverTS, status, <null>). The generated schema must keep the
+/// status, and a legacy plain schema must store NULL rather than fail on the
+/// missing value.
+ClassMethod TestBadReading(ByRef pPass, ByRef pFail)
+{
+    // 0x808A0000 BadNotConnected
+    set tBad = $LB("2026-05-05 05:05:05", "2026-05-05 05:05:06", 2156527616, )
+
+    set tClass = ..#TestPackage_".BadSchema"
+    Try {
+        $$$ThrowOnError(..BuildGeneratedSchema(tClass, "TmpBadSchema", 1))
+        $$$ThrowOnError(..ColumnIndex(tClass, .tIdx, .tColCount))
+        set tMask = "", tInput = $LB("")
+        for i=1:1:tColCount {
+            set tMask = tMask _ $LB(1)
+            set tInput = tInput _ $LB($Select($LI(tIdx(i), 1) = "Alpha":tBad, 1:$LB("2026-05-05 05:05:05", "2026-05-05 05:05:06", 0, 1)))
+        }
+        set tWriter = ##class(OPCUA.DataSource.RowWriter).%New()
+        $$$ThrowOnError(tWriter.Initialize(tClass))
+        set tResultIdx = 1
+        set tSC = tWriter.BuildRow(.tInput, tMask, "DevA", .tResultIdx, .tRow)
+        do ..Check("row with a Bad reading builds", $$$ISOK(tSC), 1, .pPass, .pFail)
+        $$$ThrowOnError(tSC)
+        $$$ThrowOnError($classmethod(tClass, "SaveSourcedData", .tRow, .tId))
+        set tObj = $classmethod(tClass, "%OpenId", tId)
+        do ..Check("Bad reading keeps its status", tObj.Alpha.Status, 2156527616, .pPass, .pFail)
+        do ..Check("Bad reading keeps its source timestamp", tObj.Alpha.SourceTimeStamp, "2026-05-05 05:05:05", .pPass, .pFail)
+        do ..Check("Bad reading has no value", tObj.Alpha.Value, "", .pPass, .pFail)
+        set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT Alpha_Status, Alpha_Value FROM "_..TableName(tClass)_" WHERE ID = ?", tId)
+        do ..Check("SQL returns the row", tRS.%Next(), 1, .pPass, .pFail)
+        do ..Check("SQL Alpha_Status is BadNotConnected", tRS.%GetData(1), 2156527616, .pPass, .pFail)
+        do ..Check("SQL Alpha_Value is empty", tRS.%GetData(2), "", .pPass, .pFail)
+    } Catch (e) {
+        set pFail = pFail + 1
+        write "  FAIL exception: ", e.DisplayString(), !
+    }
+    do ..DropSchema(tClass)
+
+    set tClass = ..#TestPackage_".BadLegacySchema"
+    Try {
+        $$$ThrowOnError(..BuildLegacyPlainSchema(tClass))
+        $$$ThrowOnError(..ColumnIndex(tClass, .tIdx, .tColCount))
+        set tMask = "", tInput = $LB("")
+        for i=1:1:tColCount {
+            set tMask = tMask _ $LB(1)
+            set tInput = tInput _ $LB(tBad)
+        }
+        set tWriter = ##class(OPCUA.DataSource.RowWriter).%New()
+        $$$ThrowOnError(tWriter.Initialize(tClass))
+        set tResultIdx = 1
+        set tSC = tWriter.BuildRow(.tInput, tMask, "Old", .tResultIdx, .tRow)
+        do ..Check("legacy row with a Bad reading builds", $$$ISOK(tSC), 1, .pPass, .pFail)
+        $$$ThrowOnError(tSC)
+        $$$ThrowOnError($classmethod(tClass, "SaveSourcedData", .tRow, .tId))
+        set tObj = $classmethod(tClass, "%OpenId", tId)
+        do ..Check("legacy column stores NULL for a Bad reading", tObj.Alpha, "", .pPass, .pFail)
+    } Catch (e) {
+        set pFail = pFail + 1
+        write "  FAIL exception: ", e.DisplayString(), !
+    }
+    do ..DropSchema(tClass)
+}
+
+/// BuildRow reports a column only when its quality changes, per device, and
+/// LogQualityChanges turns one device's changes into a single event-log line.
+ClassMethod TestQualityChanges(ByRef pPass, ByRef pFail)
+{
+    set tClass = ..#TestPackage_".QualitySchema"
+    Try {
+        $$$ThrowOnError(..BuildGeneratedSchema(tClass, "TmpQualitySchema", 1))
+        $$$ThrowOnError(..ColumnIndex(tClass, .tIdx, .tColCount))
+        for i=1:1:tColCount { set tPos($LI(tIdx(i), 1)) = i }
+        set tWriter = ##class(OPCUA.DataSource.RowWriter).%New()
+        $$$ThrowOnError(tWriter.Initialize(tClass))
+
+        // Good, then Alpha BadNotConnected + Gamma UncertainLastUsableValue, the
+        // same again, then all Good (Alpha as Good_Clamped, still Good).
+        set tBad = 2156527616, tUncertain = 1083179008, tClamped = 3145728
+        set tCycles = $LB($LB(0, 0, 0), $LB(tBad, 0, tUncertain), $LB(tBad, 0, tUncertain), $LB(tClamped, 0, 0))
+        set tWantCounts = $LB(0, 2, 0, 2)
+        for c=1:1:$LL(tCycles) {
+            set tChanges = ..QualityCycle(tWriter, "DevA", .tPos, $LI(tCycles, c), $LB(1, 1, 1))
+            do ..Check("cycle "_c_" reports "_$LI(tWantCounts, c)_" change(s)", $LL(tChanges), $LI(tWantCounts, c), .pPass, .pFail)
+            set tCycleChanges(c) = tChanges
+        }
+        set tAlpha = ""
+        for i=1:1:$LL(tCycleChanges(2)) { set:$LI($LI(tCycleChanges(2), i), 1)=tPos("Alpha") tAlpha = $LI(tCycleChanges(2), i) }
+        do ..Check("Alpha went Good -> Bad", $LI(tAlpha, 2)_">"_$LI(tAlpha, 3), "0>2", .pPass, .pFail)
+        do ..Check("Alpha change carries its status", $LI(tAlpha, 4), tBad, .pPass, .pFail)
+
+        // A second device has its own history: a Bad first reading is a change
+        // with no previous severity; the masked-out column is never reported.
+        set tChanges = ..QualityCycle(tWriter, "DevB", .tPos, $LB(tBad, tBad, 0), $LB(1, 0, 1))
+        do ..Check("new device, Bad first reading, masked column ignored", $LL(tChanges), 1, .pPass, .pFail)
+        do ..Check("first reading has no previous severity", $LI($LI(tChanges, 1), 2), "", .pPass, .pFail)
+
+        // One log line for the device, naming the column and the status.
+        // Counted by source class: looking up the status name may first load the
+        // native library in this process, which logs a line of its own.
+        set tBefore = +$Order(^Ens.Util.LogD(""), -1)
+        do tWriter.LogQualityChanges("DevA", tCycleChanges(2))
+        set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT ID FROM Ens_Util.Log WHERE ID > ? AND SourceClass = 'OPCUA.DataSource.RowWriter'", tBefore)
+        set tEntries = 0, tLogId = ""
+        while tRS.%Next() { set tEntries = tEntries + 1, tLogId = tRS.%GetData(1) }
+        do ..Check("one event-log entry for the device", tEntries, 1, .pPass, .pFail)
+        set tLog = ##class(Ens.Util.Log).%OpenId(tLogId)
+        set tText = $Select($IsObject(tLog):tLog.Text, 1:"")
+        do ..Check("entry is a warning", $Select($IsObject(tLog):tLog.Type, 1:""), 3, .pPass, .pFail)
+        do ..Check("entry names the device", tText [ "Device 'DevA'", 1, .pPass, .pFail)
+        do ..Check("entry names the status", tText [ "BadNotConnected", 1, .pPass, .pFail)
+        do ..Check("entry names both columns", (tText [ "Alpha") && (tText [ "Gamma"), 1, .pPass, .pFail)
+        write "       ", tText, !
+    } Catch (e) {
+        set pFail = pFail + 1
+        write "  FAIL exception: ", e.DisplayString(), !
+    }
+    do ..DropSchema(tClass)
+}
+
+/// Feed one row whose columns have the given statuses (by column name order
+/// Alpha, Beta, Gamma) and return BuildRow's quality changes.
+ClassMethod QualityCycle(pWriter, pPath As %String, ByRef pPos, pStatuses As %List, pMaskByName As %List) As %List [ Private ]
+{
+    set tNames = $LB("Alpha", "Beta", "Gamma")
+    set tCount = $LL(tNames)
+    kill tStatus, tMaskAt
+    for n=1:1:tCount {
+        set tStatus(pPos($LI(tNames, n))) = $LI(pStatuses, n)
+        set tMaskAt(pPos($LI(tNames, n))) = $LI(pMaskByName, n)
+    }
+    set tMask = "", tInput = $LB("")
+    for i=1:1:tCount {
+        set tMask = tMask _ $LB(tMaskAt(i))
+        continue:'tMaskAt(i)
+        set tInput = tInput _ $LB($LB("2026-06-06 06:06:06", "2026-06-06 06:06:07", tStatus(i), $Select(tStatus(i) \ 1073741824 >= 2:"", 1:1)))
+    }
+    set tResultIdx = 1
+    $$$ThrowOnError(pWriter.BuildRow(.tInput, tMask, pPath, .tResultIdx, .tRow, .tChanges))
+    quit tChanges
+}
+
 ClassMethod TestLegacyPlainRow(ByRef pPass, ByRef pFail)
 {
     set tClass = ..#TestPackage_".LegacySchema"

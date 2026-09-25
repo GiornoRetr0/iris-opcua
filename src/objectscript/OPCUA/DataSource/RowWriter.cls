@@ -1,4 +1,4 @@
-Include %occInclude
+Include (%occInclude, Ensemble)
 
 /// Shared row assembly for polling and subscription device schemas.
 /// New schemas store complete OPCUA.Types DataValues, including inside folders.
@@ -28,6 +28,16 @@ Property DataColumnPositions As %List [ Private ];
 /// The projection records 2 for full DataValues and 1 for legacy plain values.
 /// In the same leaf order used by Resolver.GetSchemaColumns() and device masks.
 Property FullDataValues As %List [ Private ];
+
+/// Column labels for log messages ("Folder/Name", or "Name" for a flat column),
+/// in the same leaf order as the masks.
+Property ColumnLabels As %List [ Private ];
+
+/// Last reading quality seen per device and column:
+/// LastSeverity(devicePath, columnIndex) = 0 Good, 1 Uncertain, 2 Bad.
+/// Held for the life of the service job, so a change is reported once rather
+/// than on every cycle.
+Property LastSeverity [ MultiDimensional, Private ];
 
 Method Initialize(pDSClass As %String) As %Status
 {
@@ -68,6 +78,15 @@ Method Initialize(pDSClass As %String) As %Status
 			continue:tEntry=""
 			set ..FullDataValues = ..FullDataValues _ $LB($LI(tEntry, 1) = 2)
 		}
+
+		set tSC = ##class(OPCUA.DataSource.Resolver).GetSchemaColumns(tDSClass, .tColumns)
+		Quit:$$$ISERR(tSC)
+		set ..ColumnLabels = ""
+		for i=1:1:tColumns {
+			set tFolder = $LI(tColumns(i), 5)
+			set ..ColumnLabels = ..ColumnLabels _ $LB($Select(tFolder = "":"", 1:tFolder_"/")_$LI(tColumns(i), 3))
+		}
+		kill ..LastSeverity
 
 	} catch (e) {
 		set tSC = e.AsStatus()
@@ -110,10 +129,17 @@ Method DiscoverStorageLayout(pDSClass As %String) As %Status [ Private ]
 
 /// Build one device row. The caller owns persistence and service logging.
 /// pResultIndex starts at 1 (the batch marker) and advances only for present nodes.
-Method BuildRow(ByRef pInput As %List, pMask As %List, pPath As %String, ByRef pResultIndex As %Integer, Output pRow As %List) As %Status
+///
+/// pQualityChanges lists the columns whose reading quality changed since this
+/// device's previous row, as $LB($LB(columnIndex, oldSeverity, newSeverity, status), ...)
+/// with severity 0 Good, 1 Uncertain, 2 Bad and oldSeverity "" on a first reading.
+/// A first reading that is Good is not a change. Hand it to
+/// <method>LogQualityChanges</method>.
+Method BuildRow(ByRef pInput As %List, pMask As %List, pPath As %String, ByRef pResultIndex As %Integer, Output pRow As %List, Output pQualityChanges As %List) As %Status
 {
 	#dim tSC As %Status = $$$OK
 	set pRow = ""
+	set pQualityChanges = ""
 	try {
 		if $LL(pMask) '= $LL(..FullDataValues) {
 			set tSC = $$$ERROR($$$GeneralError, "Device mask does not match the compiled schema")
@@ -140,13 +166,24 @@ Method BuildRow(ByRef pInput As %List, pMask As %List, pPath As %String, ByRef p
 
 			if $ListValid(tDV) && ($LL(tDV) >= 4) {
 				if 'tGotTimestamp {
-					set tSourceTS = $LI(tDV, 1)
-					set tServerTS = $LI(tDV, 2)
+					set tSourceTS = $ListGet(tDV, 1)
+					set tServerTS = $ListGet(tDV, 2)
 					set tGotTimestamp = 1
 				}
 				// A DataValue is already serialized in OPCUA.Types storage order:
 				// source timestamp, server timestamp, status, value (or array values).
-				set tLeafValues(tLeafIdx) = $Select($LI(..FullDataValues, iCol):tDV, 1:$LI(tDV, 4))
+				// A Bad reading has no value, so element 4 is null: $ListGet, not $List.
+				set tLeafValues(tLeafIdx) = $Select($LI(..FullDataValues, iCol):tDV, 1:$ListGet(tDV, 4))
+
+				// Severity is the top two bits of the StatusCode; 3 is reserved and
+				// counts as Bad.
+				set tStatus = +$ListGet(tDV, 3)
+				set tSeverity = $Select(tStatus \ 1073741824 >= 2:2, 1:tStatus \ 1073741824)
+				set tLast = $Get(..LastSeverity(pPath, iCol))
+				if (tLast '= tSeverity) && '((tLast = "") && (tSeverity = 0)) {
+					set pQualityChanges = pQualityChanges _ $LB($LB(iCol, tLast, tSeverity, tStatus))
+				}
+				set ..LastSeverity(pPath, iCol) = tSeverity
 			} else {
 				if $LI(..FullDataValues, iCol) && (tDV '= "") {
 					$$$ThrowStatus($$$ERROR($$$GeneralError, "Malformed DataValue for device '"_pPath_"', column "_iCol))
@@ -185,6 +222,49 @@ Method BuildRow(ByRef pInput As %List, pMask As %List, pPath As %String, ByRef p
 		set tSC = e.AsStatus()
 	}
 	Quit tSC
+}
+
+/// Write one event-log entry for a device's quality changes from
+/// <method>BuildRow</method>: a warning if any column got worse, otherwise an
+/// informational line. Columns that changed the same way are grouped, so a
+/// device going offline is one line however many columns it has.
+Method LogQualityChanges(pPath As %String, pQualityChanges As %List)
+{
+	Quit:pQualityChanges=""
+	set tWorse = 0
+	kill tGroups
+	for i=1:1:$LL(pQualityChanges) {
+		set tChange = $LI(pQualityChanges, i)
+		set tOld = $LI(tChange, 2), tNew = $LI(tChange, 3), tStatus = $LI(tChange, 4)
+		set:(tOld = "")||(tNew > tOld) tWorse = 1
+		set tKey = tOld_"|"_tNew_"|"_tStatus
+		set tGroups(tKey) = $Get(tGroups(tKey)) _ $LB($ListGet(..ColumnLabels, $LI(tChange, 1)))
+	}
+
+	set tNames = $LB("Good", "Uncertain", "Bad")
+	set tText = ""
+	set tKey = ""
+	for {
+		set tKey = $Order(tGroups(tKey))
+		quit:tKey=""
+		set tOld = $Piece(tKey, "|", 1), tNew = $Piece(tKey, "|", 2), tStatus = $Piece(tKey, "|", 3)
+		set tPart = $ListToString(tGroups(tKey), ", ")_": "
+		set tPart = tPart _ $Select(tOld = "":"", 1:$LI(tNames, tOld + 1)_" -> ")_$LI(tNames, tNew + 1)
+		// Name the status unless it is plain Good, which says nothing new.
+		if tStatus '= 0 {
+			set tName = ""
+			Try { do ##class(OPCUA.Client).GetStatusCodeName(.tName, tStatus) } Catch (e) {}
+			set tPart = tPart _ " ("_$Select(tName '= "":tName, 1:"status "_tStatus)_")"
+		}
+		set tText = tText _ $Select(tText = "":"", 1:"; ") _ tPart
+	}
+
+	set tMsg = "Device '"_pPath_"': reading quality "_$Select(tWorse:"degraded", 1:"recovered")_" - "_tText
+	if tWorse {
+		$$$LOGWARNING(tMsg)
+	} else {
+		$$$LOGINFO(tMsg)
+	}
 }
 
 /// Build a nested $LB from the nesting spec and flat leaf values.

@@ -273,14 +273,13 @@ ClassMethod ReadTypeAttributes(pClient As OPCUA.Client, pNodeNS As %Integer, pNo
 {
 	set (pDataType, pValueRank) = ""
 	Quit:'..ReadAttributesOnce(pClient, pNodeNS, pNodeId, $LB($$$OpcuaAttributeDataType, $$$OpcuaAttributeValueRank), .tResults) 0
-	// A missing attribute is "", not a DataValue. DataType arrives as a NodeId
-	// inlined into its DataValue:
+	// A missing attribute is "", and a failed read a DataValue with no value;
+	// the length and ValueRank checks below reject both. DataType arrives as a
+	// NodeId inlined into its DataValue:
 	// $LB(sourceTS, serverTS, status, namespace, identifier, identifierType, ...)
 	set tDT = $ListGet(tResults, 1)
 	set tVR = $ListGet(tResults, 2)
 	Quit:'$ListValid(tDT)||($ListLength(tDT) < 5)||'$ListValid(tVR)||($ListLength(tVR) < 4) 0
-	// A node the attribute does not apply to answers with a bad status.
-	Quit:($ListGet(tDT, 3) '= 0)||($ListGet(tVR, 3) '= 0) 0
 	set pDataType = $Select($ListGet(tDT, 4) = 0:$ListGet(tDT, 5), 1:"")
 	set pValueRank = $ListGet(tVR, 4)
 	Quit (pValueRank '= "")
