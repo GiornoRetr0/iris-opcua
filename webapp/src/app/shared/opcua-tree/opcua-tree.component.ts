@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/services/api.service';
 import { ConfigService } from '../../core/services/config.service';
-import { TreeNode, ServerProfile } from '../../core/models/opcua.models';
+import { ROOT_NODE, TreeNode, ServerProfile } from '../../core/models/opcua.models';
 import { nodeIcon, nodeIconClass, nodeCategoryLabel } from './node-icons';
 
 /**
@@ -397,7 +397,7 @@ export class OpcuaTreeComponent {
   private load(srv: ServerProfile): void {
     this.loading.set(true);
     this.error.set('');
-    this.api.browse(srv.rootNodeNs ?? 0, srv.rootNodeId || 85, undefined, srv).subscribe({
+    this.api.browse(ROOT_NODE.ns, ROOT_NODE.id, undefined, srv).subscribe({
       next: (nodes) => {
         this.roots.set(nodes.map((n) => ({ ...n, level: 0 }) as TreeNode));
         this.loading.set(false);
@@ -418,7 +418,7 @@ export class OpcuaTreeComponent {
     sr.error = '';
     this.serverRoots.update((r) => [...r]);
 
-    this.api.browse(sr.server.rootNodeNs ?? 0, sr.server.rootNodeId || 85, undefined, sr.server).subscribe({
+    this.api.browse(ROOT_NODE.ns, ROOT_NODE.id, undefined, sr.server).subscribe({
       next: (nodes) => {
         sr.roots = nodes.map((n) => ({ ...n, level: 1, serverId: sr.server.id }) as TreeNode);
         sr.loading = false;

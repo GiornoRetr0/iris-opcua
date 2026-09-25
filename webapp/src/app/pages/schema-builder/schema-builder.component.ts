@@ -6,7 +6,7 @@ import { forkJoin, of, Observable } from 'rxjs';
 import { catchError, map, switchMap } from 'rxjs/operators';
 import { ApiService } from '../../core/services/api.service';
 import { ConfigService } from '../../core/services/config.service';
-import { ServerProfile, TreeNode } from '../../core/models/opcua.models';
+import { ROOT_NODE, ServerProfile, TreeNode } from '../../core/models/opcua.models';
 import { nodeIcon, nodeIconClass } from '../../shared/opcua-tree/node-icons';
 
 /** A column being assembled for the new schema. */
@@ -465,7 +465,7 @@ export class SchemaBuilderComponent implements OnInit {
     // paths measured against it — neither survives a re-browse.
     this.deviceRoot.set(undefined);
     this.columns.set([]);
-    this.api.browse(srv.rootNodeNs ?? 0, srv.rootNodeId || 85, undefined, srv).subscribe({
+    this.api.browse(ROOT_NODE.ns, ROOT_NODE.id, undefined, srv).subscribe({
       next: (nodes) => {
         this.roots.set(nodes.map((n) => ({ ...n, level: 0 }) as TreeNode));
         this.browsing.set(false);

@@ -36,8 +36,6 @@ const DEFAULTS: AppConfig = {
   trustDir: '',
   crlDir: '',
   clientURI: '',
-  rootNodeId: '84',
-  rootNodeNs: 0,
   autoRefreshInterval: 5,
   servers: [],
 };
@@ -88,8 +86,6 @@ export class ConfigService {
             trustDir: merged.trustDir,
             crlDir: merged.crlDir,
             clientURI: merged.clientURI,
-            rootNodeId: merged.rootNodeId,
-            rootNodeNs: merged.rootNodeNs,
           }];
         }
 

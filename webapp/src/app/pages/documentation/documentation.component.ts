@@ -120,14 +120,6 @@ import { CommonModule } from '@angular/common';
                     </td>
                   </tr>
                   <tr class="border-b border-outline-variant/10">
-                    <td class="py-4 font-mono text-primary font-semibold">Root Node</td>
-                    <td class="py-4"><span class="px-2 py-0.5 bg-surface-container rounded text-[10px] font-bold">NO</span></td>
-                    <td class="py-4 text-on-surface-variant">
-                      Where browsing starts. Defaults to node 84 in namespace 0, the standard
-                      OPC UA root
-                    </td>
-                  </tr>
-                  <tr class="border-b border-outline-variant/10">
                     <td class="py-4 font-mono text-primary font-semibold">API Base URL</td>
                     <td class="py-4"><span class="px-2 py-0.5 bg-surface-container rounded text-[10px] font-bold">YES</span></td>
                     <td class="py-4 text-on-surface-variant">

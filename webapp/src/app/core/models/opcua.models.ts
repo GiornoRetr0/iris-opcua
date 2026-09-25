@@ -146,9 +146,13 @@ export interface ServerProfile {
   trustDir: string;
   crlDir: string;
   clientURI: string;
-  rootNodeId: string;
-  rootNodeNs: number;
 }
+
+/**
+ * Where every address-space browse starts: the Root folder, ns=0;i=84. The OPC UA
+ * spec fixes this node for every server, so it is not a per-server setting.
+ */
+export const ROOT_NODE = { ns: 0, id: 84 } as const;
 
 export interface AppConfig {
   /** @deprecated Use servers[] instead. Kept for migration only. */
@@ -172,10 +176,6 @@ export interface AppConfig {
   crlDir: string;
   /** @deprecated */
   clientURI: string;
-  /** @deprecated */
-  rootNodeId: string;
-  /** @deprecated */
-  rootNodeNs: number;
   autoRefreshInterval: number;
   servers: ServerProfile[];
 }

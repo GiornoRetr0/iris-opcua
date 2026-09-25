@@ -205,26 +205,6 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
                 </div>
               </section>
 
-              <!-- Address Space -->
-              <section>
-                <header class="mb-4 flex items-center gap-2">
-                  <span class="w-1 h-5 bg-on-secondary-container rounded-full"></span>
-                  <h3 class="text-xs font-bold uppercase tracking-widest text-on-surface-variant">Address Space Hierarchy</h3>
-                </header>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Root Node ID</label>
-                    <input type="text" [(ngModel)]="editingServer()!.rootNodeId"
-                           class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
-                  </div>
-                  <div>
-                    <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Root Namespace</label>
-                    <input type="number" [(ngModel)]="editingServer()!.rootNodeNs" min="0"
-                           class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
-                  </div>
-                </div>
-              </section>
-
               <!-- Certificates (if Sign & Encrypt) -->
               @if (editingServer()!.securityMode === 3) {
                 <section>
@@ -480,8 +460,6 @@ export class SettingsModalComponent {
       trustDir: '',
       crlDir: '',
       clientURI: '',
-      rootNodeId: '84',
-      rootNodeNs: 0,
     };
     this.servers.update(list => [...list, newServer]);
     this.selectServer(newServer);
@@ -603,8 +581,6 @@ export class SettingsModalComponent {
       trustDir: validServers[0]?.trustDir || '',
       crlDir: validServers[0]?.crlDir || '',
       clientURI: validServers[0]?.clientURI || '',
-      rootNodeId: validServers[0]?.rootNodeId || '84',
-      rootNodeNs: validServers[0]?.rootNodeNs || 0,
     });
 
     setTimeout(() => this.closed.emit(), 500);
