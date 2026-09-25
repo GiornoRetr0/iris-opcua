@@ -118,7 +118,7 @@ sequenceDiagram
         SS->>SS: GenerateSerialClasses(class, ns, .folders, .out)
         SS->>DICT: %Dictionary.ClassDefinition (%SerialObject)<br/>%Save + OBJ.Compile  (per folder)
     end
-    Note over SS: build main class extending<br/>(%Persistent, OPCUA.DataSource.DeviceSchema):<br/>NodePath, ServerTimeStamp, SourceTimeStamp<br/>+ one column each (MapToPlainType: Integer→%Integer,<br/>Double→%Double, array→%String JSON, unset→%String)
+    Note over SS: build main class extending<br/>(%Persistent, OPCUA.DataSource.DeviceSchema):<br/>NodePath (no row-level timestamps)<br/>+ one column each (MapToDataValueType: Integer→OPCUA.Types.IntegerDataValue,<br/>Double→DoubleDataValue, array→ArrayDataValue.*, unset→StringDataValue)<br/>each carrying Value + Status + SourceTimeStamp + ServerTimeStamp
     SS->>DICT: tClassDef.%Save()
     SS->>DICT: $System.OBJ.Compile(class, "ck-d")
     activate DICT
@@ -194,6 +194,7 @@ sequenceDiagram
     participant CL as OPCUA.Client
     participant CPP as $ZF(-5) → C++ → server
     participant RES as DataSource.Resolver
+    participant RW as DataSource.RowWriter
     participant CFG as Ens.Config.Item settings
     participant GD as ^OPCUA.DataSource
     participant SQL as SQL table
@@ -207,9 +208,12 @@ sequenceDiagram
 
     ENS->>SVC: OnInit()
     activate SVC
-    SVC->>SVC: %Dictionary.CompiledClass.%OpenId(class)<br/>→ discover alphabetical storage positions
-    SVC->>GD: Projection.GetOPCUAConfigSpec(class)<br/>(returns ^OPCUA.DataSource(cls))
-    SVC->>RES: DeriveNestingSpec(class)<br/>walks storage order — nothing stored
+    SVC->>RW: RowWriter.Initialize(DataSourceClass)
+    activate RW
+    RW->>RW: %Dictionary.CompiledClass.%OpenId(class)<br/>→ discover alphabetical storage positions
+    RW->>GD: Projection.GetOPCUAConfigSpec(class)<br/>(returns ^OPCUA.DataSource(cls))<br/>per-column code: 2 = full DataValue, 1 = legacy plain
+    RW->>RES: DeriveNestingSpec(class)<br/>walks storage order — nothing stored
+    deactivate RW
     Note over SVC: devices are NOT resolved here — that needs a<br/>live session, so it happens in Connect() below
     deactivate SVC
 
@@ -238,11 +242,13 @@ sequenceDiagram
         AD->>SVC: BusinessHost.ProcessInput(.tList)
         activate SVC
         loop each device (row source)
-            Note over SVC: walk columns by mask, extract leaf values<br/>+ capture serverTS / sourceTS from first DataValue
+            SVC->>RW: RowWriter.BuildRow(.tList, mask, nodePath, .resultIdx, .row)
+            Note over RW: walk columns by mask, keeping each<br/>measurement's whole DataValue<br/>$LB(srcTS, srvTS, status, value)
             opt nestingSpec present
-                SVC->>SVC: BuildNestedValues(nestingSpec, .leafValues)<br/>(recursive: leaf vs serial sub-$LB)
+                RW->>RW: BuildNestedValues(nestingSpec, .leafValues)<br/>(recursive: leaf vs serial sub-$LB)
             end
-            Note over SVC: place values at compiled storage positions →<br/>$LB("", nodePath, serverTS, sourceTS, v1, v2, ...)
+            Note over RW: place values at compiled storage positions →<br/>$LB("", nodePath, dv1, dv2, ...)
+            RW-->>SVC: row
             SVC->>SQL: $CLASSMETHOD(class, "SaveSourcedData", .tRowData)
             Note over SQL: $Increment(global) → one row per device
         end

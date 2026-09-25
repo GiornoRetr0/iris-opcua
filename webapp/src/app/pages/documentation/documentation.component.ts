@@ -234,6 +234,19 @@ import { CommonModule } from '@angular/common';
               columns in SQL.
             </p>
             <p class="text-on-surface-variant mb-8 leading-relaxed">
+              Every column keeps the full measurement OPC UA returned, so a column called
+              <code class="font-mono text-primary text-sm">Temperature</code> becomes four SQL fields:
+              <code class="font-mono text-primary text-sm">Temperature_Value</code>,
+              <code class="font-mono text-primary text-sm">Temperature_Status</code>,
+              <code class="font-mono text-primary text-sm">Temperature_SourceTimeStamp</code> and
+              <code class="font-mono text-primary text-sm">Temperature_ServerTimeStamp</code>. Each
+              reading therefore carries its own quality code and its own timestamps, rather than
+              sharing one pair with the rest of the row. Query
+              <code class="font-mono text-primary text-sm">Temperature_Value</code> for the number
+              itself, and <code class="font-mono text-primary text-sm">Temperature_Status</code> when
+              you need to know whether the server considered it trustworthy.
+            </p>
+            <p class="text-on-surface-variant mb-8 leading-relaxed">
               Columns cannot be changed afterwards. Adding one means creating a new schema, because
               the alternative is rewriting a table that already holds rows. Deleting a schema
               <strong class="font-semibold">drops its table and every row in it</strong>, and is

@@ -369,7 +369,7 @@ ClassMethod GenerateSchemaClass(pClassName As %String, pDataSourceName As %Strin
 		}
 
 		set tClassDef = ##class(%Dictionary.ClassDefinition).%New(pClassName)
-		set tClassDef.Description = "Auto-generated OPC UA DataSource class (v2 row-source model)."
+		set tClassDef.Description = "Auto-generated OPC UA device schema with per-measurement value, quality and timestamps."
 		// Extend DeviceSchema (not Definition) so the class is discoverable by the
 		// DataSourceClass dropdown, which filters on this superclass.
 		set tClassDef.Super = "%Persistent,OPCUA.DataSource.DeviceSchema"
@@ -378,22 +378,13 @@ ClassMethod GenerateSchemaClass(pClassName As %String, pDataSourceName As %Strin
 		do ..AddParameter(tClassDef, "OPCUDEFAULTANAMESPACE", pDefaultNS)
 		do ..AddParameter(tClassDef, "OPCUAPIPELINEVERSION", 2)
 
-		// Row metadata properties
+		// Device identity is row-level; timestamps and status belong to each measurement.
 		set tProp = ##class(%Dictionary.PropertyDefinition).%New()
 		set tProp.Name = "NodePath"
 		set tProp.Type = "%String"
 		do tProp.Parameters.SetAt(500, "MAXLEN")
 		do tClassDef.Properties.Insert(tProp)
 
-		set tProp = ##class(%Dictionary.PropertyDefinition).%New()
-		set tProp.Name = "ServerTimeStamp"
-		set tProp.Type = "%TimeStamp"
-		do tClassDef.Properties.Insert(tProp)
-
-		set tProp = ##class(%Dictionary.PropertyDefinition).%New()
-		set tProp.Name = "SourceTimeStamp"
-		set tProp.Type = "%TimeStamp"
-		do tClassDef.Properties.Insert(tProp)
 
 		// Column properties
 		kill tEmittedFolders, tUsedNames
@@ -418,7 +409,7 @@ ClassMethod GenerateSchemaClass(pClassName As %String, pDataSourceName As %Strin
 				do tProp.Parameters.SetAt(tFolderName, "OPCUANODENAME")
 				do tClassDef.Properties.Insert(tProp)
 			} else {
-				set tType = ..MapToPlainType(tInferredType)
+				set tType = ..MapToDataValueType(tInferredType)
 				set tChildNS = $Get(pColNamespaces(i), pDefaultNS)
 				set tLeafName = tDisplayName
 				if $IsObject($Get(tRelPath)) && (tRelPath.%Size() = 1) {
@@ -480,7 +471,7 @@ ClassMethod GenerateSerialClasses(pMainClassName As %String, pDefaultNS As %Inte
 			for i=0:1:tColumns.%Size()-1 {
 				set tSubCol = tColumns.%Get(i)
 				set tLeafName = tSubCol.%Get("leafName")
-				set tType = ..MapToPlainType(tSubCol.%Get("inferredType"))
+				set tType = ..MapToDataValueType(tSubCol.%Get("inferredType"))
 				set tPropName = ##class(OPCUA.DataSource.Generator).SanitizePropertyName(tLeafName, .tUsedNames)
 
 				set tProp = ##class(%Dictionary.PropertyDefinition).%New()
@@ -527,21 +518,25 @@ ClassMethod SerialClassName(pMainClassName As %String, pFolderName As %String) A
 	Quit pMainClassName_"."_tIdent_"Type"
 }
 
-/// Map OPCUA.Types.*DataValue to plain IRIS types for v2 flat columns.
-ClassMethod MapToPlainType(pInferredType As %String) As %String
+/// Preserve the OPC UA DataValue wrapper, including its status and timestamps.
+/// Plain type aliases remain accepted in API requests, but produce wrappers too.
+/// Unknown/unprobed types keep the existing string fallback.
+ClassMethod MapToDataValueType(pInferredType As %String) As %String
 {
-	if pInferredType = "" Quit "%String"
-	if pInferredType = "OPCUA.Types.DoubleDataValue" Quit "%Double"
-	if pInferredType = "OPCUA.Types.IntegerDataValue" Quit "%Integer"
-	if pInferredType = "OPCUA.Types.BooleanDataValue" Quit "%Boolean"
-	if pInferredType = "OPCUA.Types.TimeStampDataValue" Quit "%TimeStamp"
-	if pInferredType = "OPCUA.Types.StringDataValue" Quit "%String"
-	// Array types → store as string (JSON)
-	if pInferredType [ "ArrayDataValue" Quit "%String(MAXLEN=32000)"
-	// Already a plain type (e.g., %Double passed directly)
-	if $Extract(pInferredType, 1) = "%" Quit pInferredType
-	// Default fallback
-	Quit "%String"
+	if $Extract(pInferredType, 1, 12) = "OPCUA.Types." {
+		if ##class(%Dictionary.CompiledClass).%ExistsId(pInferredType) {
+			if (pInferredType '= "OPCUA.Types.AbstractDataValue") && $classmethod(pInferredType, "%Extends", "OPCUA.Types.AbstractDataValue") {
+				Quit pInferredType
+			}
+		}
+	}
+	if pInferredType = "%Double" Quit "OPCUA.Types.DoubleDataValue"
+	if pInferredType = "%Numeric" Quit "OPCUA.Types.DoubleDataValue"
+	if pInferredType = "%Float" Quit "OPCUA.Types.FloatDataValue"
+	if pInferredType = "%Integer" Quit "OPCUA.Types.IntegerDataValue"
+	if pInferredType = "%Boolean" Quit "OPCUA.Types.BooleanDataValue"
+	if pInferredType = "%TimeStamp" Quit "OPCUA.Types.TimeStampDataValue"
+	Quit "OPCUA.Types.StringDataValue"
 }
 
 /// Find the most common namespace among a set of nodes (or columns).

@@ -26,8 +26,9 @@ interface DraftColumn {
   nodeId: string | number;
   nodeIdType: number;
   /**
-   * `OPCUA.Types.*` name from reading the template node's value. The backend maps
-   * it to a real property type; absent means it falls back to %String.
+   * `OPCUA.Types.*` name from reading the template node's value. The backend
+   * stores the column as that measurement class, so the value arrives with its
+   * own quality and timestamps; absent means it falls back to a text measurement.
    */
   inferredType?: string;
   /** Set once a type probe has finished, successfully or not. */
@@ -35,10 +36,16 @@ interface DraftColumn {
   key: string;
 }
 
-/** Short label for a column's storage type, for the draft list. */
+/**
+ * Short label for a column's value type, for the draft list.
+ *
+ * This names the *value* only. Every column also stores that value's status,
+ * source timestamp and server timestamp, so the SQL table carries four fields
+ * per column rather than one.
+ */
 function typeLabel(inferredType?: string): string {
   if (!inferredType) return 'text';
-  if (inferredType.includes('ArrayDataValue')) return 'array → text';
+  if (inferredType.includes('ArrayDataValue')) return 'array';
   const m = /OPCUA\.Types\.(\w+?)DataValue/.exec(inferredType);
   if (!m) return 'text';
   switch (m[1]) {
@@ -699,9 +706,9 @@ export class SchemaBuilderComponent implements OnInit {
    * Resolve types for every column that doesn't have one yet, then return the
    * completed list.
    *
-   * A failed read leaves inferredType undefined, which the backend maps to
-   * %String — the same outcome as before, so a partially unreadable device still
-   * produces a usable schema rather than blocking the save.
+   * A failed read leaves inferredType undefined, which the backend stores as a
+   * text measurement — so a partially unreadable device still produces a usable
+   * schema rather than blocking the save.
    */
   private ensureTypes(): Observable<DraftColumn[]> {
     const pending = this.columns().filter((c) => !c.typeProbed);

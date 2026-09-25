@@ -208,7 +208,7 @@ DataSource classes are created in **two ways**, depending on where they come fro
 
 **Hand-authored (declarative):** the Examples and the `OPCUA.Tests` harness ship `.cls` files that extend `(%Persistent, OPCUA.DataSource.Definition)` and declare one typed `OPCUA.Types.*` property per node. These run under `TCPPollingService` / `TCPSubscriptionService` and exist to validate the C++ type marshalling. They are *not* generated.
 
-**Generated (device schemas):** `SchemaService.GenerateSchemaClass()` builds the class **in memory** via the `%Dictionary` API (`%Dictionary.ClassDefinition` + `%Dictionary.PropertyDefinition`), then calls `$System.OBJ.Compile()`. Nested folders are emitted first as `%SerialObject` subclasses (`GenerateSerialClasses()`). Columns are flattened to plain IRIS types (`MapToPlainType()`), not the `OPCUA.Types.*` wrappers.
+**Generated (device schemas):** `SchemaService.GenerateSchemaClass()` builds the class **in memory** via the `%Dictionary` API (`%Dictionary.ClassDefinition` + `%Dictionary.PropertyDefinition`), then calls `$System.OBJ.Compile()`. Nested folders are emitted first as `%SerialObject` subclasses (`GenerateSerialClasses()`). Columns are typed as the `OPCUA.Types.*` measurement classes (`MapToDataValueType()`), the same wrappers the hand-authored DataSources use, so each column keeps its own value, status, source timestamp and server timestamp. There is deliberately **no** row-level timestamp pair: a shared pair cannot describe measurements that the server stamped at different moments.
 
 Generated schemas extend `OPCUA.DataSource.DeviceSchema` (itself an abstract subclass of `Definition`). That common superclass is what lets the `DataSourceClass` production setting render as a dropdown of exactly the classes the row-source services can consume — the hand-authored Examples don't appear in it.
 
@@ -695,7 +695,7 @@ The **nesting spec** describes this tree structure so the v2 runtime services kn
 - `$LB("leaf", index)` -- a direct value at a specific position
 - `$LB("serial", folderName, innerSpec...)` -- a nested object with its own entries
 
-`BuildNestedValues()` in the row source services recursively walks this spec to assemble the proper nested `$LB` structure.
+`RowWriter.BuildNestedValues()` recursively walks this spec to assemble the proper nested `$LB` structure. A folder's inner `$LB` holds each measurement's own serialized DataValue, so a nested column reads back as `row.Motor.Temperature.Value`.
 
 ---
 
@@ -884,13 +884,25 @@ Here's the complete journey of a data point from an OPC UA server to a SQL query
     - C++ packs into $LB and returns to ObjectScript
 
 14. Adapter passes result to TCPPollingRowSourceService.OnProcessInput():
-    - Splits the flat result by row source / column mask, then for each row source
-      calls OPCUA.DS.MyData.SaveSourcedData($LB("", nodePath, serverTS, sourceTS, 20.5, 65.2))
+    - Hands the flat result to OPCUA.DataSource.RowWriter, which splits it by
+      row source / column mask and builds one row per device, keeping each
+      measurement's DataValue intact:
+      SaveSourcedData($LB("", nodePath,
+                          $LB(srcTS, srvTS, 0, 20.5),     <- Temperature
+                          $LB(srcTS, srvTS, 0, 65.2)))    <- Humidity
     - SaveSourcedData() creates one row per row source per poll
+    - Both row-source services share this writer, so polling and subscriptions
+      cannot disagree about what a stored measurement contains
 
-15. Data is now queryable (v2 stores plain values + a NodePath column):
-    SELECT NodePath, Temperature, Humidity FROM OPCUA_DS.MyData
-    -> Objects, 20.5, 65.2
+15. Data is now queryable. Each column contributes four SQL fields:
+    SELECT NodePath,
+           Temperature_Value, Temperature_Status, Temperature_SourceTimeStamp,
+           Humidity_Value,    Humidity_Status,    Humidity_SourceTimeStamp
+      FROM OPCUA_DS.MyData
+    -> Objects, 20.5, 0, 2026-01-01 10:00:01, 65.2, 0, 2026-01-01 10:00:01
+
+    Object access reaches the same data as nested properties:
+    row.Temperature.Value / .Status / .SourceTimeStamp / .ServerTimeStamp
 ```
 
 ---
