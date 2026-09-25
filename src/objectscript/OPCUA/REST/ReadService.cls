@@ -1,6 +1,6 @@
 Include (OPCUA.Constants, %occInclude)
 
-/// Read a single OPC UA node value and return as JSON with type inference.
+/// Read a single OPC UA node value and return as JSON, typed from the node's DataType.
 Class OPCUA.REST.ReadService
 {
 
@@ -116,12 +116,12 @@ ClassMethod SafeReadValue(pClient As OPCUA.Client, pNodeId, pNodeNS As %Integer,
 	Quit tSC
 }
 
-/// Safely infer the OPCUA type, catching any exceptions.
+/// Safely type the node from its DataType attribute, catching any exceptions.
 ClassMethod SafeInferType(pClient As OPCUA.Client, pNodeNS As %Integer, pNodeId, pNodeIdType As %Integer) As %String
 {
 	set tType = ""
 	Try {
-		set tType = ##class(OPCUA.DataSource.Generator).InferTypeFromValue(pClient, pNodeNS, pNodeId, pNodeIdType)
+		set tType = ##class(OPCUA.DataSource.Generator).InferType(pClient, pNodeNS, pNodeId, pNodeIdType)
 	} Catch (e) {
 		// Fall back to empty (caller defaults to StringDataValue)
 	}

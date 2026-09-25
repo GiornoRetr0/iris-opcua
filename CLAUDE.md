@@ -35,6 +35,7 @@ printf 'zn "OPCUA"\n<your commands>\nhalt\n' | docker exec -i iris-opcua-iris-1 
 printf 'zn "OPCUA"\nw ##class(OPCUA.Tests.ResolverTest).Run()\nhalt\n' | docker exec -i iris-opcua-iris-1 iris session iris
 printf 'zn "OPCUA"\nw ##class(OPCUA.Tests.PortalPipelineTest).Run()\nhalt\n' | docker exec -i iris-opcua-iris-1 iris session iris
 printf 'zn "OPCUA"\nw ##class(OPCUA.Tests.MeasurementMetadataTest).Run()\nhalt\n' | docker exec -i iris-opcua-iris-1 iris session iris
+printf 'zn "OPCUA"\nw ##class(OPCUA.Tests.TypeInferenceTest).Run()\nhalt\n' | docker exec -i iris-opcua-iris-1 iris session iris
 
 # Check production status
 printf 'zn "OPCUA"\ndo ##class(Ens.Director).GetProductionStatus(.p,.s) write p," ",s,!\nhalt\n' | docker exec -i iris-opcua-iris-1 iris session iris
@@ -81,7 +82,7 @@ SQL Explorer: http://localhost:52783/csp/sys/exp/%25CSP.UI.Portal.SQL.Home.zen?$
 
 ## Key Design Constraints
 
-- **Everything runs in the `OPCUA` namespace.** There is no `APPINT` namespace in this compose setup, so `OPCUA.Tests.DataTest` (which also needs the certified server) cannot pass here. For a regression gate, poll the local `plc` server and assert rows land with real values; `OPCUA.Tests.ResolverTest`, `PortalPipelineTest` and `MeasurementMetadataTest` run against `plc` and do pass.
+- **Everything runs in the `OPCUA` namespace.** There is no `APPINT` namespace in this compose setup, so `OPCUA.Tests.DataTest` (which also needs the certified server) cannot pass here. For a regression gate, poll the local `plc` server and assert rows land with real values; `OPCUA.Tests.ResolverTest`, `PortalPipelineTest` and `MeasurementMetadataTest` run against `plc` and do pass; `TypeInferenceTest` also uses the `certified-server` (its demo nodes cover every built-in type).
 - **Schema creation and device binding are separate, deliberately.** `POST /schemas` generates a schema class with **no** production side effects; `POST /deploy` binds devices to an existing schema and **generates nothing**. Do not reintroduce a combined create-and-deploy path — the split is a requirement, not an accident.
 - **A schema is reusable and outlives its pipelines.** Several pipelines may share one. Deleting a pipeline must never delete its schema; `SchemaService.Delete` is the only deletion path and it refuses while any pipeline references the schema.
 - **Devices are resolved by name at connect time**, never frozen at deploy time. `DeviceNodePaths` is an ordinary production setting, so adding a device is a one-line edit with no regeneration and no recompile. Nothing about devices is stored — masks and node IDs are derived by browsing on every (re)connect.
@@ -90,6 +91,7 @@ SQL Explorer: http://localhost:52783/csp/sys/exp/%25CSP.UI.Portal.SQL.Home.zen?$
 - **Every pipeline uses the row-source services** (`TCP*RowSourceService`): columns × devices → one table, one row per device per cycle. The hand-authored Examples + `OPCUA.Tests` classes are a separate declarative path (typed `OPCUA.Types.*` properties → `TCPPollingService`/`TCPSubscriptionService`) kept for the test harness — **do not regress it**.
 - **Adapters must connect before resolving.** `ResolveSpecification()` browses the server, so it needs a live session; both adapters call `##super()` first, then resolve, then prepare the query. This ordering is load-bearing.
 - **A measurement is value + status + source timestamp + server timestamp**, and generated schemas store all four per column by typing each column as an `OPCUA.Types.*DataValue`. SQL therefore exposes `Temperature_Value`, `Temperature_Status`, `Temperature_SourceTimeStamp`, `Temperature_ServerTimeStamp`. There is no row-level timestamp pair. Do not map columns back to plain IRIS types — that is what made the two storage models disagree.
+- **Column types come from the node's declared DataType + ValueRank**, not from its value (`Generator.InferType()`). The native single-attribute read supports only Value (and returns arrays as null), so these attributes are read with a one-shot `ReadBulkSetupC` / `ReadBulkPollC` / `ReadBulkClear`. Keep the Value out of that query: an unconvertible value (Guid, ExtensionObject) fails the whole poll. The value-pattern guess is only the fallback for unknown DataTypes.
 - **Row assembly has exactly one implementation**, `OPCUA.DataSource.RowWriter`. Polling and subscription services both delegate to it. Do not fork it back into the services.
 - **`%SerialObject` subclasses** are generated for nested folder hierarchies and appear as `Property_SubProperty` columns in SQL. A folder serial object holds DataValue serial objects, so a nested measurement reads as `row.Motor.Temperature.Value`.
 - **The Projection** (`OPCUA.DataSource.Projection`) fires on every DataSource class compile, writes `^OPCUA.DataSource(className)`, and generates `SaveSourcedData()`. The runtime services depend entirely on this global.

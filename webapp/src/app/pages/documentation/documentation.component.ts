@@ -229,7 +229,7 @@ import { CommonModule } from '@angular/common';
             <p class="text-on-surface-variant mb-8 leading-relaxed">
               The device you browse is only a <strong class="font-semibold">template</strong>. Its node
               IDs are never stored — they exist to tell the console what this type of device looks
-              like. Column types are inferred by reading each node once, and ticking nodes inside a
+              like. Each column's type is the data type the server declares for that node, and ticking nodes inside a
               sub-folder produces nested <code class="font-mono text-primary text-sm">Parent_Child</code>
               columns in SQL.
             </p>

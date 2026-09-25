@@ -161,15 +161,30 @@ Each extends AbstractDataValue and adds a `Value` property:
 
 ### Type inference
 
-When generating a DataSource class, the system reads a sample value from the OPC UA server and guesses the right type:
+A column's type is what the server **declares** for the node, not a guess from
+its current value. `OPCUA.DataSource.Generator.InferType()` reads two attributes:
 
-1. Looks like `YYYY-MM-DD HH:MM:SS`? -> `TimeStampDataValue`
-2. All digits (with optional minus)? -> `IntegerDataValue`
-3. Has decimal point or scientific notation? -> `DoubleDataValue`
-4. Is a `$List` (binary list)? -> appropriate `ArrayDataValue`
-5. Fallback -> `StringDataValue`
+1. **DataType** (attribute 14) — which type: 1 = Boolean, 2–9 = integers,
+   10 = Float, 11 = Double, 12 = String, 13 = DateTime, plus XmlElement,
+   NodeId, StatusCode, QualifiedName, LocalizedText and a few common standard
+   subtypes (Duration, UtcTime, ...).
+2. **ValueRank** (attribute 15) — which shape: -1 scalar, 1 array, >1 matrix.
+   A server may leave it open (-2 Any, -3 ScalarOrOneDimension); only then is
+   the value read, to see whether it is a list.
 
-This happens in `OPCUA.DataSource.Generator.InferTypeFromValue()`.
+`MapDataTypeToIRIS()` turns the pair into a class: a scalar `*DataValue`, an
+`ArrayDataValue.*`, or `Multidimensional` for a matrix.
+
+The native layer's single-attribute read supports only the Value attribute, so
+the two are fetched as a one-shot bulk query (`ReadBulkSetupC` → one
+`ReadBulkPollC` → `ReadBulkClear`), the same mechanism polling uses. The query
+leaves the Value out on purpose: a value the native layer cannot convert (a
+Guid, an ExtensionObject) fails the whole poll.
+
+The old value-pattern guess, `InferTypeFromValue()`, remains only as the
+fallback for a DataType the map does not know — a vendor-defined type in
+another namespace, say — and for node ids a bulk spec cannot express (a string
+id made only of digits, GUID and ByteString ids).
 
 ---
 

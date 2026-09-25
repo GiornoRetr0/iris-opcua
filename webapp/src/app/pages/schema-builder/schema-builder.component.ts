@@ -46,6 +46,7 @@ interface DraftColumn {
 function typeLabel(inferredType?: string): string {
   if (!inferredType) return 'text';
   if (inferredType.includes('ArrayDataValue')) return 'array';
+  if (inferredType === 'OPCUA.Types.Multidimensional') return 'matrix';
   const m = /OPCUA\.Types\.(\w+?)DataValue/.exec(inferredType);
   if (!m) return 'text';
   switch (m[1]) {

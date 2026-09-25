@@ -169,7 +169,7 @@ You do not need to start with the native library or the thousand-line security i
 
 The generated multi-device schemas use the two `RowSourceService` classes instead. Forcing both data models into one universal service could create more branching than it removes. Share proven common mechanics, but preserve both public entry paths.
 
-[Generator.cls](../src/objectscript/OPCUA/DataSource/Generator.cls) is a terminal tool that generates declarative class files. It is not the web schema generator. Two of its helpers, `InferTypeFromValue()` and `SanitizePropertyName()`, are also used by the web path. It therefore cannot simply be deleted as old code.
+[Generator.cls](../src/objectscript/OPCUA/DataSource/Generator.cls) is a terminal tool that generates declarative class files. It is not the web schema generator. Two of its helpers, `InferType()` and `SanitizePropertyName()`, are also used by the web path. It therefore cannot simply be deleted as old code.
 
 ## 5. What “preserve functionality” means
 

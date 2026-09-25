@@ -3,9 +3,9 @@ Include (OPCUA.Constants, Ensemble)
 /// Auto-generates DataSource class definitions by browsing an OPC UA server.
 /// Connects to the server, walks the node tree depth-first from a start node,
 /// and produces a ready-to-use .cls file with properties mapped to discovered
-/// variable nodes. Types are inferred by reading each node's current value
-/// (integer, double, boolean, timestamp, string, or array variants).
-/// Review the generated file and adjust any types that could not be determined.
+/// variable nodes. Types come from each node's DataType and ValueRank attributes
+/// (see <method>InferType</method>). Review the generated file and adjust any
+/// types that could not be determined.
 ///
 /// <b>Terminal-only, and not part of the pipeline path.</b> This writes a
 /// <class>OPCUA.DataSource.Definition</class> subclass to a .cls file for a human
@@ -17,7 +17,7 @@ Include (OPCUA.Constants, Ensemble)
 /// its only consumer.
 ///
 /// Two of its helpers are still on the live path and must not be moved:
-/// <method>InferTypeFromValue</method> (used by <class>OPCUA.REST.ReadService</class>
+/// <method>InferType</method> (used by <class>OPCUA.REST.ReadService</class>
 /// to type a column) and <method>SanitizePropertyName</method> (used by
 /// <class>OPCUA.REST.SchemaService</class> to turn OPC UA names into legal
 /// property identifiers).
@@ -224,29 +224,159 @@ ClassMethod ClassifyByTypeDef(pTypeDef As %List) As %String
 	Quit tResult
 }
 
-/// Add a variable node to the collection. Infers the IRIS type by reading
-/// the node's current value.
+/// Add a variable node to the collection, typed from the server's own
+/// DataType attribute.
 ClassMethod ProcessVariableNode(pClient As OPCUA.Client, pNodeNS As %Integer, pNodeId, pNodeIdType As %Integer, pDisplayName As %String, ByRef pNodes, ByRef pNodeCount As %Integer) [ Private ]
 {
-	set tType = ..InferTypeFromValue(pClient, pNodeNS, pNodeId, pNodeIdType)
+	set tType = ..InferType(pClient, pNodeNS, pNodeId, pNodeIdType)
 	set pNodeCount = $Get(pNodeCount, 0) + 1
 	set pNodes(pNodeCount) = $LB(pNodeNS, pNodeId, pNodeIdType, pDisplayName, tType)
 }
 
-/// Map an OPC UA data type NodeId (ns=0) to an OPCUA.Types class name.
-/// For future use when C++ layer supports reading the DataType attribute.
-ClassMethod MapDataTypeToIRIS(pTypeNodeId As %Integer) As %String
+/// Type a node from what the server declares about it, rather than from what
+/// its current value happens to look like.
+///
+/// Reads two attributes of the node: DataType (14), which names the type, and
+/// ValueRank (15), which says scalar, array or matrix. That settles the cases a
+/// value cannot: the native layer renders a Boolean as 0/1 like any integer,
+/// and a Double of 0.0 as "0". The value is read only when the server leaves the
+/// shape open (ValueRank Any / ScalarOrOneDimension), and the old value-based
+/// guess, <method>InferTypeFromValue</method>, is used only for a DataType that
+/// <method>MapDataTypeToIRIS</method> does not know -- a vendor-defined type, say.
+///
+/// The single-attribute read in the native layer supports only the Value
+/// attribute, so the attributes are fetched as a one-shot bulk query
+/// (<method>ReadAttributesOnce</method>). DataType and ValueRank share one query
+/// and the Value, when needed, gets its own: a value of a type the native layer
+/// cannot convert (a Guid, an ExtensionObject) fails the whole poll, while
+/// DataType and ValueRank are always a NodeId and an integer.
+ClassMethod InferType(pClient As OPCUA.Client, pNodeNS As %Integer, pNodeId, pNodeIdType As %Integer) As %String
 {
-	if pTypeNodeId = 1 Quit "OPCUA.Types.BooleanDataValue"
-	if (pTypeNodeId >= 2) && (pTypeNodeId <= 9) Quit "OPCUA.Types.IntegerDataValue"
-	if pTypeNodeId = 10 Quit "OPCUA.Types.FloatDataValue"
-	if pTypeNodeId = 11 Quit "OPCUA.Types.DoubleDataValue"
-	if pTypeNodeId = 12 Quit "OPCUA.Types.StringDataValue"
-	if pTypeNodeId = 13 Quit "OPCUA.Types.TimeStampDataValue"
-	Quit "OPCUA.Types.StringDataValue"
+	set tType = ""
+	// A bulk specification identifies a node by a bare string, and the native
+	// layer treats one made of digits as a numeric id. A string id that is all
+	// digits, a GUID or a ByteString therefore cannot be asked about this way.
+	set tProbeable = (pNodeIdType = $$$OpcuaNodeIdTypeNumeric) || ((pNodeIdType = $$$OpcuaNodeIdTypeString) && '$Match(pNodeId, "^\d+$"))
+	if tProbeable && ..ReadTypeAttributes(pClient, pNodeNS, pNodeId, .tDataType, .tValueRank) {
+		// ValueRank: -1 scalar, 1 array, >1 matrix, 0 one or more dimensions;
+		// -2 (Any) and -3 (ScalarOrOneDimension) leave it to the value.
+		set tDims = $Select(tValueRank >= 0:$Select(tValueRank = 0:1, 1:tValueRank), tValueRank = -1:0, 1:..ValueDimensions(pClient, pNodeNS, pNodeId))
+		set tType = ..MapDataTypeToIRIS(tDataType, tDims)
+	}
+	Quit $Select(tType '= "":tType, 1:..InferTypeFromValue(pClient, pNodeNS, pNodeId, pNodeIdType))
 }
 
-/// Infer the IRIS OPCUA.Types class by reading the node's current value.
+/// Fetch a node's DataType and ValueRank. Returns 0 if either is unavailable --
+/// the node does not exist, or is not a variable. pDataType is the numeric id of
+/// a namespace-0 type, or "" for a type defined in another namespace.
+ClassMethod ReadTypeAttributes(pClient As OPCUA.Client, pNodeNS As %Integer, pNodeId, Output pDataType, Output pValueRank) As %Boolean [ Private ]
+{
+	set (pDataType, pValueRank) = ""
+	Quit:'..ReadAttributesOnce(pClient, pNodeNS, pNodeId, $LB($$$OpcuaAttributeDataType, $$$OpcuaAttributeValueRank), .tResults) 0
+	// A missing attribute is "", not a DataValue. DataType arrives as a NodeId
+	// inlined into its DataValue:
+	// $LB(sourceTS, serverTS, status, namespace, identifier, identifierType, ...)
+	set tDT = $ListGet(tResults, 1)
+	set tVR = $ListGet(tResults, 2)
+	Quit:'$ListValid(tDT)||($ListLength(tDT) < 5)||'$ListValid(tVR)||($ListLength(tVR) < 4) 0
+	// A node the attribute does not apply to answers with a bad status.
+	Quit:($ListGet(tDT, 3) '= 0)||($ListGet(tVR, 3) '= 0) 0
+	set pDataType = $Select($ListGet(tDT, 4) = 0:$ListGet(tDT, 5), 1:"")
+	set pValueRank = $ListGet(tVR, 4)
+	Quit (pValueRank '= "")
+}
+
+/// Number of dimensions the node's current value actually has: 0 for a scalar,
+/// 1 for an array, 2 for a matrix. Used only when ValueRank leaves it open.
+/// A value that cannot be read counts as a scalar.
+///
+/// This cannot use <method>OPCUA.Client.ReadValueAttribute</method>: the native
+/// single read returns an array value as null. The bulk read returns it intact.
+ClassMethod ValueDimensions(pClient As OPCUA.Client, pNodeNS As %Integer, pNodeId) As %Integer [ Private ]
+{
+	Quit:'..ReadAttributesOnce(pClient, pNodeNS, pNodeId, $LB($$$OpcuaAttributeValue), .tResults) 0
+	// $LB(sourceTS, serverTS, status, value[, dimensions])
+	set tDV = $ListGet(tResults, 1)
+	Quit:'$ListValid(tDV)||($ListLength(tDV) < 4) 0
+	set tValue = $ListGet(tDV, 4)
+	// An empty String reads back as an empty list, so only a non-empty list is an array.
+	Quit:'$ListValid(tValue)||($ListLength(tValue) = 0) 0
+	Quit $Select($ListValid($ListGet(tValue, 1)) && ($ListGet(tValue, 1) '= ""):2, 1:1)
+}
+
+/// Read some attributes of one node as a one-shot bulk query: ReadBulkSetupC,
+/// one ReadBulkPollC, ReadBulkClear. pResults holds one entry per attribute in
+/// pAttributes, "" for any the server did not return. Returns 0 if the query
+/// itself failed -- including when a value cannot be converted, which fails
+/// the whole poll, so callers keep attributes that might not convert in a
+/// query of their own.
+ClassMethod ReadAttributesOnce(pClient As OPCUA.Client, pNodeNS As %Integer, pNodeId, pAttributes As %List, Output pResults As %List) As %Boolean [ Private ]
+{
+	set pResults = ""
+	set tEntries = $LB("")
+	for i=1:1:$ListLength(pAttributes) {
+		set tEntries = tEntries _ $LB($LB(2, "[TypeProbe].A"_$List(pAttributes, i), pNodeNS, pNodeId, $List(pAttributes, i)))
+	}
+	set tSpec = $LB("TypeProbe", "", tEntries)
+	set tHandle = ""
+	set tOK = 0
+	Try {
+		Quit:$$$ISERR(pClient.ReadBulkSetupC(.tHandle, .tSpec))
+		Quit:$$$ISERR(pClient.ReadBulkPollC(.tPoll, tHandle))
+		// $LB(errCode, result1, result2, ...)
+		set pResults = $List(tPoll, 2, *)
+		set tOK = 1
+	} Catch (e) {
+		set tOK = 0
+	}
+	if tHandle '= "" {
+		Try { do pClient.ReadBulkClear(tHandle) } Catch (eClear) {}
+	}
+	Quit tOK
+}
+
+/// Map an OPC UA DataType to an OPCUA.Types class. pTypeNodeId is the numeric
+/// id of a namespace-0 type (1 = Boolean ... 13 = DateTime, 21 = LocalizedText).
+/// pDimensions is 0 for a scalar, 1 for an array, 2+ for a matrix.
+/// Returns "" for a type this does not know, so the caller can fall back.
+ClassMethod MapDataTypeToIRIS(pTypeNodeId As %Integer, pDimensions As %Integer = 0) As %String
+{
+	// A few standard subtypes that servers commonly declare instead of their base:
+	// Duration, UtcTime, IntegerId, Counter, VersionTime, Enumeration (an Int32
+	// on the wire), LocaleId, and the Normalized/Decimal/Duration/Time/DateString
+	// string types.
+	set tBase = pTypeNodeId
+	if pTypeNodeId = 290 { set tBase = 11 }
+	elseif pTypeNodeId = 294 { set tBase = 13 }
+	elseif (pTypeNodeId = 288) || (pTypeNodeId = 289) || (pTypeNodeId = 20998) { set tBase = 7 }
+	elseif pTypeNodeId = 29 { set tBase = 6 }
+	elseif (pTypeNodeId = 295) || ((pTypeNodeId >= 12877) && (pTypeNodeId <= 12881)) { set tBase = 12 }
+
+	// Scalar class, and the array class where one exists.
+	if tBase = 1 { set tScalar = "BooleanDataValue", tArray = "Boolean" }
+	elseif (tBase >= 2) && (tBase <= 9) { set tScalar = "IntegerDataValue", tArray = "Integer" }
+	elseif tBase = 10 { set tScalar = "FloatDataValue", tArray = "Float" }
+	elseif tBase = 11 { set tScalar = "DoubleDataValue", tArray = "Double" }
+	elseif tBase = 12 { set tScalar = "StringDataValue", tArray = "String" }
+	elseif tBase = 13 { set tScalar = "TimeStampDataValue", tArray = "TimeStamp" }
+	elseif tBase = 16 { set tScalar = "StringDataValue", tArray = "String" }    // XmlElement
+	elseif tBase = 19 { set tScalar = "IntegerDataValue", tArray = "Integer" }  // StatusCode
+	elseif tBase = 17 { set tScalar = "NodeIdDataValue", tArray = "" }
+	elseif tBase = 20 { set tScalar = "QualifiedNameDataValue", tArray = "" }
+	elseif tBase = 21 { set tScalar = "LocalizedTextDataValue", tArray = "" }
+	else { Quit "" }
+
+	if pDimensions = 0 Quit "OPCUA.Types."_tScalar
+	// A matrix, or an array of a type with no typed array class, is kept as the
+	// generic list-of-lists.
+	if (pDimensions > 1) || (tArray = "") Quit "OPCUA.Types.Multidimensional"
+	Quit "OPCUA.Types.ArrayDataValue."_tArray
+}
+
+/// Guess the IRIS OPCUA.Types class from the node's current value. This is
+/// the fallback behind <method>InferType</method>, for nodes whose declared
+/// DataType is unknown to <method>MapDataTypeToIRIS</method>; it cannot tell a
+/// Boolean from an integer, nor a Double of 0.0 from one.
 /// Falls back to StringDataValue if the value is null or unreadable.
 ClassMethod InferTypeFromValue(pClient As OPCUA.Client, pNodeNS As %Integer, pNodeId, pNodeIdType As %Integer) As %String
 {
