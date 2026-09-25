@@ -63,15 +63,9 @@ export interface Pipeline {
   /**
    * The `Ens.Config.Item` name — the interop identity, not a label. It is the
    * lookup key for toggle/rebind/delete, the key for health telemetry, and the
-   * string an operator sees in `Ens_Util.Log` and the Management Portal. Always
-   * show it somewhere, even when a display name exists.
+   * string an operator sees in `Ens_Util.Log` and the Management Portal.
    */
   name: string;
-  /**
-   * An optional operator-facing label (the config item's `Comment`). Sugar: it
-   * exists in addition to `name`, never instead of it.
-   */
-  displayName?: string;
   /**
    * Portal categories (`Ens.Config.Item.Category`), already split and trimmed by
    * the backend. Organisational only — the Production Configuration page groups

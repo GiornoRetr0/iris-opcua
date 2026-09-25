@@ -387,25 +387,6 @@ function defaultPipelineName(schemaShortName: string): string {
                 </div>
               </div>
 
-              <!-- The label, which *is* editable. Placed in edit mode as well as
-                   deploy because renaming after the fact is the common case: you find
-                   out what a service should be called once it is running. -->
-              <div>
-                <div class="flex items-center gap-1.5 mb-1.5">
-                  <label class="block text-xs font-semibold text-on-surface-variant">Display label</label>
-                  <app-field-hint>
-                    Shown in this console and in the Management Portal's Comment column,
-                    alongside <code class="font-mono">{{ pipelineName() }}</code> — never
-                    instead of it. Clear the field to remove the label.
-                  </app-field-hint>
-                </div>
-                <input [ngModel]="displayName()" (ngModelChange)="displayName.set($event)" spellcheck="false"
-                       placeholder="e.g. Air handler, north wing"
-                       class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-muted focus:border-primary focus:ring-1 focus:ring-primary/30" />
-              </div>
-
-              <!-- Beside the label rather than below it: the two editable fields on
-                   this screen sit side by side, mirroring create mode. -->
               <div>
                 <ng-container [ngTemplateOutlet]="categoriesTpl"></ng-container>
               </div>
@@ -434,23 +415,6 @@ function defaultPipelineName(schemaShortName: string): string {
                    a pair. -->
               <div>
                 <ng-container [ngTemplateOutlet]="categoriesTpl"></ng-container>
-              </div>
-
-              <!-- Optional from the start, so the permanent identifier can stay
-                   machine-shaped without forcing that on whoever reads the dashboard. -->
-              <div class="sm:col-span-2">
-                <div class="flex items-center gap-1.5 mb-1.5">
-                  <label class="block text-xs font-semibold text-on-surface-variant">
-                    Display label <span class="font-normal text-on-surface-muted">(optional)</span>
-                  </label>
-                  <app-field-hint>
-                    A friendlier name for the dashboard. Unlike the name above it can be
-                    changed later, and it never replaces the name in the event log.
-                  </app-field-hint>
-                </div>
-                <input [ngModel]="displayName()" (ngModelChange)="displayName.set($event)" spellcheck="false"
-                       placeholder="e.g. Air handler, north wing"
-                       class="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-muted focus:border-primary focus:ring-1 focus:ring-primary/30" />
               </div>
 
               <div>
@@ -625,7 +589,7 @@ export class DeviceBindingComponent implements OnInit {
    *
    * The same screen serves both because they are the same act: choosing which
    * devices a schema reads. In edit mode the schema and the config item name are
-   * already fixed, so only the device list, strictness and display label can change
+   * already fixed, so only the device list, strictness and categories can change
    * — which is a settings update, not a regeneration.
    */
   editMode = signal(false);
@@ -650,22 +614,6 @@ export class DeviceBindingComponent implements OnInit {
   columnCount = signal(0);
 
   pipelineName = signal('');
-  /**
-   * The optional operator-facing label, kept separate from `pipelineName` because
-   * the two have different lifetimes: the name is the immutable interop identity,
-   * this is a mutable label. Held as the trimmed-on-send raw string so an edit that
-   * empties the field can clear the label — see `savedDisplayName` for why the
-   * original is remembered.
-   */
-  displayName = signal('');
-  /**
-   * What the label was when the pipeline loaded, so a rebind can tell "unchanged"
-   * from "cleared". The backend treats an absent `displayName` as leave-alone and an
-   * empty one as clear, and sending '' unconditionally would wipe the label every
-   * time somebody edited only the device list.
-   */
-  private savedDisplayName = signal<string | null>(null);
-
   /**
    * Portal categories. Prefilled with what the backend would have chosen on its
    * own — `OPCUA` plus the schema's short name — but fully the user's to change,
@@ -841,9 +789,6 @@ export class DeviceBindingComponent implements OnInit {
         }
 
         this.pipelineName.set(p.name);
-        const label = (p.displayName || '').trim();
-        this.displayName.set(label);
-        this.savedDisplayName.set(label);
         const cats = p.categories ?? [];
         this.categories.set([...cats]);
         this.savedCategories.set([...cats]);
@@ -1080,24 +1025,18 @@ export class DeviceBindingComponent implements OnInit {
     this.deploying.set(true);
     this.error.set('');
 
-    // Editing changes only the binding and the label, so it never regenerates the
-    // schema.
+    // Editing changes only the binding and the categories, so it never regenerates
+    // the schema.
     if (this.editMode()) {
-      // Send the label only when it actually changed. Sending it unconditionally
-      // would be harmless when set and destructive when empty, since the backend
-      // reads '' as "clear it".
-      const label = this.displayName().trim();
-      const changed = label !== (this.savedDisplayName() ?? '');
-      // Same reasoning for categories: only when they actually differ, or a
-      // device-only edit would re-send — and on an older backend that ignores the
-      // field, silently look like it had saved them.
+      // Send categories only when they actually differ. Sending them unconditionally
+      // would re-send on a device-only edit — and on an older backend that ignores
+      // the field, silently look like it had saved them.
       const cats = this.categories();
       const catsChanged = !this.sameCategories(cats, this.savedCategories() ?? []);
       this.api
         .rebindPipeline(
           this.pipelineName(),
           this.deviceText(),
-          changed ? label : undefined,
           catsChanged ? cats : undefined
         )
         .subscribe({
@@ -1124,9 +1063,6 @@ export class DeviceBindingComponent implements OnInit {
     } else {
       params['publishingInterval'] = this.publishingInterval();
     }
-    // Only when given: an empty label is the absence of one, not a value.
-    const label = this.displayName().trim();
-    if (label) params['displayName'] = label;
     // Always sent, even when empty: the editor was on screen, so the list shown is
     // the user's decision. Omitting it would hand the choice back to the backend's
     // default and re-add categories somebody had just removed.

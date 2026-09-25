@@ -335,10 +335,6 @@ import { CommonModule } from '@angular/common';
                     </td>
                   </tr>
                   <tr class="border-b border-outline-variant/10">
-                    <td class="py-4 font-mono text-primary font-semibold">Display label</td>
-                    <td class="py-4 text-on-surface-variant">Optional friendlier name for this console and the Portal's Comment column. Editable later, and never replaces the name</td>
-                  </tr>
-                  <tr class="border-b border-outline-variant/10">
                     <td class="py-4 font-mono text-primary font-semibold">Categories</td>
                     <td class="py-4 text-on-surface-variant">
                       How the service is grouped in the Management Portal. Prefilled with
@@ -433,7 +429,7 @@ import { CommonModule } from '@angular/common';
                     <td class="py-4 font-mono text-primary font-semibold">Edit</td>
                     <td class="py-4"><span class="material-symbols-outlined text-primary text-base">edit_square</span></td>
                     <td class="py-4 text-on-surface-variant">
-                      Change which devices it reads, its display label and its categories. The
+                      Change which devices it reads and its categories. The
                       schema and the transport are fixed, so its columns cannot change here.
                       Takes effect without a recompile
                     </td>

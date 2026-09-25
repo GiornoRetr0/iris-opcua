@@ -184,7 +184,7 @@ Treat this table as the acceptance contract. Some behaviors have tests already; 
 | Schema deletion | Refuses while the schema is referenced. Preserve existing deletion semantics and explicitly explain data consequences to the operator. |
 | Deployment | Binds an existing schema, preserves settings, and creates a disabled service. Starting remains explicit. |
 | Portal configuration | A pipeline can be configured using IRIS settings without the webapp. The schema selector remains usable. |
-| Rebinding | Editing device settings does not require schema regeneration. Preserve display labels and category editing without changing the service's identity. |
+| Rebinding | Editing device settings does not require schema regeneration. Preserve category editing without changing the service's identity. |
 | Partial devices | Missing columns are represented as missing values and diagnosed. Preserve the distinction between partial coverage and a device that cannot contribute any columns. |
 | Polling and subscriptions | Preserve mode-specific timing, batches, last-value behavior, queue handling, and reconnect behavior. Verify subscriptions separately from polling. |
 | Reconnect | Establish a session before browsing, rebuild resolved mappings and native queries, and release old handles. |
