@@ -3,9 +3,9 @@
 Class OPCUA.Types.AbstractDataValue Extends %SerialObject [ PropertyClass = OPCUA.Types.PropertyClass ]
 {
 
-Property SourceTimeStamp As %TimeStamp;
+Property SourceTimeStamp As %TimeStamp [ SqlFieldName = "SourceTS"];
 
-Property ServerTimeStamp As %TimeStamp;
+Property ServerTimeStamp As %TimeStamp [ SqlFieldName = "ServerTS"];
 
 Property Status As %Integer;
 
