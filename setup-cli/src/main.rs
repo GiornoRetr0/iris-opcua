@@ -190,7 +190,7 @@ fn delete_connection(app: &mut App, highlighted: &str) -> Option<(Status, String
 fn sign_in(app: &mut App) -> Option<Session> {
     let mut notice: Option<(Status, String)> = None;
     loop {
-        let mut f = Frame::new("Choose a connection");
+        let mut f = Frame::new("Choose a connection").hero();
         f.notice = notice.take();
         if app.store.connections.is_empty() {
             f.text("No connections yet. A connection is the web server address of an IRIS instance plus an IRIS account.");

@@ -14,6 +14,17 @@ use std::time::{Duration, Instant};
 static FULLSCREEN: AtomicBool = AtomicBool::new(false);
 static UNICODE: AtomicBool = AtomicBool::new(false);
 
+/// The start-screen banner (figlet "standard" lettering).
+const LOGO: [&str; 5] = [
+    r"  ___  ____   ____   _   _    _",
+    r" / _ \|  _ \ / ___| | | | |  / \",
+    r"| | | | |_) | |     | | | | / _ \",
+    r"| |_| |  __/| |___  | |_| |/ ___ \",
+    r" \___/|_|    \____|  \___//_/   \_\",
+];
+const REPO_URL: &str = "https://github.com/GiornoRetr0/iris-opcua";
+const TAGLINE: &str = "Install the OPC UA backend on InterSystems IRIS.";
+
 /// Marks a frame line that the spinner animates while work runs.
 const SPIN: char = '\u{1}';
 
@@ -91,6 +102,7 @@ fn text_width() -> usize {
 /// One screen: context line, title, body, an optional notice and error.
 #[derive(Clone, Default)]
 pub struct Frame {
+    hero: bool,
     context: String,
     title: String,
     lines: Vec<String>,
@@ -104,6 +116,12 @@ impl Frame {
             title: title.to_string(),
             ..Default::default()
         }
+    }
+
+    /// Show the banner instead of the compact header (the start screen).
+    pub fn hero(mut self) -> Frame {
+        self.hero = true;
+        self
     }
 
     pub fn context(mut self, ctx: &str) -> Frame {
@@ -163,6 +181,9 @@ impl Frame {
     }
 
     fn header(&self) -> Vec<String> {
+        if self.hero && text_width() >= 40 {
+            return self.hero_header();
+        }
         let rule = if unicode() && fullscreen() {
             "─"
         } else {
@@ -180,6 +201,42 @@ impl Frame {
             style(&self.title).bold().to_string(),
             String::new(),
         ]
+    }
+}
+
+impl Frame {
+    /// Banner with the link and tagline beside its lower lines, or below it when narrow.
+    fn hero_header(&self) -> Vec<String> {
+        let logo_w = LOGO.iter().map(|l| l.len()).max().unwrap_or(0);
+        let side = [
+            style(REPO_URL).blue().bold().to_string(),
+            style(TAGLINE).green().to_string(),
+            style(format!("v{}", env!("CARGO_PKG_VERSION")))
+                .dim()
+                .to_string(),
+        ];
+        let beside = logo_w + 3 + TAGLINE.len().max(REPO_URL.len()) <= text_width();
+        let mut out = vec![String::new()];
+        for (i, l) in LOGO.iter().enumerate() {
+            let art = style(format!("{l:<logo_w$}")).cyan().to_string();
+            // The side text sits against the last three rows, like a caption.
+            match i
+                .checked_sub(2)
+                .and_then(|k| side.get(k))
+                .filter(|_| beside)
+            {
+                Some(t) => out.push(format!("{art}   {t}")),
+                None => out.push(art),
+            }
+        }
+        if !beside {
+            out.push(String::new());
+            out.extend(side.iter().cloned());
+        }
+        out.push(String::new());
+        out.push(style(&self.title).bold().to_string());
+        out.push(String::new());
+        out
     }
 }
 

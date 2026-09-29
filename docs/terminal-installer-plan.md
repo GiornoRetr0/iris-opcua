@@ -250,7 +250,7 @@ Offer a small export of non-secret connection details and setup status. Do not p
 
 ## 5. Visual design and interaction rules
 
-- Compact title, consistent spacing, and one restrained accent color. No large ASCII logo, emoji decoration, or heavy nested boxes.
+- The start screen (connection list) opens with an ASCII "OPC UA" banner in the accent color, with the repository link, a one-line tagline and the version beside it, or below it on narrow terminals. Every other screen uses the compact header. Consistent spacing and one restrained accent color; no emoji decoration or heavy nested boxes.
 - Green `OK` for verified success; red `FAIL` for blocking errors; amber `ACTION` for incomplete external work; cyan for the current step; muted `WAIT` for pending work.
 - Every color has a text label. Use portable ASCII status words by default so rendering and screen readers do not depend on glyph support.
 - Show connection name, URL, and selected namespace on every review, mutation, and result screen. Revalidate the target after switching connection.
