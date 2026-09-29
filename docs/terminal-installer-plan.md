@@ -76,7 +76,7 @@ setup-cli/
 src/objectscript/IRISConfig/ClientInstaller.cls
 ```
 
-The exact module boundaries can be simplified if useful. Build one binary, `iris-opcua-setup`, with `cargo build --release`. The CLI must locate the source/library payload (the repository's `src/objectscript/` and `bin/`) reliably when launched outside the repository directory: default to the checkout containing the binary, and accept `--dist <path>` when necessary.
+The exact module boundaries can be simplified if useful. Build one binary, `iris-opcua-setup`, with `cargo build --release`. The payload (the repository's `src/objectscript/OPCUA/` without `Tests/`, `IRISConfig/ClientInstaller.cls`, and `bin/unix/`) is embedded in the binary at build time by `build.rs`, so a downloaded release needs no checkout; `--dist <checkout>` installs from a checkout instead. `src/files.rs` defines the file set for both, so they cannot diverge.
 
 ## 3. Connection and bootstrap (proven)
 

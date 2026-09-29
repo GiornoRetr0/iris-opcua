@@ -1,17 +1,22 @@
-//! Locates the ObjectScript sources and native libraries, and picks the artifacts
-//! for the server platform IRIS reports.
+//! The installer payload — ObjectScript sources and native libraries — and the
+//! artifact choice for the server platform IRIS reports.
+//!
+//! The payload is built into the binary (see `build.rs`), so a downloaded executable
+//! needs no repository. `--dist <checkout>` reads the same files from a checkout instead.
 
+use crate::files;
 use sha2::{Digest, Sha256};
-use std::fs;
+use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// The installer class the CLI loads into %SYS first.
-pub const CLIENT_INSTALLER: &str = "src/objectscript/IRISConfig/ClientInstaller.cls";
-pub const CLIENT_INSTALLER_DOC: &str = "IRISConfig.ClientInstaller.cls";
+mod embedded {
+    include!(concat!(env!("OUT_DIR"), "/embedded.rs"));
+}
 
 /// Files whose absence means the payload is incomplete.
 const REQUIRED: &[&str] = &[
-    CLIENT_INSTALLER,
+    files::CLIENT_INSTALLER,
     "src/objectscript/OPCUA/Constants.inc",
     "src/objectscript/OPCUA/Utils.cls",
     "src/objectscript/OPCUA/Client.cls",
@@ -19,27 +24,40 @@ const REQUIRED: &[&str] = &[
 ];
 
 pub struct Payload {
-    pub root: PathBuf,
+    files: BTreeMap<String, Cow<'static, [u8]>>,
+    /// The checkout it came from; `None` when built in.
+    root: Option<PathBuf>,
+    /// Where built-in native files are written when an administrator must copy them by hand.
+    extract_dir: PathBuf,
 }
 
-/// One ObjectScript document: its Atelier name and file on disk.
+/// One ObjectScript document: its Atelier name and source lines.
 #[derive(Debug, Clone)]
 pub struct Doc {
     pub name: String,
-    pub path: PathBuf,
+    pub lines: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Artifact {
     pub name: &'static str,
-    pub path: PathBuf,
     pub sha256: String,
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Arch {
     Amd64,
     Arm64,
+}
+
+impl Arch {
+    fn dir(self) -> &'static str {
+        match self {
+            Arch::Amd64 => "amd64",
+            Arch::Arm64 => "arm64",
+        }
+    }
 }
 
 /// What the server platform means for native artifacts.
@@ -87,124 +105,143 @@ pub fn target_for(os: &str, platform: &str) -> Target {
     }
 }
 
-/// Native files for a target, in dependency order (dependencies first).
-pub fn native_names(target: &Target) -> &'static [&'static str] {
-    match target {
-        Target::Linux(_) => &["libcrypto.so.1.1", "libopen62541.so.0", "irisopcua.so"],
-        Target::Unsupported(_) => &[],
-    }
-}
-
 impl Payload {
-    /// Explicit `--dist`, else the checkout containing the executable, else the working directory.
-    pub fn locate(dist: Option<PathBuf>) -> Result<Payload, String> {
-        if let Some(d) = dist {
-            return Payload::check(d.clone()).ok_or_else(|| {
-                format!(
-                    "{} does not contain the OPC UA payload (src/objectscript and bin).",
-                    d.display()
-                )
-            });
+    /// `--dist` when given, else the copy built into this binary.
+    pub fn locate(dist: Option<PathBuf>, extract_dir: PathBuf) -> Result<Payload, String> {
+        match dist {
+            Some(root) => Payload::from_dir(&root, extract_dir),
+            None => Ok(Payload::embedded(extract_dir)),
         }
-        let mut starts = Vec::new();
-        if let Ok(exe) = std::env::current_exe() {
-            starts.push(exe.canonicalize().unwrap_or(exe));
-        }
-        if let Ok(cwd) = std::env::current_dir() {
-            starts.push(cwd);
-        }
-        for start in starts {
-            for dir in start.ancestors() {
-                if let Some(p) = Payload::check(dir.to_path_buf()) {
-                    return Ok(p);
-                }
-            }
-        }
-        Err("Could not find the OPC UA payload. Run the tool from the repository checkout, or pass --dist <path to the repository>.".into())
     }
 
-    fn check(root: PathBuf) -> Option<Payload> {
-        (root.join("src/objectscript/OPCUA").is_dir() && root.join("bin").is_dir())
-            .then_some(Payload { root })
+    pub fn embedded(extract_dir: PathBuf) -> Payload {
+        let files = embedded::FILES
+            .iter()
+            .map(|(rel, bytes)| (rel.to_string(), Cow::Borrowed(*bytes)))
+            .collect();
+        Payload {
+            files,
+            root: None,
+            extract_dir,
+        }
+    }
+
+    pub fn from_dir(root: &Path, extract_dir: PathBuf) -> Result<Payload, String> {
+        let list = files::list(root).map_err(|e| {
+            format!(
+                "{} does not contain the OPC UA payload (src/objectscript and bin): {e}",
+                root.display()
+            )
+        })?;
+        let mut files = BTreeMap::new();
+        for rel in list {
+            let bytes = std::fs::read(root.join(&rel))
+                .map_err(|e| format!("{}: {e}", root.join(&rel).display()))?;
+            files.insert(rel, Cow::Owned(bytes));
+        }
+        Ok(Payload {
+            files,
+            root: Some(root.to_path_buf()),
+            extract_dir,
+        })
+    }
+
+    /// Where the payload came from, for messages.
+    pub fn origin(&self) -> String {
+        match &self.root {
+            Some(r) => r.display().to_string(),
+            None => "the copy built into this program".into(),
+        }
     }
 
     pub fn missing_files(&self) -> Vec<String> {
         REQUIRED
             .iter()
-            .filter(|f| !self.root.join(f).is_file())
+            .filter(|f| !self.files.contains_key(**f))
             .map(|f| f.to_string())
             .collect()
     }
 
-    pub fn client_installer(&self) -> Doc {
-        Doc {
-            name: CLIENT_INSTALLER_DOC.into(),
-            path: self.root.join(CLIENT_INSTALLER),
-        }
+    fn doc(&self, rel: &str) -> Result<Doc, String> {
+        let bytes = self
+            .files
+            .get(rel)
+            .ok_or_else(|| format!("{rel} is missing from the payload"))?;
+        let text = String::from_utf8_lossy(bytes);
+        Ok(Doc {
+            name: doc_name(rel),
+            lines: text
+                .replace("\r\n", "\n")
+                .split('\n')
+                .map(str::to_string)
+                .collect(),
+        })
     }
 
-    /// `OPCUA.Constants.inc` first, then every OPCUA class except `Tests/`.
-    /// Examples and the IRISConfig installers are not part of a client install.
+    pub fn client_installer(&self) -> Result<Doc, String> {
+        self.doc(files::CLIENT_INSTALLER)
+    }
+
+    /// Include files first (`OPCUA.Constants.inc`), then every OPCUA class.
+    /// `Tests/`, Examples and the IRISConfig installers are not part of a client install.
     pub fn application_docs(&self) -> Result<Vec<Doc>, String> {
-        let base = self.root.join("src/objectscript");
-        let mut docs = vec![Doc {
-            name: "OPCUA.Constants.inc".into(),
-            path: base.join("OPCUA/Constants.inc"),
-        }];
-        let mut classes = Vec::new();
-        collect_classes(&base, &base.join("OPCUA"), &mut classes)
-            .map_err(|e| format!("Reading sources: {e}"))?;
-        classes.sort_by(|a, b| a.name.cmp(&b.name));
-        docs.extend(classes);
-        Ok(docs)
+        let prefix = format!("{}/", files::APPLICATION_DIR);
+        let rels: Vec<&String> = self
+            .files
+            .keys()
+            .filter(|k| k.starts_with(&prefix))
+            .collect();
+        let includes = rels.iter().filter(|r| r.ends_with(".inc"));
+        let classes = rels.iter().filter(|r| r.ends_with(".cls"));
+        includes.chain(classes).map(|r| self.doc(r)).collect()
     }
 
     pub fn artifacts(&self, target: &Target) -> Result<Vec<Artifact>, String> {
-        let dir = match target {
-            Target::Linux(Arch::Amd64) => self.root.join("bin/unix/amd64"),
-            Target::Linux(Arch::Arm64) => self.root.join("bin/unix/arm64"),
+        let arch = match target {
+            Target::Linux(a) => *a,
             Target::Unsupported(p) => return Err(format!("No native artifacts for {p}.")),
         };
-        native_names(target)
+        files::NATIVE
             .iter()
             .map(|name| {
-                let path = dir.join(name);
-                let bytes = fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+                let rel = format!("bin/unix/{}/{name}", arch.dir());
+                let bytes = self
+                    .files
+                    .get(&rel)
+                    .ok_or_else(|| format!("{rel} is missing from the payload"))?;
                 Ok(Artifact {
                     name,
-                    sha256: sha256_hex(&bytes),
-                    path,
+                    sha256: sha256_hex(bytes),
+                    bytes: bytes.to_vec(),
                 })
             })
             .collect()
     }
-}
 
-fn collect_classes(base: &Path, dir: &Path, out: &mut Vec<Doc>) -> std::io::Result<()> {
-    for entry in fs::read_dir(dir)? {
-        let path = entry?.path();
-        if path.is_dir() {
-            if path.file_name().is_some_and(|n| n == "Tests") {
-                continue;
-            }
-            collect_classes(base, &path, out)?;
-        } else if path.extension().is_some_and(|e| e == "cls") {
-            out.push(Doc {
-                name: doc_name(base, &path),
-                path,
-            });
+    /// A file on this machine an administrator can copy to the server. Built-in files are
+    /// written to `local/native/<arch>/` first.
+    pub fn artifact_file(&self, target: &Target, a: &Artifact) -> Result<PathBuf, String> {
+        let Target::Linux(arch) = target else {
+            return Err("unsupported platform".into());
+        };
+        let rel = format!("bin/unix/{}/{}", arch.dir(), a.name);
+        if let Some(root) = &self.root {
+            return Ok(root.join(rel));
         }
+        let dir = self.extract_dir.join(arch.dir());
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let path = dir.join(a.name);
+        if std::fs::read(&path).map(|b| b != a.bytes).unwrap_or(true) {
+            std::fs::write(&path, &a.bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+        }
+        Ok(path)
     }
-    Ok(())
 }
 
 /// `src/objectscript/OPCUA/REST/Handler.cls` → `OPCUA.REST.Handler.cls`.
-fn doc_name(base: &Path, path: &Path) -> String {
-    let rel = path.strip_prefix(base).unwrap_or(path);
-    rel.components()
-        .map(|c| c.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join(".")
+fn doc_name(rel: &str) -> String {
+    rel.trim_start_matches("src/objectscript/")
+        .replace('/', ".")
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
@@ -212,16 +249,6 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()
-}
-
-/// Source lines as Atelier expects them: one string per line, no terminators.
-pub fn doc_lines(path: &Path) -> Result<Vec<String>, String> {
-    let text = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    Ok(text
-        .replace("\r\n", "\n")
-        .split('\n')
-        .map(str::to_string)
-        .collect())
 }
 
 #[cfg(test)]
@@ -252,14 +279,9 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn repository_payload_is_complete_and_excludes_tests() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .to_path_buf();
-        let p = Payload::check(root).expect("repository payload");
+    fn check_complete(p: &Payload) {
         assert!(p.missing_files().is_empty());
+        assert_eq!(p.client_installer().unwrap().name, "IRISConfig.ClientInstaller.cls");
         let docs = p.application_docs().unwrap();
         assert_eq!(docs[0].name, "OPCUA.Constants.inc");
         assert!(docs.iter().any(|d| d.name == "OPCUA.REST.Handler.cls"));
@@ -269,7 +291,31 @@ mod tests {
         for arch in [Arch::Amd64, Arch::Arm64] {
             let a = p.artifacts(&Target::Linux(arch)).unwrap();
             assert_eq!(a.len(), 3);
-            assert!(a.iter().all(|x| x.sha256.len() == 64));
+            assert!(a
+                .iter()
+                .all(|x| x.sha256.len() == 64 && !x.bytes.is_empty()));
         }
+    }
+
+    #[test]
+    fn built_in_payload_is_complete_and_matches_the_checkout() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let tmp = std::env::temp_dir();
+        let built_in = Payload::embedded(tmp.clone());
+        let checkout = Payload::from_dir(root, tmp).unwrap();
+        check_complete(&built_in);
+        check_complete(&checkout);
+        assert_eq!(built_in.files, checkout.files);
+    }
+
+    #[test]
+    fn built_in_artifacts_are_written_out_for_manual_copy() {
+        let dir = std::env::temp_dir().join(format!("opcua-native-{}", std::process::id()));
+        let p = Payload::embedded(dir.clone());
+        let t = Target::Linux(Arch::Arm64);
+        let a = &p.artifacts(&t).unwrap()[0];
+        let path = p.artifact_file(&t, a).unwrap();
+        assert_eq!(sha256_hex(&std::fs::read(&path).unwrap()), a.sha256);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

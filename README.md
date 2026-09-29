@@ -103,11 +103,7 @@ Installation on your own instance requires an IRIS administrator. Validate your 
 
 **Terminal installer (Linux IRIS servers).** [`setup-cli/`](setup-cli/README.md) installs and verifies everything in steps 1–4 over the IRIS web server, with no shell access to the IRIS host:
 
-```bash
-cd setup-cli
-cargo build --release
-./target/release/iris-opcua-setup
-```
+Download the single-file binary for your machine from [GitHub Releases](https://github.com/GiornoRetr0/iris-opcua/releases) and run it. It has everything it installs built in, so no clone or build is needed (see [its README](setup-cli/README.md#download) for the file names, checksums and the macOS/Windows first-run prompts). To build it yourself: `cd setup-cli && cargo build --release`.
 
 It asks for a connection (name, base URL, username, password), shows a review before changing anything, and ends with the API URL to enter in the webapp. See its README for the privileges it needs and exactly what it changes. It has been tested against IRIS 2025.3 on Linux ARM64. The manual path below remains available and is the only path for Windows servers.
 

@@ -161,8 +161,7 @@ pub struct Installer<'a> {
 impl<'a> Installer<'a> {
     /// Upload and compile `IRISConfig.ClientInstaller` into %SYS. Changes no configuration.
     pub fn bootstrap(&self) -> Result<(), String> {
-        let doc = self.payload.client_installer();
-        let lines = payload::doc_lines(&doc.path)?;
+        let doc = self.payload.client_installer()?;
         let explain = |e: Error| {
             match e {
             Error::Unauthorized => "IRIS refused to load the installer class into %SYS. The account needs %Development:USE and write access to %DB_IRISSYS.".to_string(),
@@ -170,7 +169,7 @@ impl<'a> Installer<'a> {
         }
         };
         self.client
-            .put_doc(SYS, &doc.name, &lines)
+            .put_doc(SYS, &doc.name, &doc.lines)
             .map_err(explain)?;
         self.client
             .compile(SYS, std::slice::from_ref(&doc.name))
@@ -295,8 +294,8 @@ impl<'a> Installer<'a> {
             block(
                 "Source payload incomplete",
                 format!(
-                    "Missing under {}: {}",
-                    self.payload.root.display(),
+                    "Missing from {}: {}",
+                    self.payload.origin(),
                     absent.join(", ")
                 ),
             );
@@ -363,14 +362,16 @@ impl<'a> Installer<'a> {
         let uploads: Vec<&(Artifact, FileAction, String)> =
             files.iter().filter(|f| f.1 == FileAction::Upload).collect();
         if !uploads.is_empty() && !info.bin_writable {
+            // Built-in files are written out so there is something on this machine to copy.
             let list = uploads
                 .iter()
                 .map(|(a, _, dest)| {
-                    format!(
-                        "  {}\n    to     {dest}\n    SHA-256 {}",
-                        a.path.display(),
-                        a.sha256
-                    )
+                    let src = self
+                        .payload
+                        .artifact_file(&target, a)
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|e| format!("{} (could not write it out: {e})", a.name));
+                    format!("  {src}\n    to     {dest}\n    SHA-256 {}", a.sha256)
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
@@ -393,13 +394,7 @@ impl<'a> Installer<'a> {
 
     /// Stream one file into IRIS's bin directory in chunks, then verify and move it into place.
     pub fn install_file(&self, a: &Artifact) -> Result<String, String> {
-        let bytes = std::fs::read(&a.path).map_err(|e| format!("{}: {e}", a.path.display()))?;
-        if payload::sha256_hex(&bytes) != a.sha256 {
-            return Err(format!(
-                "{} changed on disk during installation.",
-                a.path.display()
-            ));
-        }
+        let bytes = &a.bytes;
         let engine = base64::engine::general_purpose::STANDARD;
         for (i, chunk) in bytes.chunks(CHUNK).enumerate() {
             self.call_ok(
@@ -424,9 +419,8 @@ impl<'a> Installer<'a> {
     pub fn import_classes(&self, ns: &str) -> Result<usize, String> {
         let docs = self.payload.application_docs()?;
         for d in &docs {
-            let lines = payload::doc_lines(&d.path)?;
             self.client
-                .put_doc(ns, &d.name, &lines)
+                .put_doc(ns, &d.name, &d.lines)
                 .map_err(|e| format!("Uploading {}: {e}", d.name))?;
         }
         let names: Vec<String> = docs.iter().map(|d| d.name.clone()).collect();

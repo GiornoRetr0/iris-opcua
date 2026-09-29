@@ -6,6 +6,7 @@
 
 mod atelier;
 mod config;
+mod files;
 mod installer;
 mod log;
 mod payload;
@@ -24,8 +25,8 @@ iris-opcua-setup — install the IRIS OPC UA backend on an existing IRIS instanc
 Usage: iris-opcua-setup [--dist <path>]
 
 Options:
-  --dist <path>   Repository checkout holding src/objectscript and bin/
-                  (default: the checkout containing this program)
+  --dist <path>   Install from a repository checkout (src/objectscript and bin/)
+                  instead of the copy built into this program
   -V, --version   Print the version
   -h, --help      Print this help
 
@@ -64,14 +65,14 @@ fn main() {
         eprintln!("iris-opcua-setup is interactive: sign-in needs a terminal, and passwords are never read from redirected input.");
         std::process::exit(2);
     }
-    let payload = match Payload::locate(dist) {
+    let local = local_dir();
+    let payload = match Payload::locate(dist, local.join("native")) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("{e}");
             std::process::exit(2);
         }
     };
-    let local = local_dir(&payload);
     if let Err(e) = log::open(&local) {
         eprintln!("Warning: cannot open the log in {}: {e}", local.display());
     }
@@ -123,7 +124,7 @@ fn parse_args() -> Result<Option<PathBuf>, lexopt::Error> {
 }
 
 /// `setup-cli/local/` next to the sources when run from a checkout, else `local/` beside the binary.
-fn local_dir(payload: &Payload) -> PathBuf {
+fn local_dir() -> PathBuf {
     if let Ok(exe) = std::env::current_exe() {
         let exe = exe.canonicalize().unwrap_or(exe);
         if let Some(dir) = exe
@@ -131,10 +132,6 @@ fn local_dir(payload: &Payload) -> PathBuf {
             .find(|d| d.join("Cargo.toml").is_file() && d.join("src/main.rs").is_file())
         {
             return dir.join("local");
-        }
-        let tool = payload.root.join("setup-cli");
-        if exe.starts_with(&payload.root) && tool.is_dir() {
-            return tool.join("local");
         }
         if let Some(dir) = exe.parent() {
             return dir.join("local");

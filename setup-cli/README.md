@@ -4,9 +4,31 @@ A terminal installer for the IRIS OPC UA backend. It connects to an existing IRI
 
 It needs no access to the IRIS host beyond its web server, so it can run on the server or on your own machine.
 
-## Build
+## Download
 
-Rust 1.89 or later:
+Download the file for the machine you run the tool on (not the IRIS server) from [GitHub Releases](https://github.com/GiornoRetr0/iris-opcua/releases):
+
+| File | For |
+|---|---|
+| `iris-opcua-setup-linux-x86_64` | Linux, Intel/AMD |
+| `iris-opcua-setup-linux-arm64` | Linux, ARM |
+| `iris-opcua-setup-macos-arm64` | Apple Silicon Macs |
+| `iris-opcua-setup-macos-x86_64` | Intel Macs |
+| `iris-opcua-setup-windows-x86_64.exe` | Windows |
+
+It is one self-contained file. The ObjectScript classes and native libraries it installs are built into it, so you do not need to clone this repository. Check it against `SHA256SUMS` from the same release, then:
+
+```bash
+chmod +x iris-opcua-setup-macos-arm64          # Linux/macOS: make it executable
+xattr -d com.apple.quarantine iris-opcua-setup-macos-arm64   # macOS only, see below
+./iris-opcua-setup-macos-arm64
+```
+
+The binaries are not code-signed. On macOS, Gatekeeper blocks a downloaded unsigned program the first time; the `xattr` line above (or right-click → Open) allows it. On Windows, SmartScreen may warn: choose "More info", then "Run anyway".
+
+## Build from source
+
+Rust 1.89 or later, from a checkout of this repository:
 
 ```bash
 cd setup-cli
@@ -14,13 +36,9 @@ cargo build --release          # → target/release/iris-opcua-setup
 cargo test                     # unit tests (no IRIS needed)
 ```
 
+The build embeds `src/objectscript/OPCUA/` (without `Tests/`), `src/objectscript/IRISConfig/ClientInstaller.cls` and `bin/unix/{amd64,arm64}/` from the checkout, so rebuild after changing them. To install from a checkout without rebuilding, run `iris-opcua-setup --dist /path/to/iris-opcua`.
+
 ## Run
-
-```bash
-./target/release/iris-opcua-setup
-```
-
-The tool finds the payload (`src/objectscript/` and `bin/`) in the repository checkout that contains it. If you copy the binary elsewhere, pass the checkout path: `iris-opcua-setup --dist /path/to/iris-opcua`.
 
 It is interactive and needs a terminal. Each step fills the terminal window as its own screen: move with ↑/↓ and press Enter, or press an item's number or letter directly. Esc goes back and Ctrl+C quits. With redirected output or `TERM=dumb`, the screens are printed one after another and you type the key instead.
 
@@ -64,7 +82,7 @@ Reruns are safe. Each step inspects the server first and reuses what is already 
 
 ## Local files
 
-Everything lives in `setup-cli/local/`, which is git-ignored. When you run a binary outside the checkout, it uses `local/` next to that binary.
+Everything lives in a `local/` folder next to the program: beside a downloaded binary, or `setup-cli/local/` (git-ignored) when built and run from the checkout.
 
 | File | Contents |
 |---|---|
@@ -72,6 +90,7 @@ Everything lives in `setup-cli/local/`, which is git-ignored. When you run a bin
 | `setup.log` | Step log. Passwords are redacted. |
 | `<name>-summary.txt` | Optional non-secret export for the webapp handoff. |
 | `<name>.lock` | OS lock that prevents two installations of one connection at the same time. |
+| `native/<arch>/` | Only if IRIS cannot write its `bin` directory: the built-in native libraries, written out for an administrator to copy. |
 
 On Linux and macOS the folder is created with mode 0700 and the files with mode 0600. On Windows they inherit the folder's permissions.
 
