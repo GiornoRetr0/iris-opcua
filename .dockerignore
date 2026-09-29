@@ -30,3 +30,7 @@ tools/windows-studio
 
 # Mock server data is bind-mounted into the plc containers at run time
 fixtures
+
+# The terminal installer runs outside IRIS; its build tree is hundreds of megabytes
+# and local/ holds saved passwords
+setup-cli
