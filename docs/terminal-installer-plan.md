@@ -8,7 +8,7 @@ Build a lightweight, attractive terminal tool that installs and verifies the OPC
 
 The CLI does **not** discover instances and does not need the IRIS installation directory. The user defines the connection themselves — a name, a base URL, then a username and password — the same shape as a VS Code InterSystems Server Manager definition. Everything after that goes over HTTP to IRIS's built-in Atelier REST API (`/api/atelier`). The CLI can therefore run on the IRIS host or on another machine that can reach the instance's web server.
 
-The first launch starts with defining the connection and authenticating. No installation, configuration, or operational menu is available until authentication succeeds. Remember the connection securely so subsequent launches normally need no login prompt.
+The first launch starts with defining the connection and authenticating. No installation, configuration, or operational menu is available until authentication succeeds. Remember the connection, including its password, so subsequent launches normally need no login prompt (see §6).
 
 After login, guide the user through namespace selection, prerequisites, installation, verification, and a clear handoff to the existing webapp.
 
@@ -22,13 +22,37 @@ Other exclusions for the first release:
 - Account creation, password-policy changes, broad permission grants, or a general secrets-management system.
 - Uninstall, automatic upgrades of incompatible native libraries, and unattended installation.
 
-Platform scope is about the **IRIS server**, not the machine running the CLI: the CLI is plain Python over HTTP and is OS-independent. Implement and validate against Linux IRIS servers first, covering amd64 and arm64 only where the supplied artifacts are verified compatible. Structure the artifact-selection code so Windows servers can be added later. Detect an unsupported server platform early (IRIS reports it after sign-in) and explain it clearly; do not advertise untested Windows/macOS server support.
+Platform scope is about the **IRIS server**, not the machine running the CLI: the CLI is a single Rust binary talking HTTP and builds for Linux, macOS, and Windows. Implement and validate against Linux IRIS servers first, covering amd64 and arm64 only where the supplied artifacts are verified compatible. Structure the artifact-selection code so Windows servers can be added later. Detect an unsupported server platform early (IRIS reports it after sign-in) and explain it clearly; do not advertise untested Windows/macOS server support.
 
 ## 2. Keep the implementation small
 
-Use a Python CLI with the standard library for prompts, HTTP (`urllib`), configuration, and orchestration. Use **Rich** for consistent colors, status lines, compact tables, and progress, and **keyring** for OS-backed credential storage. These are the only direct third-party runtime dependencies. No IRIS Python driver is needed: the Atelier API is plain HTTP + JSON. Do not add a full-screen TUI framework, prompt-toolkit, a web service, Node.js, or a background daemon.
+Write the CLI in Rust as one synchronous binary: no async runtime, no OpenSSL. Direct dependencies are limited to this set (measured 2026-09-29: 44 packages in the resolved tree on Linux/macOS, 47 on Windows):
 
-Use normal numbered choices and Enter to accept a visible default. Arrow-key menus are unnecessary. Use masked password input. Keep terminal output in scrollback instead of repeatedly clearing the screen.
+| Need | Crate | Notes |
+|---|---|---|
+| HTTP/HTTPS | `ureq 3.4`, default features off, `rustls` | Blocking; agent-level connect/global timeouts; Basic auth is a header we build ourselves |
+| JSON | `serde 1` (`derive`) + `serde_json 1` | Atelier bodies, ClientInstaller results, and the local config file |
+| Terminal | `console 0.16`, default features off, `std` | Colors, TTY detection, `NO_COLOR`, and hidden password input (`Term::read_secure_line`) |
+| Base64 | `base64 0.23` | Basic auth and chunked library upload; already in `ureq`'s tree |
+| SHA-256 | `sha2 0.11`, default features off | Artifact verification |
+| Arguments | `lexopt 0.3` | Only a few flags (`--dist <path>`, `--version`, `--help`); help text is hand-written |
+
+```toml
+[dependencies]
+ureq = { version = "3.4.2", default-features = false, features = ["rustls"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+console = { version = "0.16.6", default-features = false, features = ["std"] }
+base64 = "0.23.1"
+sha2 = { version = "0.11.0", default-features = false }
+lexopt = "0.3.2"
+```
+
+Commit `Cargo.lock`. Adding any other crate needs a stated reason. Deliberately not used: `reqwest` (its blocking client runs Tokio internally), `indicatif` (the spinner is a small `std::thread` loop drawing ASCII `|/-\` to stderr only when it is a terminal, stopped and joined before any prompt or final line), `clap`, `toml`, keychain crates, and any full-screen TUI framework.
+
+TLS limit: `rustls` with bundled Mozilla roots does not trust enterprise CAs installed in the OS. An IRIS web server using an internal CA will fail the TLS handshake; the error must say so. Supporting it (ureq's platform-verifier feature or a per-connection CA file) is an open decision, not in the first release.
+
+Use normal numbered choices and Enter to accept a visible default. Arrow-key menus are unnecessary. Keep terminal output in scrollback instead of repeatedly clearing the screen.
 
 Put IRIS-specific inspection and installation logic in a separate parameterized ObjectScript installer class. Keep the current Docker demo installer working independently. Do not reuse its top-level `Install()` method for client installations.
 
@@ -36,19 +60,22 @@ Suggested layout:
 
 ```text
 tools/installer/
-  pyproject.toml                  # dependencies and iris-opcua-setup entry point
-  README.md                      # install/run instructions and supported platforms
-  iris_opcua_setup/
-    cli.py                       # authentication gate and small workflow
-    ui.py                        # shared prompts, colors, progress, messages
-    atelier.py                   # HTTP client for /api/atelier: auth, doc upload, compile, query
-    installer.py                 # inspect, plan, apply, verify (calls ClientInstaller via atelier.py)
-    config.py                    # connection profiles, credential references, keyring access
+  Cargo.toml / Cargo.lock        # binary: iris-opcua-setup
+  README.md                      # build/run instructions and supported platforms
+  .gitignore                     # local/ and target/
+  local/                         # created at runtime: connections.json, progress, logs (never committed)
+  src/
+    main.rs                      # argument parsing, authentication gate, small workflow
+    ui.rs                        # prompts, colors, spinner, status lines
+    atelier.rs                   # HTTP client for /api/atelier: auth, doc upload, compile, query
+    installer.rs                 # inspect, plan, apply, verify (calls ClientInstaller via atelier.rs)
+    config.rs                    # connection profiles and saved passwords
+    payload.rs                   # locate src/objectscript + bin/, select artifacts, hash them
   tests/
 src/objectscript/IRISConfig/ClientInstaller.cls
 ```
 
-The exact module boundaries can be simplified if useful. Package one command, `iris-opcua-setup`, and document a reproducible isolated installation. Do not modify the system Python environment. The CLI must locate the source/library payload reliably when launched outside the repository directory; accept an explicit distribution path when necessary.
+The exact module boundaries can be simplified if useful. Build one binary, `iris-opcua-setup`, with `cargo build --release`. The CLI must locate the source/library payload (the repository's `src/objectscript/` and `bin/`) reliably when launched outside the repository directory: default to the checkout containing the binary, and accept `--dist <path>` when necessary.
 
 ## 3. Connection and bootstrap (proven)
 
@@ -71,8 +98,8 @@ Bootstrap order: authenticate → check privileges with `%SYSTEM.Security.Check`
 
 Rules for the bridge:
 
-- Supply values as SQL parameters, never interpolated into ObjectScript or SQL text. Do not use `shell=True` or any subprocess.
-- Secrets go only in the `Authorization` header. They must not appear in URLs, logs, generated files, or exception dumps. Refuse a base URL containing embedded credentials.
+- Supply values as SQL parameters, never interpolated into ObjectScript or SQL text. Do not spawn any subprocess.
+- Secrets go only in the `Authorization` header. Apart from a remembered password in `local/connections.json` (§6), they must not appear in URLs, logs, other files, or error output. Refuse a base URL containing embedded credentials.
 - Every ClientInstaller method returns a JSON result with step identifier, outcome, concise explanation, and diagnostic details. Handle HTTP status, Atelier `status.errors`, IRIS `%Status` inside the result, malformed results, timeouts, and connection loss explicitly. **HTTP 200 is not proof that a compile or step succeeded.**
 - Warn when the connection is plain `http://` to a host other than localhost: Basic credentials travel unencrypted. Allow it only after the user confirms.
 
@@ -112,7 +139,7 @@ A new connection asks, in order:
 
 Then call `GET {base}/api/atelier/`. Distinguish: unreachable host/port, TLS error, non-IRIS response, Atelier disabled (404 on `/api/atelier/`), and 401 (wrong credentials **or** missing `%Development`). Offer Retry and Edit connection; preserve the entered name and URL when going back.
 
-After successful authentication, record the instance identity reported by IRIS (`%SYS.System.InstanceGUID()`, version, platform) with the connection. Save the credential in the OS credential store when available, with a visible explanation and a session-only choice. If no secure store is available or it is locked, offer session-only use and explain how to enable remembering; never fall back to plaintext files or home-grown encryption.
+After successful authentication, record the instance identity reported by IRIS (`%SYS.System.InstanceGUID()`, version, platform) with the connection. Then ask whether to remember the password (default Yes), stating where it will be saved (§6). Choosing No keeps it for this session only.
 
 On later launches, validate the saved credential against the remembered URL, user, and instance GUID. Show the authenticated target before offering any action. If authentication fails, preserve non-secret setup choices and return to sign-in with a short explanation. If the GUID differs from the one recorded, stop and say the URL now reaches a different instance; do not continue silently.
 
@@ -249,7 +276,17 @@ Use the actual reported error and corrective instruction, not a generic “Somet
 
 ## 6. Persistence, retries, and credentials
 
-Store non-secret profile data in the OS-appropriate per-user configuration directory with restrictive permissions: connection name, normalized base URL, username, recorded instance GUID/version/platform, selected namespace, installation choices, and optional API URL. Store only the keyring reference in that configuration. Bind stored credentials to the URL, the user, and the instance GUID — not just the connection name.
+Store all local state in `tools/installer/local/` — the tool's own folder, listed in `.gitignore` so it is never committed:
+
+- `connections.json`: per connection its name, normalized base URL, username, **password (when remembered)**, recorded instance GUID/version/platform, selected namespace, installation choices, and optional API URL.
+- Progress and log files.
+
+This is deliberately simple: the tool is run by an IRIS administrator on a machine they control, and the passwords are stored in plain text on purpose. No keychain and no home-grown encryption; either would add complexity without protecting the file from the admin who already owns it. What is still required:
+
+- Create `local/` with mode 0700 and the files with mode 0600 on Linux/macOS (on Windows they inherit the folder's ACL — document this).
+- Say at the "remember password" prompt exactly which file it goes into.
+- The password never appears in terminal output, logs, diagnostics, progress files, or the webapp handoff export — only in `connections.json`.
+- Bind a remembered password to the URL, the user, and the instance GUID, not just the connection name.
 
 Use a per-connection lock to prevent simultaneous installations from this machine. Save progress atomically. Redact passwords, `Authorization` headers, and credentials embedded in URLs from all logs and diagnostics. Keep logs private and show their location on failure.
 
@@ -257,7 +294,7 @@ Treat saved progress as a hint, not proof: inspect actual IRIS state before skip
 
 Do not promise transactional rollback across IRIS and the filesystem. Preserve completed safe steps, record partial/unknown state, and show the recovery action. If an existing binary is in use or needs replacement, stop with a maintenance instruction rather than overwriting it or restarting IRIS automatically.
 
-Provide Switch connection, Sign out, Forget saved login, and Delete connection as distinct actions. Switching re-enters the authentication gate; signing out ends the current authenticated context; forgetting removes the saved credential without removing the connection or the installation; deleting removes the local connection definition only.
+Provide Switch connection, Sign out, Forget saved login, and Delete connection as distinct actions. Switching re-enters the authentication gate; signing out ends the current authenticated context; forgetting removes the saved password from `connections.json` without removing the connection or the installation; deleting removes the local connection definition only.
 
 ## 7. Repository facts to account for
 
@@ -272,9 +309,9 @@ Provide Switch connection, Sign out, Forget saved login, and Delete connection a
 
 ## 8. Implementation sequence
 
-1. ~~Prove the connection mechanism~~ — done (§3). Next: connection definition, real authentication, secure credential persistence/fallback, and the structured Atelier bridge with result parsing.
+1. ~~Prove the connection mechanism~~ — done (§3). Next: connection definition, real authentication, saved connections/passwords, and the structured Atelier bridge with result parsing.
 2. Implement read-only inspection and the parameterized `ClientInstaller` with explicit result reporting and repeatable steps. Establish compatible artifacts and required privileges.
-3. Add the linear UI, review screen, progress, failure recovery, and secure saved-login flow.
+3. Add the linear UI, review screen, progress, failure recovery, and saved-login flow.
 4. Add backend verification, OPC UA API verification, and non-secret webapp handoff. Keep frontend and OPC UA setup out of scope.
 5. Exercise the acceptance scenarios below, document supported IRIS versions/server platforms, and update the root README with tested CLI commands while retaining the manual installation path.
 
@@ -289,7 +326,7 @@ Use meaningful automated tests for state transitions, request/data handling, red
 - URL without a port: the CLI warns and shows the exact URL; nothing is assumed.
 - Unreachable URL, non-IRIS URL, and Atelier disabled: each gets its own message; no credentials are sent to a non-IRIS response more than once.
 - Relaunch: saved login validates without prompting; expired/changed credential returns to login without losing setup choices; a URL that now reaches a different instance GUID is refused.
-- No secure credential store: session-only operation works and no password file is created.
+- Remember password declined: session-only operation works and `connections.json` holds no password. Accepted: file mode is 0600 and the password appears nowhere else (output, logs, export).
 - Two connections: select/switch correctly; credentials and installer state never cross targets.
 - Missing IRIS privileges: actionable preflight failure naming the missing privileges, before application changes, with no silent privilege grant.
 - IRIS process cannot write to `bin`: stop before changes; manual copy instruction with hashes; Retry continues once the files match.
