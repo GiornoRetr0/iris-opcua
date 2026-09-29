@@ -278,6 +278,13 @@ pub enum Entry {
     },
     Section(String),
     Gap,
+    /// A key that works but is only listed in the footer (Q Quit).
+    Hidden(String),
+}
+
+/// Q quits from this screen; shown in the footer, not in the list.
+pub fn quit_key() -> Entry {
+    Entry::Hidden("Q".into())
 }
 
 pub fn item(key: impl Into<String>, label: impl Into<String>, note: impl Into<String>) -> Entry {
@@ -318,9 +325,16 @@ fn selectable(entries: &[Entry]) -> Vec<usize> {
 
 fn key_of(e: &Entry) -> &str {
     match e {
-        Entry::Item { key, .. } => key,
+        Entry::Item { key, .. } | Entry::Hidden(key) => key,
         _ => "",
     }
+}
+
+/// Entries a typed key may choose: enabled items and hidden keys.
+fn keyed(entries: &[Entry]) -> impl Iterator<Item = &Entry> {
+    entries
+        .iter()
+        .filter(|e| matches!(e, Entry::Item { enabled: true, .. } | Entry::Hidden(_)))
 }
 
 fn render_entries(entries: &[Entry], selected: Option<usize>) -> Vec<String> {
@@ -337,9 +351,10 @@ fn render_entries(entries: &[Entry], selected: Option<usize>) -> Vec<String> {
     entries
         .iter()
         .enumerate()
+        .filter(|(_, e)| !matches!(e, Entry::Hidden(_)))
         .map(|(i, e)| match e {
             Entry::Section(s) => style(s).bold().to_string(),
-            Entry::Gap => String::new(),
+            Entry::Gap | Entry::Hidden(_) => String::new(),
             Entry::Item {
                 key,
                 label,
@@ -414,11 +429,8 @@ pub fn menu(frame: &Frame, entries: &[Entry], default: &str) -> String {
             }
             Ok(Key::Char(c)) => {
                 let c = c.to_string();
-                if let Some(&i) = choices
-                    .iter()
-                    .find(|&&i| key_of(&entries[i]).eq_ignore_ascii_case(&c))
-                {
-                    break key_of(&entries[i]).to_ascii_uppercase();
+                if let Some(e) = keyed(entries).find(|e| key_of(e).eq_ignore_ascii_case(&c)) {
+                    break key_of(e).to_ascii_uppercase();
                 }
             }
             Ok(Key::CtrlC) | Err(_) => quit("Cancelled."),
@@ -430,7 +442,13 @@ pub fn menu(frame: &Frame, entries: &[Entry], default: &str) -> String {
 }
 
 fn menu_plain(frame: &Frame, entries: &[Entry], default: &str) -> String {
-    draw(&compose(frame, &render_entries(entries, None), "", None));
+    let mut lines = render_entries(entries, None);
+    // No footer here, so name the hidden keys once.
+    if entries.iter().any(|e| matches!(e, Entry::Hidden(_))) {
+        lines.push(String::new());
+        lines.push(style("   Q  Quit").dim().to_string());
+    }
+    draw(&compose(frame, &lines, "", None));
     loop {
         let a = read_line(&format!("Choice [{default}]: ")).to_ascii_uppercase();
         let a = if a.is_empty() {
@@ -438,10 +456,7 @@ fn menu_plain(frame: &Frame, entries: &[Entry], default: &str) -> String {
         } else {
             a
         };
-        if selectable(entries)
-            .iter()
-            .any(|&i| key_of(&entries[i]).eq_ignore_ascii_case(&a))
-        {
+        if keyed(entries).any(|e| key_of(e).eq_ignore_ascii_case(&a)) {
             return a;
         }
         println!("  Choose one of the listed keys.");
@@ -620,9 +635,12 @@ mod tests {
             item("1", "a", ""),
             disabled("b", "why"),
             gap(),
-            item("Q", "Quit", ""),
+            quit_key(),
         ];
-        assert_eq!(selectable(&e), vec![1, 4]);
+        // Q is typed, never reached with the arrows, and listed only in the footer.
+        assert_eq!(selectable(&e), vec![1]);
+        assert_eq!(keyed(&e).map(key_of).collect::<Vec<_>>(), vec!["1", "Q"]);
+        assert_eq!(render_entries(&e, None).len(), 4);
         assert!(footer_for(&e).contains("Q Quit") && !footer_for(&e).contains("Back"));
     }
 }

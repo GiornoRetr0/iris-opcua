@@ -16,7 +16,7 @@ use config::{BaseUrl, Connection, Instance, Setup, Store, UrlInput};
 use installer::{FileAction, Info, Installer, Ping, Plan, Verification};
 use payload::Payload;
 use std::path::{Path, PathBuf};
-use ui::{disabled, gap, item, section, Frame, Status};
+use ui::{disabled, gap, item, quit_key, section, Frame, Status};
 
 const HELP: &str = "\
 iris-opcua-setup — install the IRIS OPC UA backend on an existing IRIS instance
@@ -192,7 +192,7 @@ fn sign_in(app: &mut App) -> Option<Session> {
             entries.push(gap());
         }
         entries.push(item("N", "New connection", "name, URL and login"));
-        entries.push(item("Q", "Quit", ""));
+        entries.push(quit_key());
         let default = if app.store.connections.is_empty() {
             "N"
         } else {
@@ -557,7 +557,7 @@ fn session_menu(app: &mut App, s: Session) -> Next {
             ));
         }
         entries.push(item("D", "Delete connection", "only the local definition"));
-        entries.push(item("Q", "Quit", ""));
+        entries.push(quit_key());
         match ui::menu(&f, &entries, "1").as_str() {
             "1" => {
                 let next = match ov.health {
@@ -910,7 +910,7 @@ fn setup(app: &mut App, s: &Session, info: &Info) -> Option<Next> {
                     let entries = [
                         item("R", "Retry the checks", ""),
                         item("B", "Back", ""),
-                        item("Q", "Save and quit", ""),
+                        quit_key(),
                     ];
                     match ui::menu(&f, &entries, "R").as_str() {
                         "R" => continue,
@@ -1131,7 +1131,7 @@ fn review(app: &App, s: &Session, plan: &Plan) -> Review {
     let entries = [
         item("I", "Install", "apply the changes above"),
         item("B", "Back", "change the namespace"),
-        item("Q", "Save and quit", ""),
+        quit_key(),
     ];
     match ui::menu(&f, &entries, "I").as_str() {
         "I" => Review::Install,
@@ -1301,7 +1301,7 @@ fn apply(app: &mut App, s: &Session, plan: &Plan) -> Applied {
                 let entries = [
                     item("R", "Retry", "inspects first, repeats nothing that worked"),
                     item("B", "Back to the overview", ""),
-                    item("Q", "Save and quit", ""),
+                    quit_key(),
                 ];
                 return match ui::menu(&f, &entries, "R").as_str() {
                     "R" => Applied::Retry,
@@ -1388,9 +1388,9 @@ fn handoff(app: &mut App, s: &Session, v: Verification) -> Option<Next> {
             item("4", "Export setup summary", "no passwords"),
             gap(),
             item("B", "Back to the overview", ""),
-            item("Q", "Quit", ""),
+            quit_key(),
         ];
-        match ui::menu(&f, &entries, "Q").as_str() {
+        match ui::menu(&f, &entries, "B").as_str() {
             "1" => details(app, s),
             "2" => {
                 let inst = Installer {
