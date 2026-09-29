@@ -104,3 +104,17 @@ A remembered password is only used for the URL, user, and IRIS instance (instanc
 - **Upgrades:** a native library that differs from the supplied one is never replaced automatically.
 
 Tested against InterSystems IRIS Community 2025.3 (Linux ARM64 container); see `docs/terminal-installer-plan.md` §10 for the evidence and what remains unverified.
+
+## Releasing
+
+`.github/workflows/setup-cli.yml` builds and tests all five binaries on every push and pull request that touches the installer or its payload. To publish a release:
+
+1. Set `version` in `setup-cli/Cargo.toml` (for example `0.2.0`) and commit.
+2. Tag that commit `setup-cli-v<version>` and push the tag:
+
+   ```bash
+   git tag setup-cli-v0.2.0
+   git push origin setup-cli-v0.2.0
+   ```
+
+The workflow checks that the tag matches `Cargo.toml`, builds the five binaries, and creates the GitHub Release with them and `SHA256SUMS`. Linux binaries are statically linked (musl), so they run on any distribution.
