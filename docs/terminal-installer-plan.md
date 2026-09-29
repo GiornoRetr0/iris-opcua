@@ -1,6 +1,6 @@
 # IRIS OPC UA terminal installer — implementation plan
 
-Status: approved product direction; the connection/bootstrap mechanism is proven (see §3), implementation pending. This document is the implementation brief; it supersedes the terminal onboarding suggestions in [setup-improvements.md](setup-improvements.md).
+Status: implemented in `setup-cli/` (binary `iris-opcua-setup`) and integration-tested; see §10 for evidence, deviations from this brief, and what remains unverified. This document is the implementation brief; it supersedes the terminal onboarding suggestions in [setup-improvements.md](setup-improvements.md).
 
 ## 1. Purpose and scope
 
@@ -26,7 +26,7 @@ Platform scope is about the **IRIS server**, not the machine running the CLI: th
 
 ## 2. Keep the implementation small
 
-Write the CLI in Rust as one synchronous binary: no async runtime, no OpenSSL. Direct dependencies are limited to this set (measured 2026-09-29: 44 packages in the resolved tree on Linux/macOS, 47 on Windows):
+Write the CLI in Rust as one synchronous binary: no async runtime, no OpenSSL. Direct dependencies are limited to this set (measured with the finished crate, 2026-09-29: 46 packages besides the CLI itself on macOS/Linux, 49 on Windows):
 
 | Need | Crate | Notes |
 |---|---|---|
@@ -59,7 +59,7 @@ Put IRIS-specific inspection and installation logic in a separate parameterized 
 Suggested layout:
 
 ```text
-tools/installer/
+setup-cli/
   Cargo.toml / Cargo.lock        # binary: iris-opcua-setup
   README.md                      # build/run instructions and supported platforms
   .gitignore                     # local/ and target/
@@ -69,7 +69,8 @@ tools/installer/
     ui.rs                        # prompts, colors, spinner, status lines
     atelier.rs                   # HTTP client for /api/atelier: auth, doc upload, compile, query
     installer.rs                 # inspect, plan, apply, verify (calls ClientInstaller via atelier.rs)
-    config.rs                    # connection profiles and saved passwords
+    config.rs                    # connection profiles, base URL rules, saved passwords
+    log.rs                       # redacted local/setup.log
     payload.rs                   # locate src/objectscript + bin/, select artifacts, hash them
   tests/
 src/objectscript/IRISConfig/ClientInstaller.cls
@@ -94,7 +95,7 @@ A throwaway `intersystems/iris-community:2025.3` container (Linux arm64) confirm
 | Load library | `OPCUA.Utils.Install()` → `Initialize()` → `GetVersion()` from a SqlProc | Loaded, version `0.4.0` |
 | REST app | `Security.Applications.Create` from a SqlProc, then `GET {base}/csp/opcua/api/ping` | 200 with valid credentials; wrong password gives **404**, not 401 |
 
-Bootstrap order: authenticate → check privileges with `%SYSTEM.Security.Check` (read-only) → upload and compile `IRISConfig.ClientInstaller` into `%SYS` → all further inspection and installation are calls into that class. Loading the installer class is a post-authentication operation; it changes no configuration.
+Bootstrap order: probe without credentials → authenticate → upload and compile `IRISConfig.ClientInstaller` into `%SYS` → all further inspection (including the `%SYSTEM.Security.Check` privilege checks) and installation are calls into that class. Atelier offers no way to evaluate `%SYSTEM.Security.Check` before a class exists, so an account without `%DB_IRISSYS` write is caught by the upload itself, whose error names the missing access. Loading the installer class is a post-authentication operation; it changes no configuration.
 
 Rules for the bridge:
 
@@ -276,7 +277,7 @@ Use the actual reported error and corrective instruction, not a generic “Somet
 
 ## 6. Persistence, retries, and credentials
 
-Store all local state in `tools/installer/local/` — the tool's own folder, listed in `.gitignore` so it is never committed:
+Store all local state in `setup-cli/local/` — the tool's own folder, listed in `.gitignore` so it is never committed:
 
 - `connections.json`: per connection its name, normalized base URL, username, **password (when remembered)**, recorded instance GUID/version/platform, selected namespace, installation choices, and optional API URL.
 - Progress and log files.
@@ -309,7 +310,7 @@ Provide Switch connection, Sign out, Forget saved login, and Delete connection a
 
 ## 8. Implementation sequence
 
-1. ~~Prove the connection mechanism~~ — done (§3). Next: connection definition, real authentication, saved connections/passwords, and the structured Atelier bridge with result parsing.
+1. ~~Prove the connection mechanism~~ — done (§3). Steps 1–5 are implemented in `setup-cli/`; §10 records the evidence and the open items.
 2. Implement read-only inspection and the parameterized `ClientInstaller` with explicit result reporting and repeatable steps. Establish compatible artifacts and required privileges.
 3. Add the linear UI, review screen, progress, failure recovery, and saved-login flow.
 4. Add backend verification, OPC UA API verification, and non-secret webapp handoff. Keep frontend and OPC UA setup out of scope.
@@ -339,3 +340,53 @@ Use meaningful automated tests for state transitions, request/data handling, red
 - Completed handoff: user receives the API connection information and continues in the webapp; the CLI never asks for an OPC UA endpoint or starts a production.
 
 Deliver the CLI, client ObjectScript installer, tests, verified compatibility notes, and concise installation documentation. Include the actual integration-test evidence and any remaining platform limitations in the implementation handoff.
+
+## 10. Implementation notes and evidence
+
+### Deviations from this brief, found during integration testing
+
+- **Namespace creation does not use `%Installer`.** Its manifest writes `^SECURITY` directly, which fails with `<PROTECT>` for an administrator without `%All`, even one holding `%Manager`. `CreateNamespace` uses `Security.Resources`, `SYS.Database.CreateDatabase`, `Config.Databases`, `Config.Namespaces` and `%EnsembleMgr.EnableNamespace` instead. Each step is repeatable, and a database directory the installer started is recorded so an interrupted creation resumes. A database file it did not create is never adopted.
+- **An extra precondition: access to the namespace database.** IRIS does not give an administrator access to a database they create. Unless the account has `%All`, an administrator must create `%DB_<NS>` and grant it RW before installing. The preflight checks this (`databaseAccess`) and names the resource. The installer never grants it.
+- **The REST contract is one resource plus one role per namespace.** Every app requires resource `OPCUA_API`. Role `OPCUA_API_<NS>` grants `OPCUA_API:USE` and `%DB_<NS>:RW`, is created unassigned, and the handoff says to grant it to webapp accounts. A per-namespace role means a second installation never widens an existing role.
+- **Ownership is recorded in `^IRISConfig.ClientInstaller` (in `%SYS`),** covering the files, namespaces, database directories, apps, resource and role it created. "Installed by this tool" in §4C/§4E is read from there.
+- **The local lock is an OS file lock** (`File::try_lock`), so a run killed by Ctrl+C releases it. Progress is recorded as `running:<step>` before each step. The next launch reports that outcome as unknown and inspects fresh.
+- **Password input is read key by key in raw mode.** `console`'s `read_secure_line` only turns echo off, so Ctrl+C there would leave the terminal without echo.
+- **Server identity comes from the Atelier root response.** `GET /api/atelier/` returns `id`, which equals `%SYS.System.InstanceGUID()`. The GUID check therefore happens before anything is uploaded.
+- **The server is identified before any credentials are sent.** Unauthenticated `GET /api/atelier/` → 401 means Atelier is present. A 404, combined with the Portal login page answering 200, means Atelier is disabled. Anything else is reported as not IRIS. Redirects are not followed, so the `Authorization` header is never replayed to another address.
+
+### Integration evidence
+
+The tests ran against a disposable `intersystems/iris-community:2025.3` container on Linux ARM64. The CLI was driven through a pseudo-terminal, from macOS and, as a Linux ARM64 binary, from a `rust:1` container.
+
+| Scenario (§9) | Result |
+|---|---|
+| Fresh instance: install, load library, verify REST | OK. Three libraries uploaded and hash-verified, namespace created, 44 documents compiled, library version 0.4.0, `/ping` 200 |
+| Wrong password, then Retry | 401 message names both causes; retry succeeded; password absent from terminal output and `setup.log` |
+| URL without port; host without scheme | Warning plus the exact URL; declining asks again; scheme prompt has no default |
+| Unreachable, non-IRIS, Atelier disabled, self-signed TLS | Four distinct messages, none sending credentials |
+| Relaunch with saved login | No prompt; healthy install recommends the handoff, not the wizard |
+| Different instance GUID | Refused, then an explicit opt-in to retarget |
+| Remember declined / accepted | No `password` key / key present; `local/` 0700, files 0600 |
+| Plain http to a non-localhost host | Confirmation required before credentials are sent |
+| `%Developer`-only account | Installer upload refused with IRIS's reason (`#5883`, no write on the `%SYS` routine database) |
+| Missing `%Admin_Manage` / `%Admin_Secure` | Listed on the overview and in the preflight; nothing changed |
+| `%Manager` + `%Developer` account without `%All` | Preflight names `%DB_<NS>`; after an admin grant, Retry installed fully; `/ping` → "refused … grant `OPCUA_API_<NS>`" |
+| Account holding only `OPCUA_API_NS7` | `/ping`, `/pipelines`, `/schemas` 200 on its app; 403 on another namespace's app |
+| IRIS cannot write `bin` (mode 0500) | Stopped before changes with files, SHA-256 and destinations; after a manual copy, Retry reused them |
+| Namespace with a foreign class | Refused, naming the class |
+| REST path owned by another namespace | Refused; Advanced settings path used instead |
+| Database file left by an earlier failed attempt | Refused, not adopted |
+| Compile error (broken class via `--dist`) | Step FAIL with IRIS's compiler error; next launch offered Resume and completed, reusing the namespace |
+| Ctrl+C during installation / at password prompt | Recorded as unknown and resumed without the stale lock blocking / "Cancelled.", terminal restored |
+| Forget saved login, Delete connection | Password removed and setup kept / local definition removed |
+| Redirected stdin, `--help`, `--version`, bad flag | Clear message, exit code 2 or 0 |
+
+### Not verified
+
+- A native (non-container) Linux install, where `bin` is typically root-owned. The manual-copy path was exercised only by making a container's `bin` read-only.
+- amd64 servers: the artifact selection and hashes are unit-tested, but no amd64 IRIS was installed.
+- A successful HTTPS sign-in: no TLS-enabled IRIS web server was available. TLS failure classification was tested.
+- An IRIS behind a path prefix or an external Web Gateway, and the "not routed" 404 message for the API.
+- Whether `OPCUA_API_<NS>` alone is enough to deploy and start pipelines. Production control may need interoperability roles, so for now that role covers the read endpoints only.
+- Windows builds of the CLI (not compiled; the only local Rust target was macOS).
+- Loader messages when a native dependency is missing: `LoadInto` reads them from `messages.log`, but no missing-dependency failure was staged.

@@ -1,0 +1,25 @@
+[package]
+name = "iris-opcua-setup"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+description = "Terminal installer for the IRIS OPC UA backend"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "iris-opcua-setup"
+path = "src/main.rs"
+
+[dependencies]
+ureq = { version = "3.4.2", default-features = false, features = ["rustls"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+console = { version = "0.16.6", default-features = false, features = ["std"] }
+base64 = "0.23.1"
+sha2 = { version = "0.11.0", default-features = false }
+lexopt = "0.3.2"
+
+[profile.release]
+strip = true
+lto = true

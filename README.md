@@ -99,7 +99,17 @@ After changing ObjectScript or native libraries, rebuild with `docker compose up
 
 ## Client installation
 
-Installation on your own instance currently requires an IRIS administrator. There is no production installer or environment setup wizard. The following describes the current manual installation path; validate your target IRIS/OS/library combination in staging before deployment.
+Installation on your own instance requires an IRIS administrator. Validate your target IRIS/OS/library combination in staging before deployment.
+
+**Terminal installer (Linux IRIS servers).** [`setup-cli/`](setup-cli/README.md) installs and verifies everything in steps 1–4 over the IRIS web server, with no shell access to the IRIS host:
+
+```bash
+cd setup-cli
+cargo build --release
+./target/release/iris-opcua-setup
+```
+
+It asks for a connection (name, base URL, username, password), shows a review before changing anything, and ends with the API URL to enter in the webapp. See its README for the privileges it needs and exactly what it changes. It has been tested against IRIS 2025.3 on Linux ARM64. The manual path below remains available and is the only path for Windows servers.
 
 ### 1. Prepare a dedicated namespace
 
@@ -266,4 +276,5 @@ Reuse schemas for more devices of the same structure. Removing a pipeline retain
 
 - [OPC UA concepts and legacy demos](docs/opcua-concepts-and-legacy-demos.md) — original background material, with legacy instructions identified.
 - [Architecture](docs/architecture.md) and [workflow diagrams](docs/workflow.md) — implementation details.
-- [Setup improvements proposal](docs/setup-improvements.md) — recommended installer, diagnostics, and onboarding work; not implemented yet.
+- [Setup improvements proposal](docs/setup-improvements.md) — recommended installer, diagnostics, and onboarding work; the terminal installer part is implemented in `setup-cli/`.
+- [Terminal installer plan](docs/terminal-installer-plan.md) — design and integration-test evidence for `setup-cli/`.
