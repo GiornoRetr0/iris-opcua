@@ -48,11 +48,11 @@ sha2 = { version = "0.11.0", default-features = false }
 lexopt = "0.3.2"
 ```
 
-Commit `Cargo.lock`. Adding any other crate needs a stated reason. Deliberately not used: `reqwest` (its blocking client runs Tokio internally), `indicatif` (the spinner is a small `std::thread` loop drawing ASCII `|/-\` to stderr only when it is a terminal, stopped and joined before any prompt or final line), `clap`, `toml`, keychain crates, and any full-screen TUI framework.
+Commit `Cargo.lock`. Adding any other crate needs a stated reason. Deliberately not used: `reqwest` (its blocking client runs Tokio internally), `indicatif` (the spinner is a small `std::thread` loop), `clap`, `toml`, keychain crates, and TUI frameworks such as `ratatui`: the full-screen screens (§5) are drawn with `console` alone.
 
 TLS limit: `rustls` with bundled Mozilla roots does not trust enterprise CAs installed in the OS. An IRIS web server using an internal CA will fail the TLS handshake; the error must say so. Supporting it (ureq's platform-verifier feature or a per-connection CA file) is an open decision, not in the first release.
 
-Use normal numbered choices and Enter to accept a visible default. Arrow-key menus are unnecessary. Keep terminal output in scrollback instead of repeatedly clearing the screen.
+The interface is full-screen (decided 2026-09-29, replacing the original scrollback design): every step is its own screen drawn from the top of the window, menus move with the arrow keys, and the last screen stays visible after exit. See §5.
 
 Put IRIS-specific inspection and installation logic in a separate parameterized ObjectScript installer class. Keep the current Docker demo installer working independently. Do not reuse its top-level `Install()` method for client installations.
 
@@ -254,10 +254,13 @@ Offer a small export of non-secret connection details and setup status. Do not p
 - Green `OK` for verified success; red `FAIL` for blocking errors; amber `ACTION` for incomplete external work; cyan for the current step; muted `WAIT` for pending work.
 - Every color has a text label. Use portable ASCII status words by default so rendering and screen readers do not depend on glyph support.
 - Show connection name, URL, and selected namespace on every review, mutation, and result screen. Revalidate the target after switching connection.
-- Stable numbered menus; Enter uses a displayed default. `B` goes Back, `R` retries a failed step, `D` shows details, and `Q` saves non-secret progress and exits where relevant.
+- One screen per step: a header with the tool name and connection (name · URL · user), a rule, the screen title, the content, the menu, and a dimmed key-hint footer (`↑↓ | Enter | B Back | Q Quit`).
+- Menus: ↑/↓ move a `➤` marker, Enter selects, and every item also has a key (number or letter) that selects it directly; Esc means Back. Items that cannot be chosen are shown dimmed with the reason (for example an unusable namespace). `B` goes Back, `R` retries a failed step, and `Q` saves non-secret progress and exits where relevant.
+- Text fields (name, URL, username, password, API URL) sit under an explanation of what the value is; Enter keeps a bracketed default. Validation errors appear in red on the same screen.
+- The installation screen lists every step and updates it in place: `WAIT`, the spinner with elapsed seconds, then `OK` or `FAIL`.
 - During a running mutation, do not display actions that cannot be honored safely. Handle interruption at a safe boundary; otherwise record the outcome as unknown and inspect it on the next run.
-- Use a spinner only on an interactive terminal while real work is running. Preserve the final step result and provide a route to detailed logs for long operations.
-- Respect `NO_COLOR`, `TERM=dumb`, non-TTY output, and narrow terminals. No ANSI animation or cursor control in redirected output. Do not read or echo passwords from noninteractive stdin; first release should explain that interactive authentication is required.
+- Use a spinner only on an interactive terminal while real work is running. A cleared screen loses history, so failures stay on screen until the user acts, and details are also written to `local/setup.log`.
+- Respect `NO_COLOR`, `TERM=dumb`, non-TTY output, and narrow terminals (long lines are truncated rather than wrapped mid-screen). With redirected output or `TERM=dumb` the same screens are printed one after another in plain text, menus read a typed key, and no cursor control is emitted. Do not read or echo passwords from noninteractive stdin; first release should explain that interactive authentication is required.
 - Normal operation should show concise outcomes; detailed sanitized diagnostics live behind Details and in a log file.
 
 Example failure:

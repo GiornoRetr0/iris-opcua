@@ -22,7 +22,9 @@ cargo test                     # unit tests (no IRIS needed)
 
 The tool finds the payload (`src/objectscript/` and `bin/`) in the repository checkout that contains it. If you copy the binary elsewhere, pass the checkout path: `iris-opcua-setup --dist /path/to/iris-opcua`.
 
-It is interactive and needs a terminal. You define a connection with:
+It is interactive and needs a terminal. Each step fills the terminal window as its own screen: move with ↑/↓ and press Enter, or press an item's number or letter directly. Esc goes back and Ctrl+C quits. With redirected output or `TERM=dumb`, the screens are printed one after another and you type the key instead.
+
+You define a connection with:
 
 - a **name**,
 - a **base URL**: `http(s)://host(:port)/pathPrefix`, or just a host name, in which case you are asked for the scheme. If you leave out the port, you get a warning and the URL is used exactly as typed. No port is assumed.

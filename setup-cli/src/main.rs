@@ -16,7 +16,7 @@ use config::{BaseUrl, Connection, Instance, Setup, Store, UrlInput};
 use installer::{FileAction, Info, Installer, Ping, Plan, Verification};
 use payload::Payload;
 use std::path::{Path, PathBuf};
-use ui::Status;
+use ui::{disabled, gap, item, section, Frame, Status};
 
 const HELP: &str = "\
 iris-opcua-setup — install the IRIS OPC UA backend on an existing IRIS instance
@@ -98,6 +98,7 @@ fn main() {
         }
     }
     log::write("exit");
+    println!();
 }
 
 fn parse_args() -> Result<Option<PathBuf>, lexopt::Error> {
@@ -142,34 +143,62 @@ fn local_dir(payload: &Payload) -> PathBuf {
     PathBuf::from("local")
 }
 
+fn ctx(c: &Connection) -> String {
+    format!("{} · {} · {}", c.name, c.base_url, c.username)
+}
+
+fn save(app: &App) -> Option<String> {
+    app.store
+        .save()
+        .err()
+        .map(|e| format!("Could not save {}: {e}", app.store.path().display()))
+}
+
 // ---------------------------------------------------------------- sign-in gate
 
 fn sign_in(app: &mut App) -> Option<Session> {
+    let mut notice: Option<(Status, String)> = None;
     loop {
-        ui::title(None);
-        ui::heading("Choose a connection");
-        for (i, c) in app.store.connections.iter().enumerate() {
-            let saved = if c.password.is_some() {
-                "Saved login"
-            } else {
-                "Session only"
-            };
-            ui::item(
-                &(i + 1).to_string(),
-                &format!("{:<12} {:<40}", c.name, c.base_url),
-                saved,
-            );
+        let mut f = Frame::new("Choose a connection");
+        f.notice = notice.take();
+        if app.store.connections.is_empty() {
+            f.text("No connections yet. A connection is the web server address of an IRIS instance plus an IRIS account.");
+        } else {
+            f.dim("Pick the IRIS instance to work with, or define a new one.");
         }
-        ui::item("N", "New connection", "");
-        ui::item("Q", "Exit", "");
-        ui::blank();
+        let mut entries = Vec::new();
+        if !app.store.connections.is_empty() {
+            entries.push(section("Saved connections"));
+            let w = app
+                .store
+                .connections
+                .iter()
+                .map(|c| c.name.chars().count())
+                .max()
+                .unwrap_or(0)
+                .max(8);
+            for (i, c) in app.store.connections.iter().enumerate() {
+                let saved = if c.password.is_some() {
+                    "saved login"
+                } else {
+                    "asks for password"
+                };
+                entries.push(item(
+                    (i + 1).to_string(),
+                    format!("{:<w$}  {}", c.name, c.base_url),
+                    saved,
+                ));
+            }
+            entries.push(gap());
+        }
+        entries.push(item("N", "New connection", "name, URL and login"));
+        entries.push(item("Q", "Quit", ""));
         let default = if app.store.connections.is_empty() {
             "N"
         } else {
             "1"
         };
-        let choice = ui::choose("Connection", default);
-        match choice.as_str() {
+        match ui::menu(&f, &entries, default).as_str() {
             "Q" => return None,
             "N" => {
                 if let Some(c) = define_connection(app, None) {
@@ -178,77 +207,96 @@ fn sign_in(app: &mut App) -> Option<Session> {
                     }
                 }
             }
-            n => match n.parse::<usize>() {
-                Ok(i) if i >= 1 && i <= app.store.connections.len() => {
-                    if let Some(s) =
-                        authenticate(app, app.store.connections[i - 1].clone(), Some(i - 1))
-                    {
+            n => {
+                if let Ok(i) = n.parse::<usize>() {
+                    let c = app.store.connections[i - 1].clone();
+                    if let Some(s) = authenticate(app, c, Some(i - 1)) {
                         return Some(s);
                     }
                 }
-                _ => ui::line("Choose a listed number, N or Q."),
-            },
+            }
         }
     }
 }
 
-/// Ask for name, base URL and username. `prefill` keeps earlier answers when editing.
+/// Ask for name, base URL and username, one screen each. `prefill` keeps earlier answers.
 fn define_connection(app: &App, prefill: Option<&Connection>) -> Option<Connection> {
-    ui::blank();
-    ui::heading(if prefill.is_some() {
+    let mut f = Frame::new(if prefill.is_some() {
         "Edit connection"
     } else {
         "New connection"
     });
+    f.dim(
+        "A connection is how this tool reaches IRIS: its web server address and an IRIS account.",
+    );
+    f.blank();
+
+    let mut error = None;
     let name = loop {
-        let n = ui::ask(
-            "Name of this connection",
-            prefill.map(|c| c.name.as_str()).unwrap_or(""),
-        );
-        if n.is_empty() || n.chars().any(char::is_control) || n.len() > 40 {
-            ui::line("Enter a short name (up to 40 characters).");
+        let mut g = f.clone();
+        g.error = error.take();
+        g.text("Name — a local label for this connection, for example iris-prod.");
+        let n = ui::input(&g, "Name", prefill.map(|c| c.name.as_str()).unwrap_or(""));
+        if n.is_empty() || n.chars().any(char::is_control) || n.chars().count() > 40 {
+            error = Some("Enter a short name (up to 40 characters).".into());
             continue;
         }
         let clash = app.store.find(&n).is_some_and(|i| {
             prefill.is_none_or(|p| !app.store.connections[i].name.eq_ignore_ascii_case(&p.name))
         });
         if clash {
-            ui::line(&format!("A connection named '{n}' already exists."));
+            error = Some(format!("A connection named '{n}' already exists."));
             continue;
         }
         break n;
     };
+    f.kv("Name", &name);
+
     let url = loop {
-        ui::dim("Enter the base URL used to connect to the server, or just its hostname/IP.");
-        let raw = ui::ask(
-            "Base URL  http(s)://host(:port)/pathPrefix",
+        let mut g = f.clone();
+        g.error = error.take();
+        g.blank();
+        g.text("Base URL — how to reach the IRIS web server: http(s)://host(:port)/pathPrefix, or just the host name or IP.");
+        let raw = ui::input(
+            &g,
+            "Base URL",
             prefill.map(|c| c.base_url.as_str()).unwrap_or(""),
         );
         let parsed = match config::parse_base_url(&raw) {
             Ok(UrlInput::Full(u)) => u,
-            Ok(UrlInput::NeedsScheme(host)) => match ask_scheme(&host) {
+            Ok(UrlInput::NeedsScheme(host)) => match ask_scheme(&f, &host) {
                 Some(u) => u,
                 None => continue,
             },
             Err(e) => {
-                ui::line(&e);
+                error = Some(e);
                 continue;
             }
         };
-        if confirm_url(&parsed) {
+        if parsed.port.is_some() || confirm_no_port(&f, &parsed) {
             break parsed.as_string();
         }
     };
+    f.kv("Base URL", &url);
+
     let username = loop {
-        let u = ui::ask(
+        let mut g = f.clone();
+        g.error = error.take();
+        g.blank();
+        g.text(
+            "Username — an IRIS account allowed to install (see the README for the privileges).",
+        );
+        let u = ui::input(
+            &g,
             "Username",
             prefill.map(|c| c.username.as_str()).unwrap_or(""),
         );
         if !u.is_empty() && !u.contains(':') {
             break u;
         }
-        ui::line("Enter an IRIS username (it cannot contain ':').");
+        error = Some("Enter an IRIS username (it cannot contain ':').".into());
     };
+
     let mut c = prefill.cloned().unwrap_or(Connection {
         name: String::new(),
         base_url: String::new(),
@@ -268,74 +316,70 @@ fn define_connection(app: &App, prefill: Option<&Connection>) -> Option<Connecti
     Some(c)
 }
 
-fn ask_scheme(host: &str) -> Option<BaseUrl> {
-    ui::line(&format!(
+fn ask_scheme(f: &Frame, host: &str) -> Option<BaseUrl> {
+    let mut g = f.clone();
+    g.blank();
+    g.text(&format!(
         "'{host}' has no scheme. Which one does the IRIS web server use?"
     ));
-    ui::item("1", "https", "");
-    ui::item("2", "http", "");
-    loop {
-        match ui::choose("Scheme", "").as_str() {
-            "1" | "HTTPS" => {
-                return config::with_scheme("https", host)
-                    .map_err(|e| ui::line(&e))
-                    .ok()
-            }
-            "2" | "HTTP" => {
-                return config::with_scheme("http", host)
-                    .map_err(|e| ui::line(&e))
-                    .ok()
-            }
-            _ => ui::line("Enter 1 or 2."),
-        }
-    }
+    let entries = [
+        item("1", "https", "encrypted"),
+        item("2", "http", "unencrypted"),
+        item("B", "Back", "enter the URL again"),
+    ];
+    let scheme = match ui::menu(&g, &entries, "1").as_str() {
+        "1" => "https",
+        "2" => "http",
+        _ => return None,
+    };
+    config::with_scheme(scheme, host).ok()
 }
 
-/// Show the URL exactly as it will be used; without a port, warn and ask.
-fn confirm_url(u: &BaseUrl) -> bool {
-    ui::blank();
-    if u.port.is_none() {
-        ui::status(Status::Action, "No port was given.");
-        ui::detail(&format!("The URL will be used exactly as written, so the {} default port applies. IRIS's private web server usually listens on another port (often 52773). Nothing is assumed.", u.scheme));
-    }
-    ui::line(&format!("  URL  {}", u.as_string()));
-    ui::blank();
-    if u.port.is_none() {
-        ui::confirm("Use this URL?", false)
-    } else {
-        true
-    }
+/// Without a port, warn and show the URL exactly as it will be used.
+fn confirm_no_port(f: &Frame, u: &BaseUrl) -> bool {
+    let mut g = f.clone();
+    g.blank();
+    g.status(Status::Action, "No port was given.");
+    g.detail(&format!(
+        "The URL will be used exactly as written, so the {} default port applies. IRIS's own web server usually listens on another port (often 52773). Nothing is assumed.",
+        u.scheme
+    ));
+    g.blank();
+    g.kv("URL", &u.as_string());
+    let entries = [
+        item("E", "Enter the URL again", ""),
+        item("U", "Use it as written", ""),
+    ];
+    ui::menu(&g, &entries, "E") == "U"
 }
 
 /// Probe, then authenticate. `idx` is the stored connection being used, if any.
 fn authenticate(app: &mut App, mut conn: Connection, idx: Option<usize>) -> Option<Session> {
     let mut typed: Option<String> = None;
+    let mut error: Option<String> = None;
     loop {
+        let mut f = Frame::new("Sign in").context(&ctx(&conn));
+        f.kv("Connection", &conn.name);
+        f.kv("Base URL", &conn.base_url);
+        f.kv("Username", &conn.username);
+        f.error = error.take();
         let (password, remembered) = match typed.take() {
             Some(p) => (p, false),
             None => match conn.saved_password_for(&conn.base_url, &conn.username) {
                 Some(p) => (p.to_string(), true),
-                None => {
-                    ui::blank();
-                    ui::line(&format!(
-                        "Sign in to {} ({}) as {}",
-                        conn.name, conn.base_url, conn.username
-                    ));
-                    (ui::password("Password"), false)
-                }
+                None => (ui::secret(&f, "Password"), false),
             },
         };
+        f.error = None;
         log::secret(&password);
         let client = Client::new(&conn.base_url, &conn.username, &password);
-        let result = ui::step(&format!("Connecting to {}", conn.base_url), || {
+        let probed = ui::busy(&f, &format!("Connecting to {}", conn.base_url), || {
             client.probe()
         });
-        let result = result.and_then(|_| {
-            if !plain_http_allowed(&mut conn) {
-                return Err(Error::Http(0, "cancelled".into()));
-            }
-            ui::step("Signing in", || client.authenticate())
-        });
+        if probed.is_ok() && !plain_http_allowed(&f, &mut conn) {
+            return None;
+        }
+        let result = probed.and_then(|_| ui::busy(&f, "Signing in", || client.authenticate()));
         match result {
             Ok(server) => {
                 if let Some(inst) = conn
@@ -343,11 +387,19 @@ fn authenticate(app: &mut App, mut conn: Connection, idx: Option<usize>) -> Opti
                     .as_ref()
                     .filter(|i| !i.guid.is_empty() && i.guid != server.instance_id)
                 {
-                    ui::error_block(
-                        "This URL now reaches a different IRIS instance",
-                        &format!("{} was recorded as instance {}, but it now answers as {}. Nothing was changed.", conn.base_url, inst.guid, server.instance_id),
+                    let mut g =
+                        Frame::new("A different IRIS instance answered").context(&ctx(&conn));
+                    g.status(
+                        Status::Fail,
+                        "This URL now reaches a different IRIS instance.",
                     );
-                    if !ui::confirm("Treat it as this connection's new target? Saved setup choices and the saved password are cleared", false) {
+                    g.detail(&format!(
+                        "{} was recorded as instance {}, but it now answers as {}. Nothing was changed.",
+                        conn.base_url, inst.guid, server.instance_id
+                    ));
+                    g.blank();
+                    g.text("If this is intended (for example the server was rebuilt), make it this connection's new target. Its saved setup choices and saved password are cleared.");
+                    if !ui::yes_no(&g, "Use the new instance", "Go back", false) {
                         return None;
                     }
                     conn.setup = Setup::default();
@@ -364,15 +416,15 @@ fn authenticate(app: &mut App, mut conn: Connection, idx: Option<usize>) -> Opti
                     platform,
                 });
                 if !remembered {
-                    let path = app.store.path().display().to_string();
-                    conn.password = if ui::confirm(
-                        &format!("Remember the password? It is saved in plain text in {path}"),
-                        true,
-                    ) {
-                        Some(password)
-                    } else {
-                        None
-                    };
+                    let mut g = Frame::new("Remember the password?").context(&ctx(&conn));
+                    g.status(Status::Ok, "Signed in.");
+                    g.blank();
+                    g.text(&format!(
+                        "If you remember it, the password is saved in plain text in {} — a file only your user can read, never committed. Otherwise you enter it on every launch.",
+                        app.store.path().display()
+                    ));
+                    conn.password = ui::yes_no(&g, "Yes, remember it", "No, ask every time", true)
+                        .then_some(password);
                 }
                 let i = match idx {
                     Some(i) => {
@@ -384,7 +436,7 @@ fn authenticate(app: &mut App, mut conn: Connection, idx: Option<usize>) -> Opti
                         app.store.connections.len() - 1
                     }
                 };
-                save(app);
+                let _ = save(app);
                 log::write(&format!(
                     "signed in: {} {}",
                     app.store.connections[i].name, app.store.connections[i].base_url
@@ -395,35 +447,34 @@ fn authenticate(app: &mut App, mut conn: Connection, idx: Option<usize>) -> Opti
                     server,
                 });
             }
-            Err(Error::Http(0, _)) => return None,
             Err(e) => {
                 log::write(&format!("sign-in failed: {} {e}", conn.base_url));
                 let unauthorized = matches!(e, Error::Unauthorized);
                 if remembered && unauthorized {
-                    ui::line("The saved login no longer works. Your connection and setup choices are kept; enter the password again.");
+                    error = Some("The saved login no longer works. Your connection and setup choices are kept; enter the password again.".into());
                     continue;
                 }
-                ui::error_block("Sign-in failed", &log::redact(&e.to_string()));
-                ui::item("R", "Retry", "");
-                ui::item("E", "Edit connection", "");
-                ui::item("B", "Back", "");
-                loop {
-                    match ui::choose("Choice", "R").as_str() {
-                        "R" => {
-                            if !unauthorized {
-                                typed = Some(password.clone());
-                            }
-                            break;
+                let mut g = Frame::new("Sign-in failed").context(&ctx(&conn));
+                g.status(Status::Fail, "Could not sign in.");
+                g.blank();
+                g.text(&log::redact(&e.to_string()));
+                let entries = [
+                    item("R", "Retry", ""),
+                    item("E", "Edit connection", ""),
+                    item("B", "Back", ""),
+                ];
+                match ui::menu(&g, &entries, "R").as_str() {
+                    "R" => {
+                        if !unauthorized {
+                            typed = Some(password.clone());
                         }
-                        "E" => {
-                            if let Some(c) = define_connection(app, Some(&conn)) {
-                                conn = c;
-                            }
-                            break;
-                        }
-                        "B" => return None,
-                        _ => ui::line("Enter R, E or B."),
                     }
+                    "E" => {
+                        if let Some(c) = define_connection(app, Some(&conn)) {
+                            conn = c;
+                        }
+                    }
+                    _ => return None,
                 }
             }
         }
@@ -431,7 +482,7 @@ fn authenticate(app: &mut App, mut conn: Connection, idx: Option<usize>) -> Opti
 }
 
 /// Basic credentials over plain http to another host travel unencrypted: ask once.
-fn plain_http_allowed(conn: &mut Connection) -> bool {
+fn plain_http_allowed(f: &Frame, conn: &mut Connection) -> bool {
     let url = match config::parse_base_url(&conn.base_url) {
         Ok(UrlInput::Full(u)) => u,
         _ => return true,
@@ -439,27 +490,19 @@ fn plain_http_allowed(conn: &mut Connection) -> bool {
     if url.is_https() || url.is_localhost() || conn.allow_plain_http {
         return true;
     }
-    ui::blank();
-    ui::status(
+    let mut g = f.clone();
+    g.blank();
+    g.status(
         Status::Action,
         "This connection uses plain http to another machine.",
     );
-    ui::detail("The username and password would cross the network unencrypted. Prefer an https address if the web server offers one.");
-    let ok = ui::confirm("Send the credentials over http anyway?", false);
+    g.detail("The username and password would cross the network unencrypted. Prefer an https address if the web server offers one.");
+    let ok = ui::yes_no(&g, "Send them over http anyway", "Cancel", false);
     conn.allow_plain_http = ok;
     ok
 }
 
-fn save(app: &App) {
-    if let Err(e) = app.store.save() {
-        ui::status(
-            Status::Fail,
-            &format!("Could not save {}: {e}", app.store.path().display()),
-        );
-    }
-}
-
-// ---------------------------------------------------------------- after sign-in
+// ---------------------------------------------------------------- overview
 
 enum Health {
     NotInstalled,
@@ -467,16 +510,26 @@ enum Health {
     Healthy(Verification),
 }
 
+struct Overview {
+    info: Info,
+    health: Health,
+    frame: Frame,
+}
+
 fn session_menu(app: &mut App, s: Session) -> Next {
-    let Some(info) = load_installer(app, &s) else {
+    if !load_installer(app, &s) {
         return Next::SignIn;
-    };
+    }
+    let mut notice: Option<(Status, String)> = None;
     loop {
+        // Re-read the server every time: the previous screen may have installed something.
+        let Some(ov) = inspect(app, &s) else {
+            return Next::SignIn;
+        };
         let conn = app.store.connections[s.idx].clone();
-        ui::title(Some(&header(&conn)));
-        let health = inspect(app, &s, &info);
-        ui::blank();
-        let recommended = match &health {
+        let mut f = ov.frame;
+        f.notice = notice.take();
+        let recommended = match &ov.health {
             Health::NotInstalled => "Set up backend",
             Health::Partial
                 if conn
@@ -488,89 +541,91 @@ fn session_menu(app: &mut App, s: Session) -> Next {
                 "Resume setup"
             }
             Health::Partial => "Repair installation",
-            Health::Healthy(_) => "Show connection details",
+            Health::Healthy(_) => "Webapp settings",
         };
-        ui::item("1", recommended, "Recommended");
-        ui::item("2", "Check installation", "");
-        ui::item("3", "Switch connection / sign out", "");
+        let mut entries = vec![
+            item("1", recommended, "recommended"),
+            item("2", "Check installation", "read-only"),
+            gap(),
+            item("S", "Switch connection / sign out", ""),
+        ];
         if conn.password.is_some() {
-            ui::item("4", "Forget saved login", "");
+            entries.push(item(
+                "F",
+                "Forget saved login",
+                "remove the password from this machine",
+            ));
         }
-        ui::item("5", "Delete connection", "");
-        ui::item("Q", "Exit", "");
-        ui::blank();
-        match ui::choose("Choice", "1").as_str() {
+        entries.push(item("D", "Delete connection", "only the local definition"));
+        entries.push(item("Q", "Quit", ""));
+        match ui::menu(&f, &entries, "1").as_str() {
             "1" => {
-                let next = match health {
-                    Health::Healthy(v) => handoff(app, &s, &v),
-                    _ => setup(app, &s, &info),
+                let next = match ov.health {
+                    Health::Healthy(v) => handoff(app, &s, v),
+                    _ => setup(app, &s, &ov.info),
                 };
                 if let Some(n) = next {
                     return n;
                 }
             }
             "2" => check(app, &s),
-            "3" => {
+            "S" => {
                 log::write("signed out");
                 return Next::SignIn;
             }
-            "4" if conn.password.is_some() => {
+            "F" => {
                 app.store.connections[s.idx].password = None;
-                save(app);
-                ui::status(
-                    Status::Ok,
-                    &format!(
-                        "Saved password removed from {}. You stay signed in for this session.",
-                        app.store.path().display()
+                notice = Some(match save(app) {
+                    None => (
+                        Status::Ok,
+                        "Saved password removed. You stay signed in until you quit or switch."
+                            .into(),
                     ),
-                );
+                    Some(e) => (Status::Fail, e),
+                });
             }
-            "5" => {
-                if ui::confirm(
-                    &format!(
-                        "Delete the local connection '{}'? Nothing on the IRIS server is changed",
-                        conn.name
-                    ),
-                    false,
-                ) {
+            "D" => {
+                let mut g = Frame::new("Delete connection").context(&ctx(&conn));
+                g.text(&format!("Delete the local connection '{}'? Only this machine's definition is removed; nothing on the IRIS server changes.", conn.name));
+                if ui::yes_no(&g, "Delete it", "Keep it", false) {
                     app.store.connections.remove(s.idx);
-                    save(app);
+                    let _ = save(app);
                     return Next::SignIn;
                 }
             }
-            "Q" => return Next::Quit,
-            _ => ui::line("Choose one of the listed options."),
+            _ => {
+                ui::show(&f);
+                return Next::Quit;
+            }
         }
     }
 }
 
-fn header(c: &Connection) -> String {
-    format!("{} · {} · signed in as {}", c.name, c.base_url, c.username)
-}
-
-/// Load the installer class into %SYS and read what IRIS reports about itself.
-fn load_installer(app: &mut App, s: &Session) -> Option<Info> {
+/// Load the installer class into %SYS. False means go back to the connections.
+fn load_installer(app: &mut App, s: &Session) -> bool {
+    let conn = app.store.connections[s.idx].clone();
     let inst = Installer {
         client: &s.client,
         payload: &app.payload,
     };
     loop {
-        let r = ui::step("Loading installer support into %SYS", || inst.bootstrap())
-            .and_then(|_| inst.info());
-        match r {
-            Ok(info) => {
-                if let Some(i) = app.store.connections[s.idx].instance.as_mut() {
-                    i.platform = info.platform.clone();
-                }
-                save(app);
-                return Some(info);
-            }
+        let f = Frame::new("Preparing").context(&ctx(&conn));
+        match ui::busy(&f, "Loading installer support into %SYS", || {
+            inst.bootstrap()
+        }) {
+            Ok(()) => return true,
             Err(e) => {
-                ui::error_block("Installer support could not be loaded", &log::redact(&e));
-                ui::item("R", "Retry", "");
-                ui::item("B", "Back to connections", "");
-                if ui::choose("Choice", "R") != "R" {
-                    return None;
+                let mut g =
+                    Frame::new("Installer support could not be loaded").context(&ctx(&conn));
+                g.status(
+                    Status::Fail,
+                    "The installer class could not be loaded into %SYS.",
+                );
+                g.blank();
+                g.text(&log::redact(&e));
+                let entries = [item("R", "Retry", ""), item("B", "Back to connections", "")];
+                if ui::menu(&g, &entries, "R") != "R" {
+                    return false;
                 }
             }
         }
@@ -578,81 +633,125 @@ fn load_installer(app: &mut App, s: &Session) -> Option<Info> {
 }
 
 /// Read-only overview: connection, platform, interoperability, backend state.
-fn inspect(app: &App, s: &Session, info: &Info) -> Health {
-    let conn = &app.store.connections[s.idx];
+fn inspect(app: &mut App, s: &Session) -> Option<Overview> {
+    let conn = app.store.connections[s.idx].clone();
     let inst = Installer {
         client: &s.client,
         payload: &app.payload,
     };
-    ui::status(
-        Status::Ok,
-        &format!("IRIS connection  {}", short_version(&info.version)),
-    );
-    let target = info.target();
-    match &target {
-        payload::Target::Linux(_) => ui::status(
-            Status::Ok,
-            &format!("Server platform and native artifacts  {}", target.label()),
-        ),
-        payload::Target::Unsupported(p) => {
-            ui::status(Status::Fail, &format!("Server platform not supported: {p}"))
-        }
-    }
-    if s.server.interoperability {
-        ui::status(Status::Ok, "Interoperability available");
-    } else {
-        ui::status(
-            Status::Fail,
-            "Interoperability is not available on this instance",
-        );
-    }
-    let missing = info.privileges.missing();
-    if !missing.is_empty() {
-        ui::status(
-            Status::Fail,
-            &format!("Missing privileges: {}", missing.join(", ")),
-        );
-    }
-    if let Some(p) = conn
-        .setup
-        .progress
-        .as_deref()
-        .and_then(|p| p.strip_prefix("running:"))
-    {
-        ui::status(Status::Action, &format!("A previous run stopped during \"{p}\"; its outcome is unknown. The state below was inspected fresh."));
-    }
     let ns = conn.namespace();
-    let exists = info
-        .namespaces
-        .iter()
-        .any(|n| n.name.eq_ignore_ascii_case(&ns));
-    if !exists {
-        ui::status(Status::Todo, "OPC UA backend installation");
-        return Health::NotInstalled;
-    }
-    let sp = ui::Spinner::start("Checking the installation");
-    let v = inst.verify(&ns, &conn.app_path());
-    sp.stop();
-    match v {
-        Ok(v) if v.ok => {
-            ui::status(Status::Ok, &format!("OPC UA backend installed in {ns}"));
-            Health::Healthy(v)
-        }
-        Ok(v) => {
-            ui::status(
-                Status::Todo,
-                &format!("OPC UA backend in {ns} is incomplete"),
-            );
-            for c in v.checks.iter().filter(|c| !c.ok) {
-                ui::detail(&c.message);
+    let path = conn.app_path();
+    loop {
+        let wait = Frame::new("Overview").context(&ctx(&conn));
+        let r = ui::busy(&wait, "Inspecting the instance", || {
+            let info = inst.info()?;
+            let exists = info
+                .namespaces
+                .iter()
+                .any(|n| n.name.eq_ignore_ascii_case(&ns));
+            let v = if exists {
+                Some(inst.verify(&ns, &path))
+            } else {
+                None
+            };
+            Ok::<_, String>((info, v))
+        });
+        let (info, v) = match r {
+            Ok(x) => x,
+            Err(e) => {
+                let mut g = Frame::new("Inspection failed").context(&ctx(&conn));
+                g.status(Status::Fail, &log::redact(&e));
+                let entries = [item("R", "Retry", ""), item("B", "Back to connections", "")];
+                if ui::menu(&g, &entries, "R") != "R" {
+                    return None;
+                }
+                continue;
             }
-            Health::Partial
+        };
+        if let Some(i) = app.store.connections[s.idx].instance.as_mut() {
+            i.platform = info.platform.clone();
         }
-        Err(e) => {
-            ui::status(Status::Fail, "Installation check failed");
-            ui::detail(&log::redact(&e));
-            Health::NotInstalled
+        let _ = save(app);
+
+        let mut f = Frame::new("Overview").context(&ctx(&conn));
+        f.status(
+            Status::Ok,
+            &format!("IRIS connection        {}", short_version(&info.version)),
+        );
+        match info.target() {
+            t @ payload::Target::Linux(_) => {
+                f.status(Status::Ok, &format!("Server platform        {}", t.label()))
+            }
+            payload::Target::Unsupported(p) => f.status(
+                Status::Fail,
+                &format!("Server platform        not supported: {p}"),
+            ),
         }
+        if s.server.interoperability {
+            f.status(Status::Ok, "Interoperability       available");
+        } else {
+            f.status(
+                Status::Fail,
+                "Interoperability       not available on this instance",
+            );
+        }
+        let missing = info.privileges.missing();
+        if !missing.is_empty() {
+            f.status(
+                Status::Fail,
+                &format!("Privileges             missing {}", missing.join(", ")),
+            );
+        }
+        if let Some(p) = conn
+            .setup
+            .progress
+            .as_deref()
+            .and_then(|p| p.strip_prefix("running:"))
+        {
+            f.status(
+                Status::Action,
+                &format!("A previous run stopped during \"{p}\"."),
+            );
+            f.detail("Its outcome is unknown; the state below was inspected fresh.");
+        }
+        let health = match v {
+            None => {
+                f.status(
+                    Status::Todo,
+                    &format!(
+                        "OPC UA backend         not installed (namespace {ns} does not exist)"
+                    ),
+                );
+                Health::NotInstalled
+            }
+            Some(Ok(v)) if v.ok => {
+                f.status(
+                    Status::Ok,
+                    &format!("OPC UA backend         installed in {ns} · {path}"),
+                );
+                Health::Healthy(v)
+            }
+            Some(Ok(v)) => {
+                f.status(
+                    Status::Todo,
+                    &format!("OPC UA backend         incomplete in {ns}"),
+                );
+                for c in v.checks.iter().filter(|c| !c.ok) {
+                    f.detail(&c.message);
+                }
+                Health::Partial
+            }
+            Some(Err(e)) => {
+                f.status(Status::Fail, "OPC UA backend         could not be checked");
+                f.detail(&log::redact(&e));
+                Health::Partial
+            }
+        };
+        return Some(Overview {
+            info,
+            health,
+            frame: f,
+        });
     }
 }
 
@@ -667,72 +766,87 @@ fn short_version(v: &str) -> String {
     }
 }
 
-/// Read-only verification plus the API ping.
+/// Read-only verification plus the API ping, on its own screen.
 fn check(app: &App, s: &Session) {
     let conn = &app.store.connections[s.idx];
     let inst = Installer {
         client: &s.client,
         payload: &app.payload,
     };
-    ui::blank();
-    ui::heading(&format!(
-        "Checking {} · namespace {} · {}",
-        conn.name,
-        conn.namespace(),
-        conn.app_path()
-    ));
-    let sp = ui::Spinner::start("Verifying");
-    let v = inst.verify(&conn.namespace(), &conn.app_path());
-    sp.stop();
-    match v {
-        Ok(v) => {
-            print_checks(&v);
-            if v.check("app").is_some_and(|c| c.ok) {
-                print_ping(&inst, conn, &v);
+    loop {
+        let title = format!(
+            "Check installation · {} · {}",
+            conn.namespace(),
+            conn.app_path()
+        );
+        let wait = Frame::new(&title).context(&ctx(conn));
+        let r = ui::busy(&wait, "Verifying", || {
+            inst.verify(&conn.namespace(), &conn.app_path()).map(|v| {
+                let p = v
+                    .check("app")
+                    .is_some_and(|c| c.ok)
+                    .then(|| inst.ping(&conn.app_path(), v.api_access));
+                (v, p)
+            })
+        });
+        let mut f = Frame::new(&title).context(&ctx(conn));
+        match r {
+            Ok((v, p)) => {
+                checks_into(&mut f, &v);
+                if let Some(p) = p {
+                    ping_into(&mut f, conn, &p);
+                }
             }
+            Err(e) => f.status(Status::Fail, &log::redact(&e)),
         }
-        Err(e) => ui::status(Status::Fail, &log::redact(&e)),
+        let entries = [item("R", "Run again", ""), item("B", "Back", "")];
+        if ui::menu(&f, &entries, "B") != "R" {
+            return;
+        }
     }
-    ui::blank();
-    ui::ask("Press Enter to continue", "");
 }
 
-fn print_checks(v: &Verification) {
+fn checks_into(f: &mut Frame, v: &Verification) {
     for c in &v.checks {
-        ui::status(if c.ok { Status::Ok } else { Status::Fail }, &c.message);
+        f.status(if c.ok { Status::Ok } else { Status::Fail }, &c.message);
     }
 }
 
-fn print_ping(inst: &Installer, conn: &Connection, v: &Verification) -> bool {
+/// Add the API ping result; true when the API answered.
+fn ping_into(f: &mut Frame, conn: &Connection, p: &Ping) -> bool {
     let url = format!("{}{}", conn.base_url, conn.app_path());
-    let sp = ui::Spinner::start("Calling the OPC UA API");
-    let p = inst.ping(&conn.app_path(), v.api_access);
-    sp.stop();
     match p {
         Ping::Ok => {
-            ui::status(
+            f.status(
                 Status::Ok,
                 &format!("API responds at {url} (checked from this machine)"),
             );
             true
         }
         Ping::NoAccess => {
-            ui::status(
+            f.status(
                 Status::Action,
                 &format!("API at {url} refused {}", conn.username),
             );
-            ui::detail(&format!("The account lacks the {} resource the REST application requires. Grant the {} role (created by this installer) to the accounts that use the webapp.", installer_resource(), installer_role(&conn.namespace())));
+            f.detail(&format!(
+                "The account lacks the {} resource the REST application requires. Grant the {} role (created by this installer) to the IRIS accounts that use the webapp.",
+                installer_resource(),
+                installer_role(&conn.namespace())
+            ));
             false
         }
         Ping::NotRouted => {
-            ui::status(Status::Action, &format!("API not reachable at {url}"));
-            ui::detail(&format!("IRIS has the application and this account may use it, but the request returned 404. The web server or gateway in front of IRIS probably does not route {}; add that path to its IRIS application paths.", conn.app_path()));
+            f.status(Status::Action, &format!("API not reachable at {url}"));
+            f.detail(&format!(
+                "IRIS has the application and this account may use it, but the request returned 404. The web server or gateway in front of IRIS probably does not route {}; add that path to its IRIS application paths.",
+                conn.app_path()
+            ));
             false
         }
         Ping::Other(e) => {
-            ui::status(
+            f.status(
                 Status::Action,
-                &format!("API check at {url} failed: {}", log::redact(&e)),
+                &format!("API check at {url} failed: {}", log::redact(e)),
             );
             false
         }
@@ -750,7 +864,7 @@ fn installer_role(ns: &str) -> String {
 
 // ---------------------------------------------------------------- setup wizard
 
-/// Choose namespace → preflight → review → apply → handoff. `None` returns to the menu.
+/// Choose namespace → preflight → review → apply → handoff. `None` returns to the overview.
 fn setup(app: &mut App, s: &Session, info: &Info) -> Option<Next> {
     loop {
         let (ns, path) = choose_namespace(app, s, info)?;
@@ -762,41 +876,48 @@ fn setup(app: &mut App, s: &Session, info: &Info) -> Option<Next> {
             c.setup.namespace = Some(ns.clone());
             c.setup.app_path = Some(path.clone());
         }
-        save(app);
+        let _ = save(app);
+        let conn = app.store.connections[s.idx].clone();
         let inst = Installer {
             client: &s.client,
             payload: &app.payload,
         };
         let plan = loop {
             // Re-read the server each attempt: Retry follows a privilege grant or a manual copy.
-            let sp = ui::Spinner::start("Checking prerequisites");
-            let r = match inst.info() {
-                Ok(fresh) => inst.preflight(&fresh, &ns, &path),
-                Err(e) => Err(vec![installer::Blocker {
-                    title: "Inspection failed".into(),
-                    body: e,
-                }]),
-            };
-            sp.stop();
+            let wait = Frame::new("Checking prerequisites").context(&ctx(&conn));
+            let r = ui::busy(
+                &wait,
+                &format!("Checking namespace {ns}, privileges and native files"),
+                || match inst.info() {
+                    Ok(fresh) => inst.preflight(&fresh, &ns, &path),
+                    Err(e) => Err(vec![installer::Blocker {
+                        title: "Inspection failed".into(),
+                        body: e,
+                    }]),
+                },
+            );
             match r {
                 Ok(plan) => break plan,
                 Err(blockers) => {
-                    ui::blank();
+                    let mut f = Frame::new("Cannot install yet").context(&ctx(&conn));
                     for b in &blockers {
-                        ui::status(Status::Fail, &b.title);
-                        for l in b.body.lines() {
-                            ui::detail(l);
-                        }
+                        f.status(Status::Fail, &b.title);
+                        f.detail(&b.body);
+                        f.blank();
                         log::write(&format!("preflight: {}: {}", b.title, b.body));
                     }
-                    ui::blank();
-                    ui::line("Nothing was changed.");
-                    ui::item("R", "Retry the checks", "");
-                    ui::item("B", "Back", "");
-                    ui::item("Q", "Save and exit", "");
-                    match ui::choose("Choice", "R").as_str() {
+                    f.dim("Nothing was changed.");
+                    let entries = [
+                        item("R", "Retry the checks", ""),
+                        item("B", "Back", ""),
+                        item("Q", "Save and quit", ""),
+                    ];
+                    match ui::menu(&f, &entries, "R").as_str() {
                         "R" => continue,
-                        "Q" => return Some(Next::Quit),
+                        "Q" => {
+                            ui::show(&f);
+                            return Some(Next::Quit);
+                        }
                         _ => return None,
                     }
                 }
@@ -808,7 +929,7 @@ fn setup(app: &mut App, s: &Session, info: &Info) -> Option<Next> {
             Review::Quit => return Some(Next::Quit),
         }
         match apply(app, s, &plan) {
-            Applied::Done(v) => return handoff(app, s, &v),
+            Applied::Done(v) => return handoff(app, s, v),
             Applied::Retry => continue,
             Applied::Menu => return None,
             Applied::Quit => return Some(Next::Quit),
@@ -816,6 +937,16 @@ fn setup(app: &mut App, s: &Session, info: &Info) -> Option<Next> {
     }
 }
 
+fn namespace_note(state: &str) -> Option<&'static str> {
+    match state {
+        "owned" => Some("installed by this tool"),
+        "backend" => Some("already holds the OPC UA backend"),
+        "empty" => Some("empty interoperability namespace"),
+        _ => None,
+    }
+}
+
+/// Two clear groups: create a new namespace, or use one of the existing ones.
 fn choose_namespace(app: &App, s: &Session, info: &Info) -> Option<(String, String)> {
     let conn = &app.store.connections[s.idx];
     let inst = Installer {
@@ -823,88 +954,118 @@ fn choose_namespace(app: &App, s: &Session, info: &Info) -> Option<(String, Stri
         payload: &app.payload,
     };
     let mut path = conn.app_path();
-    let preferred = conn.namespace();
+    let mut error = None;
+    let exists = |n: &str| {
+        info.namespaces
+            .iter()
+            .any(|x| x.name.eq_ignore_ascii_case(n))
+    };
+    // Suggest the saved choice, else OPCUA; if taken, OPCUA2, OPCUA3, …
+    let suggested = {
+        let saved = conn.namespace();
+        if !exists(&saved) {
+            saved
+        } else {
+            (1..)
+                .map(|i| {
+                    if i == 1 {
+                        "OPCUA".to_string()
+                    } else {
+                        format!("OPCUA{i}")
+                    }
+                })
+                .find(|n| !exists(n))
+                .unwrap()
+        }
+    };
     loop {
-        ui::blank();
-        ui::heading(&format!("Choose a dedicated namespace on {}", conn.name));
-        let mut options: Vec<(String, String)> = Vec::new();
-        let describe = |name: &str| -> String {
-            match info
-                .namespaces
-                .iter()
-                .find(|n| n.name.eq_ignore_ascii_case(name))
-            {
-                None => "Create (recommended)".into(),
-                Some(n) => match n.state.as_str() {
-                    "owned" => "Reuse — installed by this tool".into(),
-                    "backend" => "Reuse — existing OPC UA backend".into(),
-                    "empty" => "Reuse — empty interoperability namespace".into(),
-                    _ => format!("In use: {}", n.reason),
-                },
-            }
-        };
-        options.push((preferred.clone(), describe(&preferred)));
+        let mut f = Frame::new("Where should the OPC UA backend go?").context(&ctx(conn));
+        f.error = error.take();
+        f.text("The backend needs its own interoperability namespace. Create a new one, or use an existing namespace that is empty or already holds the backend.");
+        let mut entries = vec![
+            section("Create a new namespace"),
+            item("1", suggested.clone(), "recommended"),
+            item("N", "Another name…", "type a name"),
+        ];
+        entries.push(gap());
+        entries.push(section("Or use an existing namespace"));
+        let mut keys: Vec<(String, String)> = vec![("1".into(), suggested.clone())];
+        if info.namespaces.is_empty() {
+            entries.push(disabled("none", "this instance has no other namespaces"));
+        }
         for n in &info.namespaces {
-            if (n.state == "owned" || n.state == "backend")
-                && !n.name.eq_ignore_ascii_case(&preferred)
-            {
-                options.push((n.name.clone(), describe(&n.name)));
+            match namespace_note(&n.state) {
+                Some(note) => {
+                    let key = (keys.len() + 1).to_string();
+                    entries.push(item(key.clone(), n.name.clone(), note));
+                    keys.push((key, n.name.clone()));
+                }
+                None => entries.push(disabled(
+                    n.name.clone(),
+                    format!("not usable: {}", n.reason),
+                )),
             }
         }
-        for (i, (name, note)) in options.iter().enumerate() {
-            ui::item(&(i + 1).to_string(), name, note);
-        }
-        ui::item("N", "Enter another name", "");
-        ui::item("A", "Advanced settings", &format!("REST path {path}"));
-        ui::item("B", "Back", "");
-        ui::blank();
-        let choice = ui::choose("Namespace", "1");
+        entries.push(gap());
+        entries.push(item("A", "Advanced settings", format!("REST path {path}")));
+        entries.push(item("B", "Back", ""));
+        let default = keys
+            .iter()
+            .find(|(_, n)| n.eq_ignore_ascii_case(&conn.namespace()))
+            .map(|(k, _)| k.clone())
+            .unwrap_or_else(|| "1".into());
+        let choice = ui::menu(&f, &entries, &default);
         let ns = match choice.as_str() {
             "B" => return None,
             "A" => {
-                path = advanced(&path);
+                path = advanced(conn, &path);
                 continue;
             }
             "N" => {
-                let n = ui::ask("Namespace name", "").to_ascii_uppercase();
+                let mut g = Frame::new("New namespace name").context(&ctx(conn));
+                g.text("Letters, digits, '-' or '_', starting with a letter. A database with the same name is created in the instance's manager directory.");
+                let n = ui::input(&g, "Namespace", "").to_ascii_uppercase();
+                if n.is_empty() {
+                    continue;
+                }
                 if !config::valid_namespace(&n) {
-                    ui::line("Use letters, digits, '-' or '_', starting with a letter.");
+                    error = Some(format!("'{n}' is not a valid namespace name."));
                     continue;
                 }
                 n
             }
-            c => match c.parse::<usize>() {
-                Ok(i) if i >= 1 && i <= options.len() => options[i - 1].0.clone(),
-                _ => {
-                    ui::line("Choose a listed option.");
-                    continue;
-                }
+            k => match keys.iter().find(|(key, _)| key == k) {
+                Some((_, n)) => n.clone(),
+                None => continue,
             },
         };
         // Validate at once, so a conflict is explained before the review.
-        match inst.inspect_namespace(&ns) {
+        match ui::busy(&f, &format!("Checking {ns}"), || {
+            inst.inspect_namespace(&ns)
+        }) {
             Ok(c) if c.namespace.state == "conflict" => {
-                ui::status(
-                    Status::Fail,
-                    &format!("Namespace {ns} cannot be used: {}", c.namespace.reason),
-                );
-                ui::detail("It was not changed. Choose a separate namespace for OPC UA.");
+                error = Some(format!(
+                    "Namespace {ns} cannot be used: {}. It was not changed.",
+                    c.namespace.reason
+                ));
             }
             Ok(_) => return Some((ns, path)),
-            Err(e) => ui::status(Status::Fail, &e),
+            Err(e) => error = Some(e),
         }
     }
 }
 
-fn advanced(current: &str) -> String {
-    ui::blank();
-    ui::heading("Advanced settings");
+fn advanced(conn: &Connection, current: &str) -> String {
+    let mut error = None;
     loop {
-        let p = ui::ask("REST application path", current);
+        let mut f = Frame::new("Advanced settings").context(&ctx(conn));
+        f.error = error.take();
+        f.text("REST application path — the web path the webapp calls. Change it only if the default is taken or your web gateway needs another path.");
+        let p = ui::input(&f, "REST application path", current);
         if config::valid_app_path(&p) {
             return p;
         }
-        ui::line("Use a path such as /csp/opcua/api (letters, digits, '.', '-', '_').");
+        error = Some("Use a path such as /csp/opcua/api (letters, digits, '.', '-', '_').".into());
     }
 }
 
@@ -916,70 +1077,74 @@ enum Review {
 
 fn review(app: &App, s: &Session, plan: &Plan) -> Review {
     let conn = &app.store.connections[s.idx];
-    ui::blank();
-    ui::heading(&format!(
-        "Ready to install into {} ({})",
-        conn.name, conn.base_url
-    ));
+    let mut f = Frame::new("Review the changes").context(&ctx(conn));
     let uploads = plan
         .files
         .iter()
         .filter(|f| f.1 == FileAction::Upload)
         .count();
     let native = if uploads > 0 {
-        "Upload through IRIS"
+        "upload through IRIS"
     } else {
-        "Reuse (already present)"
+        "reuse (already present)"
     };
+    f.heading(&format!("{:<16}{:<24}{}", "What", "Target", "Action"));
     row(
+        &mut f,
         "Namespace",
         &plan.namespace,
         if plan.create_namespace {
-            "Create"
+            "create"
         } else {
-            "Reuse"
+            "reuse"
         },
     );
-    row("Native adapter", &plan.target.label(), native);
-    row("ObjectScript", "OPCUA application", "Import and compile");
+    row(&mut f, "Native adapter", &plan.target.label(), native);
     row(
+        &mut f,
+        "ObjectScript",
+        "OPCUA application",
+        "import and compile",
+    );
+    row(
+        &mut f,
         "REST app",
         &plan.app_path,
-        if plan.create_app { "Create" } else { "Reuse" },
+        if plan.create_app { "create" } else { "reuse" },
     );
+    f.blank();
     for (a, action, dest) in &plan.files {
         let what = match action {
             FileAction::Upload => "upload",
             FileAction::Reuse => "identical, reuse",
-            FileAction::KeepExisting => "keep the existing copy (never replaced)",
+            FileAction::KeepExisting => "keep the existing copy",
         };
-        ui::dim(&format!("  {:<20} {what}  → {dest}", a.name));
+        f.dim(&format!("{:<20} {what} → {dest}", a.name));
     }
     if plan.create_app {
-        ui::dim(&format!(
-            "  The REST app requires resource {}; role {} grants it (both created if missing).",
+        f.dim(&format!(
+            "The REST app requires resource {}; role {} grants it (both created if missing, assigned to nobody).",
             installer_resource(),
             installer_role(&plan.namespace)
         ));
     }
-    ui::blank();
-    loop {
-        match ui::choose(
-            "Enter Install to continue, B to go back, or Q to save and exit",
-            "",
-        )
-        .as_str()
-        {
-            "INSTALL" => return Review::Install,
-            "B" => return Review::Back,
-            "Q" => return Review::Quit,
-            _ => ui::line("Type Install, B or Q."),
+    let entries = [
+        item("I", "Install", "apply the changes above"),
+        item("B", "Back", "change the namespace"),
+        item("Q", "Save and quit", ""),
+    ];
+    match ui::menu(&f, &entries, "I").as_str() {
+        "I" => Review::Install,
+        "B" => Review::Back,
+        _ => {
+            ui::show(&f);
+            Review::Quit
         }
     }
 }
 
-fn row(what: &str, value: &str, action: &str) {
-    ui::line(&format!("{what:<15} {value:<22} {action}"));
+fn row(f: &mut Frame, what: &str, value: &str, action: &str) {
+    f.text(&format!("{what:<16}{value:<24}{action}"));
 }
 
 enum Applied {
@@ -1014,57 +1179,75 @@ impl Lock {
     }
 }
 
+const STEPS: [&str; 6] = [
+    "Native libraries installed",
+    "Namespace ready",
+    "ObjectScript imported and compiled",
+    "Native connector registered and loaded",
+    "REST application configured",
+    "Backend verified",
+];
+
+/// The install screen: every step with its current state.
+fn progress_frame(
+    conn: &Connection,
+    plan: &Plan,
+    done: &[(Status, String)],
+    running: Option<usize>,
+) -> Frame {
+    let mut f =
+        Frame::new(&format!("Installing into namespace {}", plan.namespace)).context(&ctx(conn));
+    for (i, name) in STEPS.iter().enumerate() {
+        if let Some((st, note)) = done.get(i) {
+            f.status(
+                *st,
+                &if note.is_empty() {
+                    name.to_string()
+                } else {
+                    format!("{name}  ({note})")
+                },
+            );
+        } else if running == Some(i) {
+            f.spinning(name);
+        } else {
+            f.status(Status::Wait, name);
+        }
+    }
+    f
+}
+
 fn apply(app: &mut App, s: &Session, plan: &Plan) -> Applied {
-    let _lock = match Lock::acquire(&app.local, &app.store.connections[s.idx].name) {
+    let conn = app.store.connections[s.idx].clone();
+    let _lock = match Lock::acquire(&app.local, &conn.name) {
         Ok(l) => l,
         Err(e) => {
-            ui::error_block("Installation not started", &e);
+            let mut f = Frame::new("Installation not started").context(&ctx(&conn));
+            f.status(Status::Fail, &e);
+            ui::menu(&f, &[item("B", "Back", "")], "B");
             return Applied::Menu;
         }
     };
-    let conn = app.store.connections[s.idx].clone();
-    ui::blank();
-    ui::heading(&format!(
-        "Installing into {} ({}) · namespace {}",
-        conn.name, conn.base_url, plan.namespace
-    ));
-    let steps = [
-        "Native libraries installed",
-        "Namespace ready",
-        "ObjectScript imported and compiled",
-        "Native connector registered and loaded",
-        "REST application configured",
-        "Backend verified",
-    ];
+    let mut done: Vec<(Status, String)> = Vec::new();
     let mut verification = None;
-    for (i, name) in steps.iter().enumerate() {
+    for (i, name) in STEPS.iter().enumerate() {
         set_progress(app, s, &format!("running:{name}"));
         let inst = Installer {
             client: &s.client,
             payload: &app.payload,
         };
-        let sp = ui::Spinner::start(name);
-        let r: Result<String, String> = match i {
+        let frame = progress_frame(&conn, plan, &done, Some(i));
+        let r: Result<String, String> = ui::busy(&frame, name, || match i {
             0 => {
                 let mut notes = Vec::new();
-                let mut res = Ok(());
                 for (a, action, _) in &plan.files {
                     if *action == FileAction::Upload {
-                        match inst.install_file(a) {
-                            Ok(what) => notes.push(format!("{} {what}", a.name)),
-                            Err(e) => {
-                                res = Err(e);
-                                break;
-                            }
-                        }
+                        notes.push(format!("{} {}", a.name, inst.install_file(a)?));
                     }
                 }
-                res.map(|_| {
-                    if notes.is_empty() {
-                        "all present".into()
-                    } else {
-                        notes.join(", ")
-                    }
+                Ok(if notes.is_empty() {
+                    "all present".into()
+                } else {
+                    notes.join(", ")
                 })
             }
             1 => inst.create_namespace(&plan.namespace),
@@ -1095,41 +1278,38 @@ fn apply(app: &mut App, s: &Session, plan: &Plan) -> Applied {
                         .join("; "))
                 }
             }),
-        };
-        sp.stop();
+        });
         match r {
             Ok(note) => {
-                ui::status(
-                    Status::Ok,
-                    &if note.is_empty() {
-                        name.to_string()
-                    } else {
-                        format!("{name}  ({note})")
-                    },
-                );
                 log::write(&format!("step ok: {name} {note}"));
+                done.push((Status::Ok, note));
             }
             Err(e) => {
                 let e = log::redact(&e);
                 log::write(&format!("step failed: {name}: {e}"));
                 set_progress(app, s, &format!("failed:{name}"));
-                ui::status(Status::Fail, name);
-                for rest in &steps[i + 1..] {
-                    ui::status(Status::Wait, rest);
-                }
-                ui::error_block(&format!("{name} — failed"), &e);
-                ui::line("Completed installation steps have been preserved.");
+                done.push((Status::Fail, String::new()));
+                let mut f = progress_frame(&conn, plan, &done, None);
+                f.blank();
+                f.status(Status::Fail, &format!("{name} — failed"));
+                f.detail(&e);
+                f.blank();
+                f.dim("Completed installation steps have been preserved.");
                 if let Some(p) = log::path() {
-                    ui::dim(&format!("Log: {}", p.display()));
+                    f.dim(&format!("Log: {}", p.display()));
                 }
-                ui::blank();
-                ui::item("R", "Retry", "");
-                ui::item("B", "Back to the menu", "");
-                ui::item("Q", "Save and exit", "");
-                return match ui::choose("Choice", "R").as_str() {
+                let entries = [
+                    item("R", "Retry", "inspects first, repeats nothing that worked"),
+                    item("B", "Back to the overview", ""),
+                    item("Q", "Save and quit", ""),
+                ];
+                return match ui::menu(&f, &entries, "R").as_str() {
                     "R" => Applied::Retry,
-                    "Q" => Applied::Quit,
-                    _ => Applied::Menu,
+                    "B" => Applied::Menu,
+                    _ => {
+                        ui::show(&f);
+                        Applied::Quit
+                    }
                 };
             }
         }
@@ -1140,111 +1320,152 @@ fn apply(app: &mut App, s: &Session, plan: &Plan) -> Applied {
 
 fn set_progress(app: &mut App, s: &Session, p: &str) {
     app.store.connections[s.idx].setup.progress = Some(p.to_string());
-    save(app);
+    let _ = save(app);
 }
 
 // ---------------------------------------------------------------- handoff
 
-fn handoff(app: &mut App, s: &Session, v: &Verification) -> Option<Next> {
-    let mut v = v.clone();
-    loop {
-        let conn = app.store.connections[s.idx].clone();
+fn handoff(app: &mut App, s: &Session, v: Verification) -> Option<Next> {
+    let mut v = v;
+    let mut ping = {
+        let conn = &app.store.connections[s.idx];
         let inst = Installer {
             client: &s.client,
             payload: &app.payload,
         };
-        ui::blank();
-        ui::dim(&header(&conn));
-        ui::blank();
-        let version = v
-            .check("library")
-            .and_then(|c| c.value.clone())
-            .map(|x| x.as_str().map(String::from).unwrap_or(x.to_string()))
-            .unwrap_or_default();
-        ui::status(Status::Ok, "Classes compiled");
-        ui::status(
-            Status::Ok,
-            &format!("Native connector loaded  (version {version})"),
-        );
-        ui::status(
-            Status::Ok,
-            &format!(
-                "REST application configured  ({} in {})",
-                conn.app_path(),
-                conn.namespace()
-            ),
-        );
-        let reachable = print_ping(&inst, &conn, &v);
-        ui::blank();
-        ui::heading(if reachable {
+        let wait = Frame::new("Checking the API").context(&ctx(conn));
+        ui::busy(&wait, "Calling the OPC UA API", || {
+            inst.ping(&conn.app_path(), v.api_access)
+        })
+    };
+    if app.store.connections[s.idx].setup.api_url.is_none() {
+        let reachable = matches!(ping, Ping::Ok);
+        let url = choose_api_url(app, s, reachable);
+        app.store.connections[s.idx].setup.api_url = Some(url);
+        let _ = save(app);
+    }
+    let mut notice = None;
+    loop {
+        let conn = app.store.connections[s.idx].clone();
+        let reachable = matches!(ping, Ping::Ok);
+        let mut f = Frame::new(if reachable {
             "Backend installed"
         } else {
             "Backend installed; HTTP access not yet verified"
-        });
-
+        })
+        .context(&ctx(&conn));
+        f.notice = notice.take();
+        checks_into(&mut f, &v);
+        ping_into(&mut f, &conn, &ping);
+        f.blank();
+        f.heading("In the webapp, open Settings → IRIS API Gateway and enter:");
+        f.blank();
         let checked = format!("{}{}", conn.base_url, conn.app_path());
-        let proposed = conn
+        let api = conn
             .setup
             .api_url
             .clone()
-            .filter(|u| u.ends_with(&conn.app_path()))
             .unwrap_or_else(|| checked.clone());
-        ui::dim("The browser may reach IRIS through a different address than this machine did.");
-        let api = loop {
-            let a = ui::ask("API Base URL for the webapp", &proposed);
-            match config::parse_base_url(&a) {
-                Ok(UrlInput::Full(u)) => break u.as_string(),
-                _ => ui::line("Enter a full http(s):// URL."),
-            }
-        };
-        app.store.connections[s.idx].setup.api_url = Some(api.clone());
-        save(app);
         let label = if api == checked && reachable {
             "(checked from this machine)"
         } else {
             "(not checked)"
         };
-        ui::blank();
-        ui::line("In the webapp, open Settings → IRIS API Gateway:");
-        ui::blank();
-        ui::line(&format!("  API Base URL   {api}  {label}"));
-        ui::line(&format!(
-            "  Username       Use your authorized IRIS API account (it needs the {} role)",
-            installer_role(&conn.namespace())
-        ));
-        ui::blank();
-        ui::line("Then configure your OPC UA servers in the webapp.");
-        ui::blank();
-        loop {
-            ui::item("1", "Show connection details", "");
-            ui::item("2", "Run checks again", "");
-            ui::item("3", "Export setup summary (no passwords)", "");
-            ui::item("B", "Back to the menu", "");
-            ui::item("Q", "Exit", "");
-            ui::blank();
-            match ui::choose("Choice", "Q").as_str() {
-                "1" => details(app, s),
-                "2" => {
-                    let sp = ui::Spinner::start("Verifying");
-                    let r = inst.verify(&conn.namespace(), &conn.app_path());
-                    sp.stop();
-                    match r {
-                        Ok(nv) => {
-                            print_checks(&nv);
-                            if !nv.ok {
-                                return None;
-                            }
-                            v = nv;
-                        }
-                        Err(e) => ui::status(Status::Fail, &log::redact(&e)),
+        f.kv("API Base URL", &format!("{api}  {}", label));
+        f.kv(
+            "Username",
+            &format!(
+                "an IRIS account with the {} role",
+                installer_role(&conn.namespace())
+            ),
+        );
+        f.blank();
+        f.text("Then configure your OPC UA servers in the webapp.");
+        let entries = [
+            item("1", "Show connection details", ""),
+            item("2", "Run checks again", "read-only"),
+            item("3", "Change the API Base URL", ""),
+            item("4", "Export setup summary", "no passwords"),
+            gap(),
+            item("B", "Back to the overview", ""),
+            item("Q", "Quit", ""),
+        ];
+        match ui::menu(&f, &entries, "Q").as_str() {
+            "1" => details(app, s),
+            "2" => {
+                let inst = Installer {
+                    client: &s.client,
+                    payload: &app.payload,
+                };
+                let wait = Frame::new("Checking the installation").context(&ctx(&conn));
+                let r = ui::busy(&wait, "Verifying", || {
+                    inst.verify(&conn.namespace(), &conn.app_path()).map(|nv| {
+                        let p = inst.ping(&conn.app_path(), nv.api_access);
+                        (nv, p)
+                    })
+                });
+                match r {
+                    Ok((nv, p)) if nv.ok => {
+                        v = nv;
+                        ping = p;
+                        notice = Some((Status::Ok, "Checks ran again.".into()));
                     }
-                    break;
+                    Ok(_) => return None,
+                    Err(e) => notice = Some((Status::Fail, log::redact(&e))),
                 }
-                "3" => export(app, s),
-                "B" => return None,
-                "Q" => return Some(Next::Quit),
-                _ => ui::line("Choose one of the listed options."),
             }
+            "3" => {
+                let url = choose_api_url(app, s, reachable);
+                app.store.connections[s.idx].setup.api_url = Some(url);
+                let _ = save(app);
+            }
+            "4" => notice = Some(export(app, s)),
+            "B" => return None,
+            _ => {
+                ui::show(&f);
+                return Some(Next::Quit);
+            }
+        }
+    }
+}
+
+/// The API address the webapp should use: proposed, and changeable.
+fn choose_api_url(app: &App, s: &Session, reachable: bool) -> String {
+    let conn = &app.store.connections[s.idx];
+    let checked = format!("{}{}", conn.base_url, conn.app_path());
+    let proposed = conn
+        .setup
+        .api_url
+        .clone()
+        .filter(|u| u.ends_with(&conn.app_path()))
+        .unwrap_or_else(|| checked.clone());
+    let mut f = Frame::new("API address for the webapp").context(&ctx(conn));
+    f.text("The webapp needs the address of the OPC UA REST API. This tool proposes the address it used itself:");
+    f.blank();
+    let label = if proposed == checked && reachable {
+        "(checked from this machine)"
+    } else {
+        "(not checked)"
+    };
+    f.kv("Proposed", &format!("{proposed}  {label}"));
+    f.blank();
+    f.dim("Keep it unless browsers reach IRIS through another address, such as a proxy or a different host name.");
+    let entries = [
+        item("1", "Use the proposed address", ""),
+        item("2", "Enter a different address", ""),
+    ];
+    if ui::menu(&f, &entries, "1") == "1" {
+        return proposed;
+    }
+    let mut error = None;
+    loop {
+        let mut g = Frame::new("API address for the webapp").context(&ctx(conn));
+        g.error = error.take();
+        g.text("Enter the full address browsers use for the OPC UA REST API, for example https://iris.example.com/csp/opcua/api.");
+        let a = ui::input(&g, "API Base URL", &proposed);
+        match config::parse_base_url(&a) {
+            Ok(UrlInput::Full(u)) => return u.as_string(),
+            _ => error = Some("Enter a full http(s):// URL.".into()),
         }
     }
 }
@@ -1274,23 +1495,23 @@ fn summary_lines(c: &Connection) -> Vec<(String, String)> {
 
 fn details(app: &App, s: &Session) {
     let c = &app.store.connections[s.idx];
-    ui::blank();
+    let mut f = Frame::new("Connection details").context(&ctx(c));
     for (k, v) in summary_lines(c) {
-        ui::line(&format!("  {k:<16} {v}"));
+        f.kv(&k, &v);
     }
     let saved = if c.password.is_some() {
         format!("saved in {}", app.store.path().display())
     } else {
-        "session only".into()
+        "not saved (asked on each launch)".into()
     };
-    ui::line(&format!("  {:<16} {saved}", "Password"));
+    f.kv("Password", &saved);
     if let Some(p) = log::path() {
-        ui::line(&format!("  {:<16} {}", "Log file", p.display()));
+        f.kv("Log file", &p.display().to_string());
     }
-    ui::blank();
+    ui::menu(&f, &[item("B", "Back", "")], "B");
 }
 
-fn export(app: &App, s: &Session) {
+fn export(app: &App, s: &Session) -> (Status, String) {
     let c = &app.store.connections[s.idx];
     let safe: String = c
         .name
@@ -1305,16 +1526,12 @@ fn export(app: &App, s: &Session) {
     let r = config::private_file(&path)
         .and_then(|mut f| std::io::Write::write_all(&mut f, log::redact(&text).as_bytes()));
     match r {
-        Ok(()) => ui::status(
-            Status::Ok,
-            &format!("Summary written to {}", path.display()),
-        ),
-        Err(e) => ui::status(
+        Ok(()) => (Status::Ok, format!("Summary written to {}", path.display())),
+        Err(e) => (
             Status::Fail,
-            &format!("Could not write {}: {e}", path.display()),
+            format!("Could not write {}: {e}", path.display()),
         ),
     }
-    ui::blank();
 }
 
 #[cfg(test)]

@@ -102,8 +102,6 @@ pub struct Check {
     pub ok: bool,
     #[serde(default)]
     pub message: String,
-    #[serde(default)]
-    pub value: Option<Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
