@@ -278,13 +278,23 @@ pub enum Entry {
     },
     Section(String),
     Gap,
-    /// A key that works but is only listed in the footer (Q Quit).
-    Hidden(String),
+    /// A key that works but is listed only in the footer: key and footer label.
+    Hidden(String, String),
 }
 
 /// Q quits from this screen; shown in the footer, not in the list.
 pub fn quit_key() -> Entry {
-    Entry::Hidden("Q".into())
+    Entry::Hidden("Q".into(), "Quit".into())
+}
+
+/// B (or Esc) goes back; shown in the footer, not in the list.
+pub fn back_key() -> Entry {
+    Entry::Hidden("B".into(), "Back".into())
+}
+
+/// A footer-only key acting on the highlighted item (see `menu_at`).
+pub fn action_key(key: &str, label: &str) -> Entry {
+    Entry::Hidden(key.into(), label.into())
 }
 
 pub fn item(key: impl Into<String>, label: impl Into<String>, note: impl Into<String>) -> Entry {
@@ -325,7 +335,7 @@ fn selectable(entries: &[Entry]) -> Vec<usize> {
 
 fn key_of(e: &Entry) -> &str {
     match e {
-        Entry::Item { key, .. } | Entry::Hidden(key) => key,
+        Entry::Item { key, .. } | Entry::Hidden(key, _) => key,
         _ => "",
     }
 }
@@ -334,7 +344,7 @@ fn key_of(e: &Entry) -> &str {
 fn keyed(entries: &[Entry]) -> impl Iterator<Item = &Entry> {
     entries
         .iter()
-        .filter(|e| matches!(e, Entry::Item { enabled: true, .. } | Entry::Hidden(_)))
+        .filter(|e| matches!(e, Entry::Item { enabled: true, .. } | Entry::Hidden(..)))
 }
 
 fn render_entries(entries: &[Entry], selected: Option<usize>) -> Vec<String> {
@@ -351,10 +361,10 @@ fn render_entries(entries: &[Entry], selected: Option<usize>) -> Vec<String> {
     entries
         .iter()
         .enumerate()
-        .filter(|(_, e)| !matches!(e, Entry::Hidden(_)))
+        .filter(|(_, e)| !matches!(e, Entry::Hidden(..)))
         .map(|(i, e)| match e {
             Entry::Section(s) => style(s).bold().to_string(),
-            Entry::Gap | Entry::Hidden(_) => String::new(),
+            Entry::Gap | Entry::Hidden(..) => String::new(),
             Entry::Item {
                 key,
                 label,
@@ -388,9 +398,16 @@ fn render_entries(entries: &[Entry], selected: Option<usize>) -> Vec<String> {
 fn footer_for(entries: &[Entry]) -> String {
     let arrows = if unicode() { "↑↓" } else { "Up/Down" };
     let mut parts = vec![arrows.to_string(), "Enter".to_string()];
-    for (k, name) in [("B", "Back"), ("Q", "Quit")] {
-        if entries.iter().any(|e| key_of(e).eq_ignore_ascii_case(k)) {
-            parts.push(format!("{k} {name}"));
+    // A listed Back item still gets its footer hint.
+    let hidden_back = entries
+        .iter()
+        .any(|e| matches!(e, Entry::Hidden(k, _) if k == "B"));
+    if !hidden_back && entries.iter().any(|e| key_of(e).eq_ignore_ascii_case("B")) {
+        parts.push("B Back".into());
+    }
+    for e in entries {
+        if let Entry::Hidden(k, label) = e {
+            parts.push(format!("{k} {label}"));
         }
     }
     parts.join("  |  ")
@@ -399,12 +416,19 @@ fn footer_for(entries: &[Entry]) -> String {
 /// Choose an entry; returns its key upper-cased. Arrow keys move, Enter selects,
 /// a key selects directly, and Esc means Back when there is one.
 pub fn menu(frame: &Frame, entries: &[Entry], default: &str) -> String {
+    menu_at(frame, entries, default).0
+}
+
+/// Like `menu`, and also returns the key of the item highlighted when the key was
+/// pressed, for footer actions that apply to it. Without a full screen nothing is
+/// highlighted, so the second value is empty.
+pub fn menu_at(frame: &Frame, entries: &[Entry], default: &str) -> (String, String) {
     let choices = selectable(entries);
     if choices.is_empty() {
-        return String::new();
+        return (String::new(), String::new());
     }
     if !fullscreen() {
-        return menu_plain(frame, entries, default);
+        return (menu_plain(frame, entries, default), String::new());
     }
     let term = Term::stdout();
     let mut pos = choices
@@ -438,15 +462,22 @@ pub fn menu(frame: &Frame, entries: &[Entry], default: &str) -> String {
         }
     };
     let _ = term.show_cursor();
-    result
+    (result, key_of(&entries[choices[pos]]).to_ascii_uppercase())
 }
 
 fn menu_plain(frame: &Frame, entries: &[Entry], default: &str) -> String {
     let mut lines = render_entries(entries, None);
     // No footer here, so name the hidden keys once.
-    if entries.iter().any(|e| matches!(e, Entry::Hidden(_))) {
+    let hints: Vec<String> = entries
+        .iter()
+        .filter_map(|e| match e {
+            Entry::Hidden(k, label) => Some(format!("{k} {label}")),
+            _ => None,
+        })
+        .collect();
+    if !hints.is_empty() {
         lines.push(String::new());
-        lines.push(style("   Q  Quit").dim().to_string());
+        lines.push(style(format!("   {}", hints.join("   "))).dim().to_string());
     }
     draw(&compose(frame, &lines, "", None));
     loop {

@@ -298,7 +298,7 @@ Treat saved progress as a hint, not proof: inspect actual IRIS state before skip
 
 Do not promise transactional rollback across IRIS and the filesystem. Preserve completed safe steps, record partial/unknown state, and show the recovery action. If an existing binary is in use or needs replacement, stop with a maintenance instruction rather than overwriting it or restarting IRIS automatically.
 
-Provide Switch connection, Sign out, Forget saved login, and Delete connection as distinct actions. Switching re-enters the authentication gate; signing out ends the current authenticated context; forgetting removes the saved password from `connections.json` without removing the connection or the installation; deleting removes the local connection definition only.
+Back (B/Esc) on the overview signs out and returns to the connection list, which is also how to switch connections. The list offers Delete (D) for the highlighted connection, after confirmation: it removes the local definition, including any saved password and setup choices, and never touches the IRIS server. There is deliberately no separate "forget saved login"; to stop remembering a password, delete and redefine the connection, or decline Remember at sign-in.
 
 ## 7. Repository facts to account for
 
@@ -381,7 +381,7 @@ The tests ran against a disposable `intersystems/iris-community:2025.3` containe
 | Database file left by an earlier failed attempt | Refused, not adopted |
 | Compile error (broken class via `--dist`) | Step FAIL with IRIS's compiler error; next launch offered Resume and completed, reusing the namespace |
 | Ctrl+C during installation / at password prompt | Recorded as unknown and resumed without the stale lock blocking / "Cancelled.", terminal restored |
-| Forget saved login, Delete connection | Password removed and setup kept / local definition removed |
+| Back from the overview, Delete from the list | Returns to the connection list / definition removed after confirmation |
 | Redirected stdin, `--help`, `--version`, bad flag | Clear message, exit code 2 or 0 |
 
 ### Not verified

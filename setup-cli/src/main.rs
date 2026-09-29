@@ -16,7 +16,7 @@ use config::{BaseUrl, Connection, Instance, Setup, Store, UrlInput};
 use installer::{FileAction, Info, Installer, Ping, Plan, Verification};
 use payload::Payload;
 use std::path::{Path, PathBuf};
-use ui::{disabled, gap, item, quit_key, section, Frame, Status};
+use ui::{action_key, back_key, disabled, gap, item, quit_key, section, Frame, Status};
 
 const HELP: &str = "\
 iris-opcua-setup — install the IRIS OPC UA backend on an existing IRIS instance
@@ -156,6 +156,37 @@ fn save(app: &App) -> Option<String> {
 
 // ---------------------------------------------------------------- sign-in gate
 
+/// Delete a saved connection after confirmation. `highlighted` is the list key of the
+/// connection under the cursor; without one (plain mode) the number is asked for.
+fn delete_connection(app: &mut App, highlighted: &str) -> Option<(Status, String)> {
+    let number = if highlighted.is_empty() {
+        let f = Frame::new("Delete connection");
+        ui::input(&f, "Number of the connection to delete", "")
+    } else {
+        highlighted.to_string()
+    };
+    let i = number
+        .parse::<usize>()
+        .ok()
+        .filter(|i| *i >= 1 && *i <= app.store.connections.len())?
+        - 1;
+    let c = &app.store.connections[i];
+    let mut f = Frame::new("Delete connection").context(&ctx(c));
+    f.text(&format!(
+        "Delete the connection '{}' ({})? Its URL, username, saved password and setup choices are removed from this machine. Nothing on the IRIS server changes.",
+        c.name, c.base_url
+    ));
+    if !ui::yes_no(&f, "Delete it", "Keep it", false) {
+        return None;
+    }
+    let name = app.store.connections.remove(i).name;
+    log::write(&format!("deleted connection {name}"));
+    Some(match save(app) {
+        None => (Status::Ok, format!("Connection '{name}' deleted.")),
+        Some(e) => (Status::Fail, e),
+    })
+}
+
 fn sign_in(app: &mut App) -> Option<Session> {
     let mut notice: Option<(Status, String)> = None;
     loop {
@@ -192,14 +223,19 @@ fn sign_in(app: &mut App) -> Option<Session> {
             entries.push(gap());
         }
         entries.push(item("N", "New connection", "name, URL and login"));
+        if !app.store.connections.is_empty() {
+            entries.push(action_key("D", "Delete"));
+        }
         entries.push(quit_key());
         let default = if app.store.connections.is_empty() {
             "N"
         } else {
             "1"
         };
-        match ui::menu(&f, &entries, default).as_str() {
+        let (key, highlighted) = ui::menu_at(&f, &entries, default);
+        match key.as_str() {
             "Q" => return None,
+            "D" => notice = delete_connection(app, &highlighted),
             "N" => {
                 if let Some(c) = define_connection(app, None) {
                     if let Some(s) = authenticate(app, c, None) {
@@ -520,15 +556,13 @@ fn session_menu(app: &mut App, s: Session) -> Next {
     if !load_installer(app, &s) {
         return Next::SignIn;
     }
-    let mut notice: Option<(Status, String)> = None;
     loop {
         // Re-read the server every time: the previous screen may have installed something.
         let Some(ov) = inspect(app, &s) else {
             return Next::SignIn;
         };
         let conn = app.store.connections[s.idx].clone();
-        let mut f = ov.frame;
-        f.notice = notice.take();
+        let f = ov.frame;
         let recommended = match &ov.health {
             Health::NotInstalled => "Set up backend",
             Health::Partial
@@ -543,21 +577,12 @@ fn session_menu(app: &mut App, s: Session) -> Next {
             Health::Partial => "Repair installation",
             Health::Healthy(_) => "Webapp settings",
         };
-        let mut entries = vec![
+        let entries = [
             item("1", recommended, "recommended"),
             item("2", "Check installation", "read-only"),
-            gap(),
-            item("S", "Switch connection / sign out", ""),
+            back_key(),
+            quit_key(),
         ];
-        if conn.password.is_some() {
-            entries.push(item(
-                "F",
-                "Forget saved login",
-                "remove the password from this machine",
-            ));
-        }
-        entries.push(item("D", "Delete connection", "only the local definition"));
-        entries.push(quit_key());
         match ui::menu(&f, &entries, "1").as_str() {
             "1" => {
                 let next = match ov.health {
@@ -569,29 +594,9 @@ fn session_menu(app: &mut App, s: Session) -> Next {
                 }
             }
             "2" => check(app, &s),
-            "S" => {
+            "B" => {
                 log::write("signed out");
                 return Next::SignIn;
-            }
-            "F" => {
-                app.store.connections[s.idx].password = None;
-                notice = Some(match save(app) {
-                    None => (
-                        Status::Ok,
-                        "Saved password removed. You stay signed in until you quit or switch."
-                            .into(),
-                    ),
-                    Some(e) => (Status::Fail, e),
-                });
-            }
-            "D" => {
-                let mut g = Frame::new("Delete connection").context(&ctx(&conn));
-                g.text(&format!("Delete the local connection '{}'? Only this machine's definition is removed; nothing on the IRIS server changes.", conn.name));
-                if ui::yes_no(&g, "Delete it", "Keep it", false) {
-                    app.store.connections.remove(s.idx);
-                    let _ = save(app);
-                    return Next::SignIn;
-                }
             }
             _ => {
                 ui::show(&f);
