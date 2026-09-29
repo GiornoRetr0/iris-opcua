@@ -17,10 +17,10 @@ mod embedded {
 /// Files whose absence means the payload is incomplete.
 const REQUIRED: &[&str] = &[
     files::CLIENT_INSTALLER,
-    "src/objectscript/OPCUA/Constants.inc",
-    "src/objectscript/OPCUA/Utils.cls",
-    "src/objectscript/OPCUA/Client.cls",
-    "src/objectscript/OPCUA/REST/Handler.cls",
+    "backend/src/OPCUA/Constants.inc",
+    "backend/src/OPCUA/Utils.cls",
+    "backend/src/OPCUA/Client.cls",
+    "backend/src/OPCUA/REST/Handler.cls",
 ];
 
 pub struct Payload {
@@ -129,7 +129,7 @@ impl Payload {
     pub fn from_dir(root: &Path, extract_dir: PathBuf) -> Result<Payload, String> {
         let list = files::list(root).map_err(|e| {
             format!(
-                "{} does not contain the OPC UA payload (src/objectscript and bin): {e}",
+                "{} does not contain the OPC UA payload (backend/ and installer/objectscript/): {e}",
                 root.display()
             )
         })?;
@@ -183,7 +183,7 @@ impl Payload {
     }
 
     /// Include files first (`OPCUA.Constants.inc`), then every OPCUA class.
-    /// `Tests/`, Examples and the IRISConfig installers are not part of a client install.
+    /// Tests and Examples live outside `backend/src/` and are not part of a client install.
     pub fn application_docs(&self) -> Result<Vec<Doc>, String> {
         let prefix = format!("{}/", files::APPLICATION_DIR);
         let rels: Vec<&String> = self
@@ -204,7 +204,7 @@ impl Payload {
         files::NATIVE
             .iter()
             .map(|name| {
-                let rel = format!("bin/unix/{}/{name}", arch.dir());
+                let rel = files::native(arch.dir(), name);
                 let bytes = self
                     .files
                     .get(&rel)
@@ -224,7 +224,7 @@ impl Payload {
         let Target::Linux(arch) = target else {
             return Err("unsupported platform".into());
         };
-        let rel = format!("bin/unix/{}/{}", arch.dir(), a.name);
+        let rel = files::native(arch.dir(), a.name);
         if let Some(root) = &self.root {
             return Ok(root.join(rel));
         }
@@ -238,10 +238,13 @@ impl Payload {
     }
 }
 
-/// `src/objectscript/OPCUA/REST/Handler.cls` → `OPCUA.REST.Handler.cls`.
+/// `backend/src/OPCUA/REST/Handler.cls` → `OPCUA.REST.Handler.cls`.
 fn doc_name(rel: &str) -> String {
-    rel.trim_start_matches("src/objectscript/")
-        .replace('/', ".")
+    let below = files::SOURCE_ROOTS
+        .iter()
+        .find_map(|root| rel.strip_prefix(root)?.strip_prefix('/'))
+        .unwrap_or(rel);
+    below.replace('/', ".")
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
@@ -281,7 +284,10 @@ mod tests {
 
     fn check_complete(p: &Payload) {
         assert!(p.missing_files().is_empty());
-        assert_eq!(p.client_installer().unwrap().name, "IRISConfig.ClientInstaller.cls");
+        assert_eq!(
+            p.client_installer().unwrap().name,
+            "IRISConfig.ClientInstaller.cls"
+        );
         let docs = p.application_docs().unwrap();
         assert_eq!(docs[0].name, "OPCUA.Constants.inc");
         assert!(docs.iter().any(|d| d.name == "OPCUA.REST.Handler.cls"));

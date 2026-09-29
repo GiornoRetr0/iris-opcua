@@ -1,8 +1,9 @@
-# Builds and tests the terminal installer (setup-cli/) for every supported platform.
+# Builds and tests the terminal installer (installer/) for every supported platform.
 # Pushing a tag setup-cli-vX.Y.Z also publishes a GitHub Release with the binaries
-# and SHA256SUMS. Branch pushes and pull requests only build and test.
+# and SHA256SUMS; the tag keeps the name it had before the folder was renamed.
+# Branch pushes and pull requests only build and test.
 
-name: setup-cli
+name: installer
 
 on:
   push:
@@ -10,18 +11,16 @@ on:
     tags: ["setup-cli-v*"]
     # Tag pushes ignore this filter, so a release always builds.
     paths:
-      - "setup-cli/**"
-      - "src/objectscript/OPCUA/**"
-      - "src/objectscript/IRISConfig/ClientInstaller.cls"
-      - "bin/unix/**"
-      - ".github/workflows/setup-cli.yml"
+      - "installer/**"
+      - "backend/src/**"
+      - "backend/native/linux-*/**"
+      - ".github/workflows/installer.yml"
   pull_request:
     paths:
-      - "setup-cli/**"
-      - "src/objectscript/OPCUA/**"
-      - "src/objectscript/IRISConfig/ClientInstaller.cls"
-      - "bin/unix/**"
-      - ".github/workflows/setup-cli.yml"
+      - "installer/**"
+      - "backend/src/**"
+      - "backend/native/linux-*/**"
+      - ".github/workflows/installer.yml"
   workflow_dispatch:
 
 permissions:
@@ -45,7 +44,7 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: setup-cli
+        working-directory: installer
     steps:
       - uses: actions/checkout@v4
 
@@ -89,9 +88,9 @@ jobs:
       - name: Check the tag matches Cargo.toml
         run: |
           tag="${GITHUB_REF_NAME#setup-cli-v}"
-          crate="$(grep -m1 '^version' setup-cli/Cargo.toml | cut -d'"' -f2)"
+          crate="$(grep -m1 '^version' installer/Cargo.toml | cut -d'"' -f2)"
           if [ "$tag" != "$crate" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match setup-cli/Cargo.toml version $crate"
+            echo "::error::Tag $GITHUB_REF_NAME does not match installer/Cargo.toml version $crate"
             exit 1
           fi
 
@@ -122,7 +121,7 @@ jobs:
 
           Verify with `SHA256SUMS`. On Linux/macOS, `chmod +x` the file first. The binaries are not code-signed: on macOS run `xattr -d com.apple.quarantine <file>` once (or right-click → Open); on Windows choose "More info → Run anyway" if SmartScreen warns.
 
-          Installs onto Linux x86-64 and ARM64 IRIS servers. See [setup-cli/README.md](https://github.com/GiornoRetr0/iris-opcua/blob/main/setup-cli/README.md) for the required privileges and what it changes.
+          Installs onto Linux x86-64 and ARM64 IRIS servers. See [installer/README.md](https://github.com/GiornoRetr0/iris-opcua/blob/main/installer/README.md) for the required privileges and what it changes.
           EOF
           gh release create "$GITHUB_REF_NAME" dist/* \
             --verify-tag \

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Drive the running app in a real browser, for the DESIGN-QA.md pass.
+ * Drive the running app in a real browser, for the docs/design/webapp-design-qa.md pass.
  *
- * DESIGN-QA.md insists its assertions be checked against the running app rather
+ * That document insists its assertions be checked against the running app rather
  * than the source, because that is exactly the gap that let a finished sparkline
  * ship invisible. This is the harness for doing that: it seeds a working config,
  * navigates, optionally runs a snippet in the page, and then either prints what

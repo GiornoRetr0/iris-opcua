@@ -17,7 +17,7 @@ Browser → Web server / gateway → IRIS REST API → Native libraries → OPC 
 | Component | Where it runs | What it does |
 |---|---|---|
 | Web console (`webapp/`) | Browser, served by your web server | Configure connections, browse nodes, manage schemas and pipelines |
-| ObjectScript (`src/objectscript/OPCUA/`) | A dedicated IRIS namespace | REST API, schema generation, background collection and storage |
+| ObjectScript (`backend/src/OPCUA/`) | A dedicated IRIS namespace | REST API, schema generation, background collection and storage |
 | Native libraries (`bin/`) | The IRIS host | Communicate with OPC UA servers |
 
 There are two separate connections to configure: **browser → IRIS API** and **IRIS → OPC UA server**. Their URLs and credentials are different. OPC UA hostnames and certificate paths must be accessible from the IRIS host, even when you use the console on your laptop. Collection continues in IRIS after you close the browser.
@@ -32,14 +32,14 @@ From a clone of this repository:
 
 ```bash
 # Once, before the first build:
-bash tools/certgen/generate.sh
+bash demo/certgen/generate.sh
 
 # Build and start IRIS and the demo OPC UA servers:
 docker compose up -d --build
 docker compose logs -f iris
 ```
 
-Wait for IRIS to finish starting. Ctrl+C exits the log view without stopping the containers. On subsequent starts, reuse the generated certificates; the generator expects `tools/certgen/temp` not to exist.
+Wait for IRIS to finish starting. Ctrl+C exits the log view without stopping the containers. On subsequent starts, reuse the generated certificates; the generator expects `demo/certgen/temp` not to exist.
 
 The image installs the libraries and ObjectScript code, creates the `OPCUA` namespace, and configures the REST API. **Compose does not start the frontend.**
 
@@ -101,9 +101,9 @@ After changing ObjectScript or native libraries, rebuild with `docker compose up
 
 Installation on your own instance requires an IRIS administrator. Validate your target IRIS/OS/library combination in staging before deployment.
 
-**Terminal installer (Linux IRIS servers).** [`setup-cli/`](setup-cli/README.md) installs and verifies everything in steps 1–4 over the IRIS web server, with no shell access to the IRIS host:
+**Terminal installer (Linux IRIS servers).** [`installer/`](installer/README.md) installs and verifies everything in steps 1–4 over the IRIS web server, with no shell access to the IRIS host:
 
-Download the single-file binary for your machine from [GitHub Releases](https://github.com/GiornoRetr0/iris-opcua/releases) and run it. It has everything it installs built in, so no clone or build is needed (see [its README](setup-cli/README.md#download) for the file names, checksums and the macOS/Windows first-run prompts). To build it yourself: `cd setup-cli && cargo build --release`.
+Download the single-file binary for your machine from [GitHub Releases](https://github.com/GiornoRetr0/iris-opcua/releases) and run it. It has everything it installs built in, so no clone or build is needed (see [its README](installer/README.md#download) for the file names, checksums and the macOS/Windows first-run prompts). To build it yourself: `cd installer && cargo build --release`.
 
 It asks for a connection (name, base URL, username, password), shows a review before changing anything, and ends with the API URL to enter in the webapp. See its README for the privileges it needs and exactly what it changes. It has been tested against IRIS 2025.3 on Linux ARM64. The manual path below remains available and is the only path for Windows servers.
 
@@ -134,9 +134,9 @@ Select files for the **IRIS host's OS and CPU**, not the browser machine:
 
 | IRIS host | Files |
 |---|---|
-| Linux x86-64 | `bin/unix/amd64/` |
-| Linux ARM64 | `bin/unix/arm64/` |
-| Windows x64 | `bin/windows/` — compatibility caveat below |
+| Linux x86-64 | `backend/native/linux-amd64/` |
+| Linux ARM64 | `backend/native/linux-arm64/` |
+| Windows x64 | `backend/native/windows-x64/` — compatibility caveat below |
 
 On Linux, install `irisopcua.so` and its required companion libraries from the matching directory into the instance's binary directory. Check dependencies on that host:
 
@@ -147,13 +147,13 @@ ldd /path/to/iris/bin/libopen62541.so.0
 
 Resolve any `not found` dependencies. The Docker image also installs `libmbedtls-dev`; the required packages depend on the target OS. Do not overwrite existing instance libraries without checking compatibility.
 
-On Windows, the connector uses `IrisOPCUA.dll` and `open62541.dll`. The supplied `libcrypto-1_1-x64.dll` is supplemental: **do not overwrite IRIS's existing copy**. The [Windows notes](bin/windows/README.md) warn that the binaries and source may be from different revisions. Confirm a matching build for the current console; the legacy Studio export does not replace the current REST classes.
+On Windows, the connector uses `IrisOPCUA.dll` and `open62541.dll`. The supplied `libcrypto-1_1-x64.dll` is supplemental: **do not overwrite IRIS's existing copy**. The [Windows notes](backend/native/windows-x64/README.md) warn that the binaries and source may be from different revisions. Confirm a matching build for the current console; the legacy Studio export does not replace the current REST classes.
 
 No native macOS library set is included. On macOS, use the Linux Docker environment. The repository does not yet provide a tested compatibility matrix for client installations.
 
 ### 3. Load and compile ObjectScript
 
-Copy `src/objectscript/OPCUA/` to a staging directory readable by IRIS **on the IRIS host**. Omit its `Tests/` directory for a client installation. The console does not require `Examples/`, `IRISConfig/`, or the legacy Studio project.
+Copy `backend/src/OPCUA/` to a staging directory readable by IRIS **on the IRIS host**. That is the whole application: the console does not require `backend/tests/`, `backend/examples/`, the Docker installer in `demo/`, or the legacy Studio project.
 
 In an IRIS terminal, substitute your namespace and staging path. Run each command and resolve any reported error before continuing:
 
@@ -222,7 +222,7 @@ Open **Settings → IRIS API Gateway** and enter your API URL and dedicated IRIS
 
 For temporary development use, you can run `npm start` and edit `webapp/proxy.conf.json` to target your instance. It forwards the existing path unchanged: adjust the route/path handling if your gateway uses another prefix, then restart the development server.
 
-**Current limitation:** IRIS and OPC UA passwords are saved in cleartext browser `localStorage`, per browser profile. Profiles do not automatically follow users between computers. See the [credential-storage review](webapp/SECURITY-REVIEW.md); improved authentication and server-side credential storage remain product work before a general client rollout.
+**Current limitation:** IRIS and OPC UA passwords are saved in cleartext browser `localStorage`, per browser profile. Profiles do not automatically follow users between computers. See the [credential-storage review](docs/design/webapp-security-review.md); improved authentication and server-side credential storage remain product work before a general client rollout.
 
 ### 6. Connect to the real OPC UA server
 
@@ -258,7 +258,7 @@ Reuse schemas for more devices of the same structure. Removing a pipeline retain
 
 | Symptom | Check |
 |---|---|
-| Docker build cannot find certificates | Run `bash tools/certgen/generate.sh` before the first build |
+| Docker build cannot find certificates | Run `bash demo/certgen/generate.sh` before the first build |
 | Certificate generator says temporary directory exists | Reuse existing outputs, or archive the previous generation before deliberately generating replacement demo identities |
 | API returns 404 or HTML | Gateway prefix, REST application's namespace/dispatch class, and proxy routing |
 | API returns 401/403 | IRIS credentials, authentication settings, application and namespace permissions |
@@ -272,5 +272,5 @@ Reuse schemas for more devices of the same structure. Removing a pipeline retain
 
 - [OPC UA concepts and legacy demos](docs/opcua-concepts-and-legacy-demos.md) — original background material, with legacy instructions identified.
 - [Architecture](docs/architecture.md) and [workflow diagrams](docs/workflow.md) — implementation details.
-- [Setup improvements proposal](docs/setup-improvements.md) — recommended installer, diagnostics, and onboarding work; the terminal installer part is implemented in `setup-cli/`.
-- [Terminal installer plan](docs/terminal-installer-plan.md) — design and integration-test evidence for `setup-cli/`.
+- [Setup improvements proposal](docs/design/setup-improvements.md) — recommended installer, diagnostics, and onboarding work; the terminal installer part is implemented in `installer/`.
+- [Terminal installer plan](docs/design/terminal-installer-plan.md) — design and integration-test evidence for `installer/`.

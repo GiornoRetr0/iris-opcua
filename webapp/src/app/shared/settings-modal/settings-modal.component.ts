@@ -316,8 +316,8 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
 
           <!-- Where this configuration lives. Per-browser, not per-user: two operators
                at one workstation share it and the same operator elsewhere has none of
-               it, and nothing said so. See SECURITY-REVIEW.md for the credential
-               question, which is not a design call. -->
+               it, and nothing said so. See docs/design/webapp-security-review.md for
+               the credential question, which is not a design call. -->
           <p class="px-8 pb-4 -mt-4 flex items-start gap-1.5 text-[11px] text-on-surface-muted">
             <span class="material-symbols-outlined text-sm shrink-0">info</span>
             <span>

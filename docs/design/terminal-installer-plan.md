@@ -1,6 +1,6 @@
 # IRIS OPC UA terminal installer — implementation plan
 
-Status: implemented in `setup-cli/` (binary `iris-opcua-setup`) and integration-tested; see §10 for evidence, deviations from this brief, and what remains unverified. This document is the implementation brief; it supersedes the terminal onboarding suggestions in [setup-improvements.md](setup-improvements.md).
+Status: implemented in `installer/` (binary `iris-opcua-setup`) and integration-tested; see §10 for evidence, deviations from this brief, and what remains unverified. This document is the implementation brief; it supersedes the terminal onboarding suggestions in [setup-improvements.md](setup-improvements.md).
 
 ## 1. Purpose and scope
 
@@ -59,7 +59,7 @@ Put IRIS-specific inspection and installation logic in a separate parameterized 
 Suggested layout:
 
 ```text
-setup-cli/
+installer/
   Cargo.toml / Cargo.lock        # binary: iris-opcua-setup
   README.md                      # build/run instructions and supported platforms
   .gitignore                     # local/ and target/
@@ -71,12 +71,13 @@ setup-cli/
     installer.rs                 # inspect, plan, apply, verify (calls ClientInstaller via atelier.rs)
     config.rs                    # connection profiles, base URL rules, saved passwords
     log.rs                       # redacted local/setup.log
-    payload.rs                   # locate src/objectscript + bin/, select artifacts, hash them
-  tests/
-src/objectscript/IRISConfig/ClientInstaller.cls
+    files.rs                     # the payload file list, shared with build.rs
+    payload.rs                   # built-in or --dist payload, select artifacts, hash them
+  build.rs                       # embeds the payload in the binary
+  objectscript/IRISConfig/ClientInstaller.cls
 ```
 
-The exact module boundaries can be simplified if useful. Build one binary, `iris-opcua-setup`, with `cargo build --release`. The payload (the repository's `src/objectscript/OPCUA/` without `Tests/`, `IRISConfig/ClientInstaller.cls`, and `bin/unix/`) is embedded in the binary at build time by `build.rs`, so a downloaded release needs no checkout; `--dist <checkout>` installs from a checkout instead. `src/files.rs` defines the file set for both, so they cannot diverge.
+The exact module boundaries can be simplified if useful. Build one binary, `iris-opcua-setup`, with `cargo build --release`. The payload (the repository's `backend/src/OPCUA/`, `installer/objectscript/IRISConfig/ClientInstaller.cls`, and `backend/native/linux-*/`) is embedded in the binary at build time by `build.rs`, so a downloaded release needs no checkout; `--dist <checkout>` installs from a checkout instead. `src/files.rs` defines the file set for both, so they cannot diverge.
 
 ## 3. Connection and bootstrap (proven)
 
@@ -280,7 +281,7 @@ Use the actual reported error and corrective instruction, not a generic “Somet
 
 ## 6. Persistence, retries, and credentials
 
-Store all local state in `setup-cli/local/` — the tool's own folder, listed in `.gitignore` so it is never committed:
+Store all local state in `installer/local/` — the tool's own folder, listed in `.gitignore` so it is never committed:
 
 - `connections.json`: per connection its name, normalized base URL, username, **password (when remembered)**, recorded instance GUID/version/platform, selected namespace, installation choices, and optional API URL.
 - Progress and log files.
@@ -302,10 +303,10 @@ Back (B/Esc) on the overview signs out and returns to the connection list, which
 
 ## 7. Repository facts to account for
 
-- `src/objectscript/IRISConfig/Installer.cls` is a Docker/demo installer with fixed paths, demo credentials, and password-policy changes. Keep it separate.
-- `src/objectscript/OPCUA/Utils.cls` exposes library path registration, initialization, and version retrieval.
-- `src/objectscript/OPCUA/REST/Handler.cls` supplies `/ping`; it does not perform comprehensive readiness checks.
-- Native artifacts live in `bin/unix/{amd64,arm64}/` and `bin/windows/`; Windows notes explicitly flag potential source/binary mismatch.
+- `demo/iris/IRISConfig/Installer.cls` is a Docker/demo installer with fixed paths, demo credentials, and password-policy changes. Keep it separate.
+- `backend/src/OPCUA/Utils.cls` exposes library path registration, initialization, and version retrieval.
+- `backend/src/OPCUA/REST/Handler.cls` supplies `/ping`; it does not perform comprehensive readiness checks.
+- Native artifacts live in `backend/native/linux-{amd64,arm64}/` and `backend/native/windows-x64/`; Windows notes explicitly flag potential source/binary mismatch.
 - `irisopcua.so` needs `libopen62541.so.0` and `libcrypto.so.1.1` and has no RUNPATH, so all three must sit in the IRIS `bin` directory, where IRIS's loader path finds them.
 - The existing frontend already has IRIS API settings and OPC UA server setup. No duplicate CLI feature is needed.
 - Pipeline startup currently can stop another production in the namespace. Dedicated namespace isolation is required; changing pipeline behavior is a separate product task.
@@ -313,7 +314,7 @@ Back (B/Esc) on the overview signs out and returns to the connection list, which
 
 ## 8. Implementation sequence
 
-1. ~~Prove the connection mechanism~~ — done (§3). Steps 1–5 are implemented in `setup-cli/`; §10 records the evidence and the open items.
+1. ~~Prove the connection mechanism~~ — done (§3). Steps 1–5 are implemented in `installer/`; §10 records the evidence and the open items.
 2. Implement read-only inspection and the parameterized `ClientInstaller` with explicit result reporting and repeatable steps. Establish compatible artifacts and required privileges.
 3. Add the linear UI, review screen, progress, failure recovery, and saved-login flow.
 4. Add backend verification, OPC UA API verification, and non-secret webapp handoff. Keep frontend and OPC UA setup out of scope.

@@ -806,7 +806,7 @@ Mutual TLS -- both client and server verify each other's certificates. Requires:
 
 These are passed through `Client.SetupClient()` before connecting. The C++ library handles the actual TLS handshake.
 
-For Docker, `tools/certgen/generate.sh` generates all necessary certificates using OpenSSL.
+For Docker, `demo/certgen/generate.sh` generates all necessary certificates using OpenSSL.
 
 ---
 
@@ -981,5 +981,5 @@ InboundAdapter InboundAdapter   Svc   Svc   Svc    Svc
 | How subscriptions work | `OPCUA/Adapter/TCPSubscriptionInboundAdapter.cls`, `OPCUA/Service/TCPSubscriptionService.cls` |
 | How multi-device (v2) works | `OPCUA/Service/TCPPollingRowSourceService.cls` |
 | How pipelines are managed | `OPCUA/REST/PipelineService.cls` |
-| How the Docker image is set up | `IRISConfig/Installer.cls` |
-| How certificates work | `tools/certgen/certgen.bash`, security settings in `OPCUA/Adapter/Common.cls` |
+| How the Docker image is set up | `demo/iris/IRISConfig/Installer.cls` |
+| How certificates work | `demo/certgen/certgen.bash`, security settings in `OPCUA/Adapter/Common.cls` |
