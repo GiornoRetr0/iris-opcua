@@ -1,6 +1,6 @@
 Include %occInclude
 
-/// Server half of the terminal installer (<tt>setup-cli/</tt>). The CLI uploads and
+/// Server half of the terminal installer (<tt>installer/</tt>). The CLI uploads and
 /// compiles this class into <tt>%SYS</tt> over the Atelier REST API, then calls these
 /// SQL procedures through <tt>/api/atelier/v1/%SYS/action/query</tt>.
 ///

@@ -4,19 +4,21 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
+// Shared with the program, which also uses what only it needs (document names).
 #[path = "src/files.rs"]
+#[allow(dead_code)]
 mod files;
 
 fn main() {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let root = Path::new(&manifest)
         .parent()
-        .expect("setup-cli sits inside the repository");
+        .expect("installer/ sits inside the repository");
     println!("cargo:rerun-if-changed=src/files.rs");
     for dir in [
-        "src/objectscript/OPCUA",
-        "src/objectscript/IRISConfig",
-        "bin/unix",
+        "backend/src/OPCUA",
+        "installer/objectscript",
+        "backend/native",
     ] {
         println!("cargo:rerun-if-changed={}", root.join(dir).display());
     }

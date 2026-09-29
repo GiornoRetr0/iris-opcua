@@ -25,8 +25,8 @@ iris-opcua-setup — install the IRIS OPC UA backend on an existing IRIS instanc
 Usage: iris-opcua-setup [--dist <path>]
 
 Options:
-  --dist <path>   Install from a repository checkout (src/objectscript and bin/)
-                  instead of the copy built into this program
+  --dist <path>   Install from a repository checkout instead of the copy
+                  built into this program
   -V, --version   Print the version
   -h, --help      Print this help
 
@@ -123,7 +123,7 @@ fn parse_args() -> Result<Option<PathBuf>, lexopt::Error> {
     Ok(dist)
 }
 
-/// `setup-cli/local/` next to the sources when run from a checkout, else `local/` beside the binary.
+/// `installer/local/` next to the sources when run from a checkout, else `local/` beside the binary.
 fn local_dir() -> PathBuf {
     if let Ok(exe) = std::env::current_exe() {
         let exe = exe.canonicalize().unwrap_or(exe);

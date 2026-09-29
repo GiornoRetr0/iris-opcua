@@ -4,8 +4,8 @@ import { AppConfig, ServerProfile } from '../models/opcua.models';
 /**
  * Where configuration lives, and it is worth being explicit about the shape of
  * that: cleartext `localStorage`, per-browser rather than per-user, holding every
- * OPC UA server password and the IRIS API password. See SECURITY-REVIEW.md — that
- * is a security question, not a design one, and it is escalated rather than
+ * OPC UA server password and the IRIS API password. See
+ * docs/design/webapp-security-review.md — that is a security question, not a design one, and it is escalated rather than
  * decided here. The UI states the browser-local part so a user is not surprised
  * when their servers do not follow them to another machine.
  */

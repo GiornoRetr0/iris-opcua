@@ -14,23 +14,19 @@ webapp
 # Docs and design notes
 docs
 *.md
-!src/**/*.md
 LICENSE
 
-# The other image's build tree
-docker/certified-server
-
-# Certificate generation working directory. The generated certs the image needs
-# are copied into docker/iris/certs, which is deliberately not excluded.
-tools/certgen/temp
+# Demo pieces the iris image does not use: the other image's build tree, the
+# certificate generator (its outputs are copied into demo/iris/certs, which is
+# deliberately not excluded), and the mock servers' bind-mounted data
+demo/certified-server
+demo/certgen
+demo/mock-data
 
 # Windows artefacts are for native installs, not the Linux image
-bin/windows
-tools/windows-studio
-
-# Mock server data is bind-mounted into the plc containers at run time
-fixtures
+backend/native/windows-x64
+legacy
 
 # The terminal installer runs outside IRIS; its build tree is hundreds of megabytes
 # and local/ holds saved passwords
-setup-cli
+installer

@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Docker environment
 ```bash
-./tools/certgen/generate.sh          # Generate TLS certs (required before first build)
+./demo/certgen/generate.sh           # Generate TLS certs (required before first build)
 docker compose up                    # Start all containers (iris, plc, plc2, certified-server)
 docker compose build                 # Rebuild iris + certified-server images after source changes
 ```
@@ -44,29 +44,30 @@ printf 'zn "OPCUA"\ndo ##class(Ens.Director).GetProductionStatus(.p,.s) write p,
 printf 'zn "OPCUA"\nset rs=##class(%%SQL.Statement).%%ExecDirect(,"SELECT TOP 10 Type,ConfigName,$extract(Text,1,200) FROM Ens_Util.Log ORDER BY ID DESC") while rs.%%Next() { write rs.Type," | ",rs.ConfigName," | ",rs.%%GetData(3),! }\nhalt\n' | docker exec -i iris-opcua-iris-1 iris session iris
 ```
 
-> **Source changes in `src/objectscript/` require rebuilding the Docker image** (`docker compose build`) to take effect — edits on disk are not hot-reloaded.
+> **Source changes in `backend/` require rebuilding the Docker image** (`docker compose build`) to take effect — edits on disk are not hot-reloaded.
 
 ## Repository Layout (what lives where)
 
 | Path | Contents |
 |------|----------|
-| `src/objectscript/OPCUA/` | All production ObjectScript: Client, Adapters, Services, REST, DataSource, Types, Tests |
-| `src/objectscript/Examples/` | Demo Business Services (PollingExample, SubscriptionExample, SecureExample, ArrayExample, etc.) |
-| `src/objectscript/IRISConfig/` | `Installer.cls` — namespace/DB setup run during Docker build |
-| `bin/unix/{amd64,arm64}/` | Prebuilt Unix shared objects (`.so`), picked by `TARGETARCH` |
+| `backend/src/OPCUA/` | All production ObjectScript: Client, Adapters, Services, REST, DataSource, Types. This is exactly what a client install ships |
+| `backend/tests/OPCUA/Tests/` | Test classes (`OPCUA.Tests.*`) |
+| `backend/examples/Examples/` | Demo Business Services (PollingExample, SubscriptionExample, SecureExample, ArrayExample, etc.) |
+| `backend/native/linux-{amd64,arm64}/` | Prebuilt Unix shared objects (`.so`), picked by `TARGETARCH` |
+| `backend/native/windows-x64/` | Prebuilt Windows DLLs |
+| `installer/` | Rust terminal installer (`iris-opcua-setup`); embeds `backend/src/OPCUA/`, the Linux native libraries and its own `objectscript/IRISConfig/ClientInstaller.cls` |
 | `webapp/src/app/` | Angular 19 console (standalone components, signals, Tailwind) |
 | `webapp/src/app/core/models/opcua.models.ts` | All TypeScript interfaces (`TreeNode`, `Schema`, `DeviceValidation`, `PipelineHealth`, etc.) |
 | `webapp/src/app/pages/schema-library/`, `schema-builder/` | Schema list + creation |
 | `webapp/src/app/pages/device-binding/` | Bind devices to a schema; also serves pipeline edit |
 | `webapp/src/app/shared/opcua-tree/` | Embeddable single-server address-space browser |
 | `webapp/src/app/core/services/api.service.ts` | REST client (browse, deploy, editPipeline, listPipelines) |
-| `tools/certgen/` | OpenSSL configs, `certgen.bash`, and `generate.sh` |
-| `bin/windows/` | Prebuilt Windows DLLs |
-| `tools/windows-studio/` | Studio project XML for native Windows IRIS install |
-| `fixtures/mocksvr-data/data.csv` | Data served by the `plc` and `plc2` mock OPC UA servers |
-| `docker/iris/` | IRIS image Dockerfile + install script; builds with the **repo root** as context |
-| `docker/certified-server/` | OPC Foundation certified server image |
-| `docs/` | `architecture.md`, `workflow.md`, `decisions/` |
+| `demo/iris/` | IRIS image Dockerfile, install script and `IRISConfig/Installer.cls` (namespace/DB setup run during the Docker build); builds with the **repo root** as context |
+| `demo/certified-server/` | OPC Foundation certified server image |
+| `demo/certgen/` | OpenSSL configs, `certgen.bash`, and `generate.sh` |
+| `demo/mock-data/data.csv` | Data served by the `plc` and `plc2` mock OPC UA servers |
+| `legacy/windows-studio/` | Studio project XML for native Windows IRIS install |
+| `docs/` | `architecture.md`, `workflow.md`, `decisions/`; plans and reviews in `docs/design/` |
 
 ## Docker Services
 

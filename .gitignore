@@ -1,7 +1,7 @@
 .vscode/*
 .DS_Store
 **/.DS_Store
-# certgen's scratch directory, wherever it sits. Not anchored to tools/certgen on
+# certgen's scratch directory, wherever it sits. Not anchored to demo/certgen on
 # purpose: a checkout made before certgen moved keeps its old, untracked temp/ on
 # disk (git does not remove ignored files when branches move it), and an anchored
 # rule would stop covering it and surface every generated key as untracked.
@@ -23,8 +23,8 @@ build/
 # These need the ** and the .so.N suffixes: the old `!image-iris/uacbin/*.so` rule
 # matched neither the per-architecture subdirectories nor libopen62541.so.0, which
 # is why arm64/irisopcua.so was never committed.
-!bin/unix/**/*.so
-!bin/unix/**/*.so.*
+!backend/native/**/*.so
+!backend/native/**/*.so.*
 .venv/
 venv/
 env/

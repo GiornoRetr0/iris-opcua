@@ -31,12 +31,12 @@ The binaries are not code-signed. On macOS, Gatekeeper blocks a downloaded unsig
 Rust 1.89 or later, from a checkout of this repository:
 
 ```bash
-cd setup-cli
+cd installer
 cargo build --release          # → target/release/iris-opcua-setup
 cargo test                     # unit tests (no IRIS needed)
 ```
 
-The build embeds `src/objectscript/OPCUA/` (without `Tests/`), `src/objectscript/IRISConfig/ClientInstaller.cls` and `bin/unix/{amd64,arm64}/` from the checkout, so rebuild after changing them. To install from a checkout without rebuilding, run `iris-opcua-setup --dist /path/to/iris-opcua`.
+The build embeds `backend/src/OPCUA/`, `installer/objectscript/IRISConfig/ClientInstaller.cls` and `backend/native/linux-{amd64,arm64}/` from the checkout, so rebuild after changing them. To install from a checkout without rebuilding, run `iris-opcua-setup --dist /path/to/iris-opcua`.
 
 ## Run
 
@@ -70,7 +70,7 @@ The last row is only automatic for accounts with the `%All` role. IRIS does not 
 - **Namespace:** the namespace (default `OPCUA`) and its database are created in the manager directory, with interoperability enabled.
   - This uses the `Security.Resources`, `SYS.Database`, `Config.*`, and `%EnsembleMgr` APIs, not `%Installer`, whose manifest needs `%All`.
   - An existing namespace is reused only if it is empty, was created by this tool, or already holds the OPC UA backend. A namespace with other classes or another production is refused.
-- **ObjectScript:** `OPCUA/Constants.inc` and the `OPCUA` classes are uploaded. `Tests/`, `Examples/`, and `IRISConfig/` are left out.
+- **ObjectScript:** `OPCUA/Constants.inc` and the `OPCUA` classes from `backend/src/` are uploaded. Tests, examples and the Docker installer live elsewhere and are left out.
 - **REST application** (default `/csp/opcua/api`):
   - It uses password authentication and dispatches to `OPCUA.REST.Handler`.
   - It requires the resource `OPCUA_API`.
@@ -82,7 +82,7 @@ Reruns are safe. Each step inspects the server first and reuses what is already 
 
 ## Local files
 
-Everything lives in a `local/` folder next to the program: beside a downloaded binary, or `setup-cli/local/` (git-ignored) when built and run from the checkout.
+Everything lives in a `local/` folder next to the program: beside a downloaded binary, or `installer/local/` (git-ignored) when built and run from the checkout.
 
 | File | Contents |
 |---|---|
@@ -103,14 +103,14 @@ A remembered password is only used for the URL, user, and IRIS instance (instanc
 - **Atelier API:** it must be enabled and routed by the web server. Its 401 cannot tell a wrong password from an account without `%Development`.
 - **Upgrades:** a native library that differs from the supplied one is never replaced automatically.
 
-Tested against InterSystems IRIS Community 2025.3 (Linux ARM64 container); see `docs/terminal-installer-plan.md` §10 for the evidence and what remains unverified.
+Tested against InterSystems IRIS Community 2025.3 (Linux ARM64 container); see `docs/design/terminal-installer-plan.md` §10 for the evidence and what remains unverified.
 
 ## Releasing
 
-`.github/workflows/setup-cli.yml` builds and tests all five binaries on every push and pull request that touches the installer or its payload. To publish a release:
+`.github/workflows/installer.yml` builds and tests all five binaries on every push and pull request that touches the installer or its payload. To publish a release:
 
-1. Set `version` in `setup-cli/Cargo.toml` (for example `0.2.0`) and commit.
-2. Tag that commit `setup-cli-v<version>` and push the tag:
+1. Set `version` in `installer/Cargo.toml` (for example `0.2.0`) and commit.
+2. Tag that commit `setup-cli-v<version>` (the tag prefix predates the folder's rename to `installer/`) and push the tag:
 
    ```bash
    git tag setup-cli-v0.2.0
