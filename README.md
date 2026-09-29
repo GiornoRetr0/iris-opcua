@@ -1,332 +1,269 @@
-# IRIS OPC UA Adapter Demos
+# IRIS OPC UA Console
 
-This repository holds an example application in which IRIS uses 
-OPC UA to access data and subsequently store that data in tables/globals.
-A simple method by which small amounts of data can be written to an 
-OPC UA server using ObjectScript is also implemented.
+Connect InterSystems IRIS to OPC UA servers, browse their nodes, define reusable schemas, and collect measurements into SQL tables through polling or subscriptions.
 
-## ToC
-- [OPC UA Basics](#opc-ua-basics)
-- [The IRIS OPC UA Adapter Client](#the-iris-opc-ua-adapter-client)
-- [Polling Access vs. OPC UA Subscription](#polling-access-vs-opc-ua-subscription)
-- [Security](#security)
-- [Running the Demos Importing Data into IRIS](#running-the-demos-importing-data-into-iris)
-- [SimpleWrite and SecureWrite Demos](#simplewrite-and-securewrite-demos)
-- [Future Work](#future-work)
-- [Product Availabilty](#product-availability)
+- **Evaluate locally:** [Run with Docker](#run-with-docker).
+- **Use your own IRIS instance:** [Client installation](#client-installation).
+- **Start collecting:** [Your first pipeline](#your-first-pipeline).
+- **Learn about the protocol:** [OPC UA concepts and legacy demos](docs/opcua-concepts-and-legacy-demos.md).
 
-## OPC UA Basics
+## What you install
 
-OPC UA is a client-server protocol by which data and 
-information can be transferred between machines.
-
-Data intended for transmission via OPC UA is made available 
-by OPC UA servers to which OPC UA clients can connect.
-Clients connect to servers with TCP/IP by referencing
-special URLs designating the OPC UA protocol (see below), 
-and subsequently those clients 
-can then request specific data values held on those servers
-by referencing the "node" on which each 
-data value is stored. 
-
-Each OPC UA "node" on a server is identified by a "node id" and typically 
-stores a single data element that might be any one of various data types. 
-Often such data elements are simple primitives 
-such as strings, integers, booleans, and floats, 
-but server nodes can also hold more complex data types as well
-such as bytestrings that 
-can literally hold data in virtually any format that a developer so chooses,
-including code files and PDF documents.
-
-A relatively common situation might involve an industrial machine 
-for which data elements such as the temperature of the machine 
-and the pressure inside the machine are made accessible by an OPC UA
-server to computers on a local area network. 
-In such a situation, instantaneous temperature and pressure values 
-might be indexed upon the OPC UA server on nodes each named as 
-"temperature" and "pressure". OPC UA clients could then connect 
-to the server using the server's URL and subsequently request 
-current values 
-for each of the temperature and pressure nodes. The OPC UA server 
-would typically then reply with the most recent values for the data 
-along with timestamps indicating when those most recent
-values had been posted to the server.
-
-Although the general concepts behind OPC UA are simple, 
-the protocol itself has myriad of different features 
-that allow it to be used with great flexibility 
-in many situations, making its specification quite detailed and complex. 
-More information on OPC UA including the protocol's official specification
-can be found at http://opcfoundation.org.
-
-## The IRIS OPC UA Adapter Client
-
-The OPC UA adapter for IRIS contained in this repository
-serves to allow IRIS to act 
-as an OPC UA client in order to access OPC UA servers,
-primarily to query those servers for information, allowing the 
-construction of data feeds to continuously import data into IRIS.
-(The adapter can also be used to write data to servers in 
-limited amounts as is described regarding the 
-SimpleWrite and SecureWrite demos at bottom).
-
-Users of the adapter can construct "DataSource" classes 
-in ObjectScript with properties that reference queryable OPC UA nodes 
-upon a desired target server. Such "DataSource" classes are persistent within IRIS, 
-and thus, when values are eventually accessed from the desired OPC UA server, 
-those values are immediately stored within IRIS and made queryable 
-using both ObjectScript as well as SQL.
-In order to perform its function, each "DataSource" class must extend not only 
-%Persistent but also OPCUA.DataSource.Definition,
-and this allows the adapter to set up the necessary framework in order 
-to gather and store the relevant data. 
-
-Each property of a "DataSource" class is specified 
-indicating both (1)
-the node name for the node on which to find the relevant data,
-as well as (2)
-a special ObjectScript data type that is 
-itself reflective of the data type of that target data. 
-In the following sample code line below, data is sought from a node called 
-"AirConditioner_1.Temperature", 
-and placed in a property called "Temperature" 
-(notably, allowing the data to subsequently be 
-queried within IRIS both as an object property
-as well as in a SQL column of the same name). 
-
-```C#
-Property Temperature As OPCUA.Types.DoubleDataValue(OPCUANODENAME = "AirConditioner_1.Temperature");
+```text
+Browser → Web server / gateway → IRIS REST API → Native libraries → OPC UA server
+                                IRIS production → Measurements in SQL tables
 ```
 
-Importantly, the data type above is declared as OPCUA.Types.DoubleDataValue, 
-which is a special data type that allows access to both 
-the double value that is being sought as well as timestamps 
-indicating when that double was placed on the server. Currently, this
-adapter supports the accessing of primitive strings and integers,
-as well as other basic OPC UA data types,
-each of which must be accessed using similar 
-data type-related ObjectScript classes.
-Similar means can be used to obtain arrays of data as well
-(see ArrayExample, below).
+| Component | Where it runs | What it does |
+|---|---|---|
+| Web console (`webapp/`) | Browser, served by your web server | Configure connections, browse nodes, manage schemas and pipelines |
+| ObjectScript (`src/objectscript/OPCUA/`) | A dedicated IRIS namespace | REST API, schema generation, background collection and storage |
+| Native libraries (`bin/`) | The IRIS host | Communicate with OPC UA servers |
 
-## Polling Access vs. OPC UA Subscription
+There are two separate connections to configure: **browser → IRIS API** and **IRIS → OPC UA server**. Their URLs and credentials are different. OPC UA hostnames and certificate paths must be accessible from the IRIS host, even when you use the console on your laptop. Collection continues in IRIS after you close the browser.
 
-This IRIS client adapter can access OPC UA data using two fundamentally 
-different methods: (1) a method we term "polling", and 
-(2) a method that is most precisely referred to 
-in OPC UA terminology as "subscription to monitored items".
+## Run with Docker
 
-The polling method, which is here implemented using an 
-ObjectScript class OPCUA.Service.TCPPollingService, involves 
-the repeated requesting of data corresponding to a certain 
-set of data nodes in bulk. Specifically, using this polling method, 
-data for each and every property of a DataSource class is 
-requested from a server all at once. The client application 
-then expects to receive data from the server for each and 
-every node requested along with the relevant timestamps for 
-each reported data element, effectively representing a snapshot
-of the node values at that point in time. 
-The returned results are then 
-placed by the connector into a table/global within IRIS.
+### 1. Start the backend
 
-The second method improves upon the first in some ways by 
-using the OPC UA Subscription framework. Using this second method, 
-a request is made of an OPC UA server to track the changes made to 
-each node corresponding to a property of the relevant DataSource class. 
-Periodically, the client then queries the OPC UA server asking 
-if there have been any changes since last querying. 
-Upon receipt of this information, the IRIS OPC UA adapter 
-then arranges any such changes into one or more new rows 
-that are then added to a table/global within the database.
-If a particular value has not changed, then the previous value is
-inserted instead. If no values have changed, then the row is 
-typically omitted altogether. (Some settings can be adjusted to
-control this behavior.)
+You need Docker with Compose, Bash and OpenSSL for generating demo certificates, and Node.js with npm for the frontend. Node.js 22 satisfies the frontend toolchain's declared engine requirement.
 
-## Security
+From a clone of this repository:
 
-Currently, this version of the IRIS OPC UA Adapter supports (at least)
-two security modes: (1) unencrypted data transmission with anonymous login, 
-and (2) encrypted data transmission with two-way mutual client/server 
-authentication that allows for username/password login. 
+```bash
+# Once, before the first build:
+bash tools/certgen/generate.sh
 
-It is not uncommon for OPC UA servers to be implemented 
-without substantive security requirements and the use of basic, unsecure, 
-unencrypted transmission combined with anonymous login may be sufficient in many
-cases. Such a security policy can be selected when using the 
-IRIS OPC UA client by setting the "SecurityMode" 
-setting to "None" for any OPCUA.Service.TCPPollingService or 
-OPCUA.Service.TCPSubscriptionService. The SecurityMode setting
-appears under the "Security" heading on the settings tab
-for the business service in question when 
-viewing the service's parent Production in IRIS.
+# Build and start IRIS and the demo OPC UA servers:
+docker compose up -d --build
+docker compose logs -f iris
+```
 
-In contrast, encrypted data transmission 
-with two-way mutual client/server authentication 
-requires not only that the SecurityMode be set to the alternative 
-"Sign & Encrypt" setting, but also that each of several 
-crytographic files be supplied to the IRIS OPC UA client 
-before that software can be used. 
-Fundamentally, in establishing a secure 
-connection, the client must first sign its request to the server 
-with its own private key,
-then make available its public certificate to the server as well, 
-then the server must then accept that client's certificate as valid, 
-and then the same must happen in reverse with the server providing 
-its credentials to the client and the client accepting them.
-In practice, this requires that the IRIS
-OPC UA client be supplied with up to four different
-cryptographic files in order to function: 
-the client's public certificate, the client's 
-private key, the public certificate of a trusted certificate authority
-(useful for verifying the server's identity), 
-and a valid certificate revocation list for that certificate authority. 
-Indeed, a similar set of files may be needed by any relevant target
-server as well.
+Wait for IRIS to finish starting. Ctrl+C exits the log view without stopping the containers. On subsequent starts, reuse the generated certificates; the generator expects `tools/certgen/temp` not to exist.
 
-Other security modes besides these two are available for use with 
-the OPC UA protocol, but are not necessarily implemented for the 
-IRIS OPC UA client at this time. (It is unclear if security 
-standards may be automatically reduced if a target server 
-does not require them.)
+The image installs the libraries and ObjectScript code, creates the `OPCUA` namespace, and configures the REST API. **Compose does not start the frontend.**
 
-Security features are available for this connector on each of 
-Windows, Mac OS, and Docker/Ubuntu platforms.
+### 2. Start the frontend
 
-## Running the Demos Importing Data into IRIS
+In another terminal:
 
-### Using Docker
-The demos in this repository can be run using only a few steps:
+```bash
+cd webapp
+npm ci
+npm start
+```
 
-* Download the relevant code from GitHub.
-* Run "docker-compose up" in order to start the three Docker containers 
-used by the demos. 
-* Login to the IRIS Management Portal at http://localhost:52783/csp/sys/UtilHome.csp 
-with username "SuperUser" and password "sys".
-* Navigate to the IRIS Production Examples.OPCUADS.Production. 
-* Enable any of the IRIS Business Services found at the left hand side of the screen. 
-Each is itself a separate demo, each 
-intended to place incoming OPC UA data on a different table/global within IRIS.
+Open [http://localhost:4200](http://localhost:4200). Under **Settings → IRIS API Gateway**, use:
 
-### Using native IRIS
-- Ensure that your version of IRIS is licensed for Productions.
-- Place the [DLLs](./bin/windows/) (Windows) or [SOs](./bin/unix/) (Unix) in the bin directory for the instance of IRIS.
-- Open the Management Portal and add a namespace “APPINT”.
-- Open Studio/VS Code and connect to IRIS and the APPINT namespace.
-- Import into Studio/VS Code the material in the [IrisOPCUA_prj.xml](./tools/windows-studio/IrisOPCUA_prj-20251217.xml) project file, and compile it for use with the connected instance of IRIS.
-- Return to the Management Portal and navigate to
- <code>Interoperability > Production Configuration > (Examples.OPCUADS.Production)</code>. At this point, you should be able to see the five business service examples.
-- Enable the InternetPollingExample and the InternetSubscriptionExample.
-- Each of the two enabled business services should deposit incoming data on tables/globals that correspond to their names. View the results at <code>System > SQL</code> using SQL queries: e.g. <code>SELECT * FROM Examples_OPCUADS.InternetPollingExample</code>.
+| Setting | Demo value |
+|---|---|
+| API Base URL | `/iris/csp/opcua/api` |
+| IRIS API Username | `SuperUser` |
+| IRIS API Password | `SYS` (uppercase) |
 
-At this time, it is intended that there be six
-OPC UA BusinessService demonstrations available 
-within this repository now or in the near future:
+Save the settings. The development proxy forwards this path to `http://localhost:52783`. To check API access through the same route:
 
-* Local Polling Example (Examples.OPCUADS.PollingExample.cls) - This 
-example shows IRIS use the OPC UA adapter to connect to an 
-OPC UA server running locally in a separate container, that server being
-here called "mockserver". The "mockserver" application reads data 
-from a .csv file and makes that data available on nodes queryable 
-by clients connecting to it. 
-IRIS then repeatedly requests data from the "mockserver"
-using the polling mechanism described above,
-and each time receives a response with the requested data snapshot
-which is immediately deposited on a table/global "Examples.OPCUADS.PollingExample".
-* Local Subscription Example (Examples.OPCUADS.SubscriptionExample.cls) - This 
-example also shows IRIS use the OPC UA adapter to connect to "mockserver", 
-though here the data is obtained using the Subscription method instead of the Polling method.
-The data is deposited on a table/global "Examples.OPCUADS.SubscriptionExample".
-* Internet Polling Example (Examples.OPCUADS.InternetPollingExample.cls) - This 
-example shows IRIS use the OPC UA adapter to connect to 
-a publicly available OPC UA server on the Internet at 
-opc.tcp://opcuaserver.com:48010. 
-Data is then requested from that server using the polling method and deposited
-on a table/global "Examples.OPCUADS.InternetPollingExample". 
-* Internet Subscription Example (Examples.OPCUADS.InternetSubscriptionExample.cls) - This 
-example again shows IRIS use the OPC UA adapter to connect to 
-the publicly available OPC UA server on the Internet at 
-opc.tcp://opcuaserver.com:48010. 
-Data is requested from that server using the subscription method 
-and again stored within IRIS on a table/global.
-* Secure Example (Examples.OPCUADS.SecureExample.cls) - This example shows 
-IRIS use the OPC UA adapter to connect to and download data from 
-an OPC UA server that requires mutual authentication and transmission 
-encryption. The example is otherwise similar to the above local subscription example 
-in that it uses the subscription method of data retrieval and seeks data from 
-a server running locally, here in a separate docker container called "certified-server". 
-This example differs from that above, however, in that, in this case, the 
-locally running server is one that has been certified by the OPC Foundation
-in its use of security, and connecting to that server requires that certain minimum 
-security standards are met. More information on the server can be found at 
-https://open62541.org/certified-sdk.
-* Array Example (Examples.OPCUADS.ArrayExamole.cls) - This example shows 
-IRIS use the OPC UA adapter in order to download arrays of data from the
-publicly available OPC UA server on the Internet at opc.tcp://opcuaserver.com:48010.
-Aside from the array format in which the data is downloaded, this example is 
-fundamentally similar to the Internet Polling Example mentioned above.
+```bash
+curl --user SuperUser http://localhost:4200/iris/csp/opcua/api/ping
+```
 
-## SimpleWrite and SecureWrite Demos
+Enter `SYS` when prompted. Expect JSON containing `"status":"ok"`. This verifies the API route, not the native library or OPC UA connectivity.
 
-Demos showing the the use of the adapter to write small amounts of data
-to OPC UA servers are provided for use with an IRIS terminal session.
-ObjectScript code constituting the demos is provided in each of the 
-Examples.OPCUA.SimpleWrite.Run() procedure and the 
-Examples.OPCUA.SecureWrite.Run() procedure.
+### 3. Connect to a demo server
 
-In order to run these demos, one must follow the same initial steps as before:
+Under **Settings → OPC UA Servers**, add:
 
-* Download the relevant code from GitHub.
-* Run "docker-compose up" to start the Docker containers. 
+| Setting | Value |
+|---|---|
+| Display Name | `Demo PLC` |
+| OPC UA Server URL | `opc.tcp://plc:4840` |
+| Security Mode | `None` |
+| Username / Password | Leave empty |
 
-Subsequently, the procedure to access the terminal-based demos differs:
+Click **Test Connection**, then **Save Changes**. A second mock server is available at `opc.tcp://plc2:4840`.
 
-* Start an IRIS terminal session. Such can be accomplished by running
-"iris session iris" from within a bash shell running within the IRIS
-Docker container. (The procedure to access such a bash shell may differ
-on some systems. On Mac OS, with Docker accessible from the command 
-prompt, one can run "docker ps" to list information about the running 
-Dockeer containers including their "container ids". Select the 
-container id for the container named "irisdemo-demo-opcua_iris_1";
-it can be used to access a bash shell within that container using the
-command "docker exec -it &lt;CONTAINER_IR&gt; /bin/bash".)
-* Login using username "SuperUser" and password "sys".
-* Select the APPINT namespace using "zn ""APPINT""". (Notice the 
-double-quotes around APPINT.)
-* Each of the two demos can not be run by invoking the Run() method of 
-each of their classes: "w ##class(Examples.OPCUA.SimpleWrite).Run()" 
-and "w ##class(Examples.OPCUA.SecureWrite).Run()".
+These addresses are resolved inside Docker by IRIS. `localhost:10000` is the first mock server's address for clients running on your host, not for IRIS inside its container.
 
-Both of the write demos illustrate the use of a simple feature of the 
-adapter by which a single data element can be written to an
-OPC UA server. Simple read commands are also included so that the 
-values on the server can be diplayed in the terminal before and
-after the write procedure call is executed.
+Continue with [Your first pipeline](#your-first-pipeline). The [IRIS Management Portal](http://localhost:52783/csp/sys/UtilHome.csp) uses the same `SuperUser` / `SYS` login; select namespace `OPCUA`.
 
-* SimpleWrite - This demo writes a simple value to a publicly
-accessible OPC UA server located on the Internet at 
-opc.tcp://opcuaserver.com:48010. Security features of the 
-IRIS OPC UA adapter are not used.
-* SecureWrite - This demo writes a simple value to an OPC UA server
-running in one of the locally-running Docker containers, the same
-OPC Foundation-certified server instance that is used for the 
-Secure data feed example (using Examples.OPCUADS.SecureExample.cls),
-and does so using a secure connection. If the SecureExample data
-feed is running at the time that the Examples.OPCUA.SecureWrite.Run() 
-procedure is invoked, then the results of the write will be
-visible, not only on the screen within the IRIS terminal session,
-but also in the incomcing SecureExample data as well. In order to 
-view the results in the data feed, first note the time at which the
-Examples.OPCUA.SecureWrite.Run() procedure is invoked; the value 
-"57" should be viewable in the column "TheAnswer_Value" for the 
-one-second period after the invocation of the procedure. Otherwise,
-the values in "TheAnswer_Value" column should be "42" instead. 
+### Stop and restart
 
-## Future Work
+```bash
+docker compose stop
+docker compose start
+```
 
-TBD
+After changing ObjectScript or native libraries, rebuild with `docker compose up -d --build`. Frontend changes reload through `npm start`.
 
-## Product Availability
+**The demo is disposable:** the current Compose file persists certificate volumes but has no IRIS database volume. Removing or recreating the IRIS container can lose schemas, pipeline configuration, and collected data. Use the demo credentials and certificates only for evaluation.
 
-Versions of this OPC UA code are available for use on Windows and Mac OS,
-in addition to the Docker/Ubuntu version used for these demos.
+## Client installation
+
+Installation on your own instance currently requires an IRIS administrator. There is no production installer or environment setup wizard. The following describes the current manual installation path; validate your target IRIS/OS/library combination in staging before deployment.
+
+### 1. Prepare a dedicated namespace
+
+Use IRIS licensed and configured for interoperability productions. Create a dedicated interoperability-enabled namespace and database, for example `OPCUA`, with writable storage. Use that namespace throughout installation.
+
+You will need:
+
+- Access to the IRIS host to install libraries and certificates.
+- Administrator access to import classes and configure an authenticated REST application.
+- An HTTPS web server / InterSystems Web Gateway for the API and a web server for the frontend; these may share one origin.
+- The OPC UA endpoint, credentials if required, and certificate/trust requirements from the server administrator.
+
+**Use a dedicated namespace.** The console manages `OPCUA.Pipeline.Production`. Starting a pipeline currently stops another running production in the same namespace before starting its own.
+
+Do not run `IRISConfig.Installer.Install()` on a client instance: it assumes Docker paths, creates demo credentials, and changes default-account password-expiration settings.
+
+### 2. Install native libraries on the IRIS host
+
+Find the instance's binary directory in an IRIS terminal:
+
+```objectscript
+write $System.Util.BinaryDirectory(), !
+```
+
+Select files for the **IRIS host's OS and CPU**, not the browser machine:
+
+| IRIS host | Files |
+|---|---|
+| Linux x86-64 | `bin/unix/amd64/` |
+| Linux ARM64 | `bin/unix/arm64/` |
+| Windows x64 | `bin/windows/` — compatibility caveat below |
+
+On Linux, install `irisopcua.so` and its required companion libraries from the matching directory into the instance's binary directory. Check dependencies on that host:
+
+```bash
+ldd /path/to/iris/bin/irisopcua.so
+ldd /path/to/iris/bin/libopen62541.so.0
+```
+
+Resolve any `not found` dependencies. The Docker image also installs `libmbedtls-dev`; the required packages depend on the target OS. Do not overwrite existing instance libraries without checking compatibility.
+
+On Windows, the connector uses `IrisOPCUA.dll` and `open62541.dll`. The supplied `libcrypto-1_1-x64.dll` is supplemental: **do not overwrite IRIS's existing copy**. The [Windows notes](bin/windows/README.md) warn that the binaries and source may be from different revisions. Confirm a matching build for the current console; the legacy Studio export does not replace the current REST classes.
+
+No native macOS library set is included. On macOS, use the Linux Docker environment. The repository does not yet provide a tested compatibility matrix for client installations.
+
+### 3. Load and compile ObjectScript
+
+Copy `src/objectscript/OPCUA/` to a staging directory readable by IRIS **on the IRIS host**. Omit its `Tests/` directory for a client installation. The console does not require `Examples/`, `IRISConfig/`, or the legacy Studio project.
+
+In an IRIS terminal, substitute your namespace and staging path. Run each command and resolve any reported error before continuing:
+
+```objectscript
+zn "OPCUA"
+set sc = $System.OBJ.Load("/srv/iris-opcua/OPCUA/Constants.inc", "k")
+do $System.Status.DisplayError(sc)
+set sc = $System.OBJ.LoadDir("/srv/iris-opcua/OPCUA/", "k", , 1)
+do $System.Status.DisplayError(sc)
+set sc = $System.OBJ.CompilePackage("OPCUA", "ck")
+do $System.Status.DisplayError(sc)
+```
+
+Load `Constants.inc` explicitly; `LoadDir` does not load include files automatically. On Windows, use the equivalent absolute staging path.
+
+Register and test the library in the same namespace:
+
+```objectscript
+set sc = ##class(OPCUA.Utils).Install($System.Util.BinaryDirectory()_"irisopcua.so")
+do $System.Status.DisplayError(sc)
+set sc = ##class(OPCUA.Utils).Initialize()
+do $System.Status.DisplayError(sc)
+```
+
+Use `IrisOPCUA.dll` instead on Windows. `Install()` only records the path; `Initialize()` actually loads and calls the library. Resolve loading errors before proceeding.
+
+### 4. Configure the REST API
+
+In the Management Portal, open **System Administration → Security → Applications → Web Applications** and create:
+
+| Property | Value |
+|---|---|
+| Name | `/csp/opcua/api` |
+| Namespace | Your dedicated namespace, e.g. `OPCUA` |
+| Dispatch class | `OPCUA.REST.Handler` |
+| Enabled | Yes |
+| Authentication | Password authentication with an authorized IRIS account |
+
+Configure your web server / InterSystems Web Gateway to serve this application through HTTPS. The externally visible prefix depends on the gateway: `/iris/csp/opcua/api` and `/csp/opcua/api` are not automatically interchangeable.
+
+Create a dedicated API account with the application/database permissions needed to browse, generate and compile schema classes, and manage this namespace's production. The repository does not supply a predefined role or verified minimum-permission profile. Have your IRIS administrator validate these operations with the dedicated account.
+
+Test your published URL, substituting your actual address and username:
+
+```bash
+curl --user opcua-console https://iris.example.com/csp/opcua/api/ping
+```
+
+Enter the password when prompted. Expect JSON containing `"status":"ok"`; an HTML login page is not an API success.
+
+### 5. Host the frontend and connect it to IRIS
+
+On a build workstation:
+
+```bash
+cd webapp
+npm ci
+npm run build
+```
+
+Publish the contents of `webapp/dist/webapp/browser/` on your HTTPS web server. Configure frontend routes such as `/schemas` and `/pipelines` to fall back to `index.html`; route API requests to IRIS separately. The default build assumes the site's root. For a subdirectory, use the appropriate base, for example `npm run build -- --base-href /opcua/`.
+
+Prefer a same-origin deployment, with the web server proxying the API. If frontend and API use different origins, configure and verify CORS/preflight handling for your frontend origin, the `Authorization` header, and API methods. **The Angular development proxy is not part of the production build.**
+
+Open **Settings → IRIS API Gateway** and enter your API URL and dedicated IRIS account credentials. Use the same-origin API path if you configured a proxy, or the full HTTPS API URL otherwise. Save the settings; changing the target instance needs no frontend rebuild.
+
+For temporary development use, you can run `npm start` and edit `webapp/proxy.conf.json` to target your instance. It forwards the existing path unchanged: adjust the route/path handling if your gateway uses another prefix, then restart the development server.
+
+**Current limitation:** IRIS and OPC UA passwords are saved in cleartext browser `localStorage`, per browser profile. Profiles do not automatically follow users between computers. See the [credential-storage review](webapp/SECURITY-REVIEW.md); improved authentication and server-side credential storage remain product work before a general client rollout.
+
+### 6. Connect to the real OPC UA server
+
+Under **Settings → OPC UA Servers**, add the endpoint and its credentials if required. These belong to the OPC UA server, separately from the IRIS API account.
+
+For **Sign & Encrypt**, provision the following on the IRIS host and enter their paths:
+
+- Client certificate and private key in DER format, readable by the IRIS service account. Restrict access to the private key.
+- Trust directory containing the certificates needed to trust the server, and the revocation-list directory required by your certificate configuration.
+- Client application URI matching the URI in the client certificate.
+
+Have the server administrator trust the client certificate as well. The UI offers `None` and `Sign & Encrypt`, identifying `Basic256Sha256` for the latter; verify compatibility with your server. The console accepts filesystem paths and does not upload or provision certificates. Use your organization's certificates for client installations.
+
+Click **Test Connection**, save, then verify browsing and actual collection below.
+
+## Your first pipeline
+
+1. In **Node Explorer**, select your server and browse to the device containing the measurements you need.
+2. Open **Schemas → New Schema**. Select the server, mark a representative device as the template root, select measurement nodes, name the schema, and click **Save Schema**.
+3. Bind devices to the saved schema. Select device roots, resolve validation errors, choose polling or subscription and collection settings, then deploy. For the local mock server, use `Objects` as the root and measurements such as `SA1`, `SA2`, and `VT5`.
+4. Find the pipeline on the dashboard and start it. **Deployment creates a stopped pipeline; starting it begins collection.**
+5. Open SQL in the Management Portal in the same namespace and query the table shown for the schema. For example, class `OPCUA.DS.MyDevice` uses table `OPCUA_DS.MyDevice`:
+
+   ```sql
+   SELECT TOP 20 * FROM OPCUA_DS.MyDevice ORDER BY ID DESC
+   ```
+
+Expect device identity in `NodePath`, plus each measurement's value, status, source timestamp, and server timestamp. Check the production event log if collection fails or quality is bad. With subscriptions, unchanged values may not produce a row every interval.
+
+Reuse schemas for more devices of the same structure. Removing a pipeline retains its schema and collected data. Include the namespace database, production configuration, and certificates in operational backups; browser settings are separate.
+
+## Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| Docker build cannot find certificates | Run `bash tools/certgen/generate.sh` before the first build |
+| Certificate generator says temporary directory exists | Reuse existing outputs, or archive the previous generation before deliberately generating replacement demo identities |
+| API returns 404 or HTML | Gateway prefix, REST application's namespace/dispatch class, and proxy routing |
+| API returns 401/403 | IRIS credentials, authentication settings, application and namespace permissions |
+| CORS or mixed-content error | HTTPS on both connections, preflight handling, or a same-origin proxy |
+| `/ping` succeeds, connection test fails | Library initialization, reachability from IRIS, server credentials, security mode, and certificate trust |
+| Native library will not load | Host architecture, dependency libraries, file access, and registered path |
+| Pipeline starts but no rows appear | Device validation, production event log, measurement quality, and SQL namespace/table |
+| Demo data disappears after container recreation | Compose currently has no persistent IRIS database volume |
+
+## Further reading
+
+- [OPC UA concepts and legacy demos](docs/opcua-concepts-and-legacy-demos.md) — original background material, with legacy instructions identified.
+- [Architecture](docs/architecture.md) and [workflow diagrams](docs/workflow.md) — implementation details.
+- [Setup improvements proposal](docs/setup-improvements.md) — recommended installer, diagnostics, and onboarding work; not implemented yet.
