@@ -6,6 +6,11 @@ device list was baked in at deploy time. Adding a device meant regenerating and
 recompiling the class.
 
 ### Added
+  - `includeServerTimestamp` option on `POST /schemas` (default `true`), with a
+    checkbox in the schema builder. When it is `false`, columns are typed as the new
+    `OPCUA.Types.NoServerTS.*` measurements, which have no `ServerTimeStamp`, so the
+    table has no `*_ServerTS` columns. The source timestamp, status and full payload
+    are kept, flat and nested. Existing schemas are unchanged.
   - `OPCUA.DataSource.DeviceSchema` — abstract superclass for generated schemas. Gives
     the `DataSourceClass` production setting a class family, so it renders as a dropdown.
   - `OPCUA.DataSource.Resolver` — parses `DeviceNodePaths` and matches each device's

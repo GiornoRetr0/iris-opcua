@@ -143,6 +143,10 @@ Every OPC UA value in IRIS is stored as a "serial object" (`%SerialObject` -- an
 - `ServerTimeStamp` -- when the OPC UA server processed it
 - `Status` -- OPC UA status code (0 = good)
 
+### Without a server timestamp: `OPCUA.Types.NoServerTS.*`
+
+A schema created with `includeServerTimestamp: false` types its columns with a parallel family: `OPCUA.Types.NoServerTS.AbstractDataValue` holds only `SourceTimeStamp` and `Status`, and each concrete type (`OPCUA.Types.NoServerTS.DoubleDataValue`, `...ArrayDataValue.Integer`, ...) mirrors its `OPCUA.Types` counterpart with the payload one storage position earlier. It does not extend `OPCUA.Types.AbstractDataValue`, because inheriting would bring the property back, and the point is that the `*_ServerTS` SQL column does not exist. The native layer still returns the full DataValue; `OPCUA.DataSource.RowWriter` removes the server timestamp before storing, so these types are for generated device schemas only.
+
 ### Concrete types
 
 Each extends AbstractDataValue and adds a `Value` property:
@@ -909,10 +913,11 @@ Here's the complete journey of a data point from an OPC UA server to a SQL query
     - Both row-source services share this writer, so polling and subscriptions
       cannot disagree about what a stored measurement contains
 
-15. Data is now queryable. Each column contributes four SQL fields:
+15. Data is now queryable. Each column contributes four SQL fields (three when
+    the schema was created with includeServerTimestamp: false — no *_ServerTS):
     SELECT NodePath,
-           Temperature_Value, Temperature_Status, Temperature_SourceTimeStamp,
-           Humidity_Value,    Humidity_Status,    Humidity_SourceTimeStamp
+           Temperature_Value, Temperature_Status, Temperature_SourceTS,
+           Humidity_Value,    Humidity_Status,    Humidity_SourceTS
       FROM OPCUA_DS.MyData
     -> Objects, 20.5, 0, 2026-01-01 10:00:01, 65.2, 0, 2026-01-01 10:00:01
 

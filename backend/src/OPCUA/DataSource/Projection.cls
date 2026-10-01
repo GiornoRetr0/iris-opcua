@@ -134,7 +134,9 @@ ClassMethod ProcessObj(oObj As %CompiledClass, pOPCUADefaultNamespace As %String
             Set tSC = ..CreateConfigSpecEntry(2, pPropertyPath_"."_oProp.Name, tOPCUANamespace, tNodeName, tNodeAttributeId, .lConfigSpecEntry)
             Quit:$$$ISERR(tSC)
         }
-        ElseIf $Extract(oProp.Type,1,12)="OPCUA.Types."
+        // A measurement, with or without its server timestamp. Both are read as
+        // the full DataValue; RowWriter drops the server timestamp where needed.
+        ElseIf ($Extract(oProp.Type,1,12)="OPCUA.Types.") || $classmethod(oProp.Type, "%Extends", "OPCUA.Types.AbstractDataValue") || $classmethod(oProp.Type, "%Extends", "OPCUA.Types.NoServerTS.AbstractDataValue")
         {
             // Using code 2 on the first parameter to say this is a standard OPCUA structure
             Set tSC = ..CreateConfigSpecEntry(2, pPropertyPath_"."_oProp.Name, tOPCUANamespace, tNodeName, tNodeAttributeId, .lConfigSpecEntry)

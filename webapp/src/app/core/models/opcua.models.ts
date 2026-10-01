@@ -203,6 +203,8 @@ export interface CreateSchemaRequest {
   packagePath?: string;
   dataSourceName?: string;
   defaultNamespace?: number;
+  /** Default true. false: columns have no ServerTimeStamp, in the class or in SQL */
+  includeServerTimestamp?: boolean;
   columns: { displayName: string; inferredType?: string; relativePath?: string[]; nodeNs?: number }[];
 }
 
@@ -213,6 +215,7 @@ export interface CreateSchemaResult {
   tableName: string;
   columnCount: number;
   serialClasses: number;
+  includeServerTimestamp: boolean;
 }
 
 /** Per-device outcome of a dry-run binding check against a live server. */
