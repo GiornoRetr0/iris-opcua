@@ -41,8 +41,20 @@ ClassMethod Run(pURL As %String = "opc.tcp://plc") As %Boolean
     write !, "=== Reading quality changes (offline) ===", !
     do ..TestQualityChanges(.tPass, .tFail)
 
+    write !, "=== No server timestamp: type family (offline) ===", !
+    do ..TestNoServerTSTypes(.tPass, .tFail)
+
+    write !, "=== No server timestamp: flat schema (offline) ===", !
+    do ..TestNoServerTSFlat(.tPass, .tFail)
+
+    write !, "=== No server timestamp: nested folder (offline) ===", !
+    do ..TestNoServerTSNested(.tPass, .tFail)
+
     write !, "=== Live poll against ", pURL, " ===", !
     do ..TestLiveRow(pURL, .tPass, .tFail)
+
+    write !, "=== Live poll without server timestamp against ", pURL, " ===", !
+    do ..TestLiveRow(pURL, .tPass, .tFail, 0)
 
     write !, "=== Live subscription against ", pURL, " ===", !
     do ..TestLiveSubscription(pURL, .tPass, .tFail)
@@ -153,7 +165,7 @@ ClassMethod TestSchemaShape(ByRef pPass, ByRef pFail)
         for i=1:1:tMeta.columnCount {
             set tField($ZConvert(tMeta.columns.GetAt(i).colName, "U")) = ""
         }
-        for tName = "ALPHA_VALUE", "ALPHA_STATUS", "ALPHA_SOURCETIMESTAMP", "ALPHA_SERVERTIMESTAMP" {
+        for tName = "ALPHA_VALUE", "ALPHA_STATUS", "ALPHA_SOURCETS", "ALPHA_SERVERTS" {
             do ..Check("SQL exposes "_tName, ''$Data(tField(tName)), 1, .pPass, .pFail)
         }
     } Catch (e) {
@@ -246,12 +258,12 @@ ClassMethod TestFlatRow(ByRef pPass, ByRef pFail)
 
         // --- SQL readback ---
         set tRS = ##class(%SQL.Statement).%ExecDirect(,
-            "SELECT Alpha_Value, Alpha_Status, Alpha_SourceTimeStamp, Beta_Value, Gamma_Value, Gamma_Status "_
+            "SELECT Alpha_Value, Alpha_Status, Alpha_SourceTS, Beta_Value, Gamma_Value, Gamma_Status "_
             "FROM "_..TableName(tClass)_" WHERE ID = ?", tId)
         do ..Check("SQL returns the row", tRS.%Next(), 1, .pPass, .pFail)
         do ..Check("SQL Alpha_Value", tRS.%GetData(1), 21.5, .pPass, .pFail)
         do ..Check("SQL Alpha_Status", tRS.%GetData(2), 7, .pPass, .pFail)
-        do ..Check("SQL Alpha_SourceTimeStamp", tRS.%GetData(3), "2026-01-01 00:00:01", .pPass, .pFail)
+        do ..Check("SQL Alpha_SourceTS", tRS.%GetData(3), "2026-01-01 00:00:01", .pPass, .pFail)
         do ..Check("SQL Beta_Value is empty for the unresolved column", tRS.%GetData(4), "", .pPass, .pFail)
         do ..Check("SQL Gamma_Value", tRS.%GetData(5), "hello", .pPass, .pFail)
         do ..Check("SQL Gamma_Status", tRS.%GetData(6), 9, .pPass, .pFail)
@@ -343,11 +355,11 @@ ClassMethod TestNestedRow(ByRef pPass, ByRef pFail)
         do ..Check("Motor.Speed source timestamp is its own", tObj.Motor.Speed.SourceTimeStamp, "2026-03-03 03:03:03", .pPass, .pFail)
 
         set tRS = ##class(%SQL.Statement).%ExecDirect(,
-            "SELECT Motor_Temperature_Value, Motor_Temperature_SourceTimeStamp, Motor_Speed_Value, Humidity_Value "_
+            "SELECT Motor_Temperature_Value, Motor_Temperature_SourceTS, Motor_Speed_Value, Humidity_Value "_
             "FROM "_..TableName(tClass)_" WHERE ID = ?", tId)
         do ..Check("SQL returns the nested row", tRS.%Next(), 1, .pPass, .pFail)
         do ..Check("SQL Motor_Temperature_Value", tRS.%GetData(1), 21.5, .pPass, .pFail)
-        do ..Check("SQL Motor_Temperature_SourceTimeStamp", tRS.%GetData(2), "2026-03-03 02:02:02", .pPass, .pFail)
+        do ..Check("SQL Motor_Temperature_SourceTS", tRS.%GetData(2), "2026-03-03 02:02:02", .pPass, .pFail)
         do ..Check("SQL Motor_Speed_Value", tRS.%GetData(3), 1500, .pPass, .pFail)
         do ..Check("SQL Humidity_Value", tRS.%GetData(4), 45, .pPass, .pFail)
     } Catch (e) {
@@ -558,17 +570,266 @@ ClassMethod TestLegacyPlainRow(ByRef pPass, ByRef pFail)
     do ..DropSchema(tClass)
 }
 
+// ==================== no server timestamp ====================
+
+/// Every full measurement type has a NoServerTS counterpart without the
+/// property, and the mapping goes both ways.
+ClassMethod TestNoServerTSTypes(ByRef pPass, ByRef pFail)
+{
+    set tSvc = "OPCUA.REST.SchemaService"
+
+    do ..Check("DoubleDataValue maps to its counterpart",
+        $classmethod(tSvc, "MapToDataValueType", "OPCUA.Types.DoubleDataValue", 0),
+        "OPCUA.Types.NoServerTS.DoubleDataValue", .pPass, .pFail)
+    do ..Check("array type maps to its counterpart",
+        $classmethod(tSvc, "MapToDataValueType", "OPCUA.Types.ArrayDataValue.Integer", 0),
+        "OPCUA.Types.NoServerTS.ArrayDataValue.Integer", .pPass, .pFail)
+    do ..Check("%Boolean maps to the counterpart wrapper",
+        $classmethod(tSvc, "MapToDataValueType", "%Boolean", 0),
+        "OPCUA.Types.NoServerTS.BooleanDataValue", .pPass, .pFail)
+    do ..Check("unknown type falls back to the counterpart string",
+        $classmethod(tSvc, "MapToDataValueType", "", 0),
+        "OPCUA.Types.NoServerTS.StringDataValue", .pPass, .pFail)
+    do ..Check("a counterpart sent with the default maps back to the full type",
+        $classmethod(tSvc, "MapToDataValueType", "OPCUA.Types.NoServerTS.DoubleDataValue"),
+        "OPCUA.Types.DoubleDataValue", .pPass, .pFail)
+
+    set tBad = ""
+    set tAll = $LB("BooleanDataValue", "DoubleDataValue", "FloatDataValue", "IntegerDataValue", "StringDataValue", "TimeStampDataValue", "LocalizedTextDataValue", "NodeIdDataValue", "QualifiedNameDataValue", "Multidimensional", "ArrayDataValue.Boolean", "ArrayDataValue.Double", "ArrayDataValue.Float", "ArrayDataValue.Integer", "ArrayDataValue.String", "ArrayDataValue.TimeStamp")
+    for iType=1:1:$LL(tAll) {
+        set tShort = $LI(tAll, iType)
+        set tFull = "OPCUA.Types."_tShort
+        set tShortType = $classmethod(tSvc, "MapToDataValueType", tFull, 0)
+        if tShortType '= ("OPCUA.Types.NoServerTS."_tShort) { set tBad = tBad_" "_tShort_"(map)" continue }
+        if '##class(%Dictionary.CompiledClass).%ExistsId(tShortType) { set tBad = tBad_" "_tShort_"(missing)" continue }
+        if ##class(%Dictionary.CompiledProperty).%ExistsId(tShortType_"||ServerTimeStamp") { set tBad = tBad_" "_tShort_"(has ServerTimeStamp)" continue }
+        if '##class(OPCUA.DataSource.Resolver).IsMeasurementType(tShortType) { set tBad = tBad_" "_tShort_"(not a measurement)" continue }
+        // Same payload, in the same order, one position earlier.
+        set tFullVals = ..StorageValues(tFull), tShortVals = ..StorageValues(tShortType)
+        if $LI(tShortVals, 3, *) '= $LI(tFullVals, 4, *) { set tBad = tBad_" "_tShort_"(payload)" }
+    }
+    do ..Check("every counterpart exists, lacks ServerTimeStamp, keeps the payload", tBad, "", .pPass, .pFail)
+    do ..Check("full types are not flagged as omitting the server timestamp",
+        ##class(OPCUA.DataSource.Resolver).OmitsServerTimeStamp("OPCUA.Types.DoubleDataValue"), 0, .pPass, .pFail)
+}
+
+/// A flat schema created without server timestamps: no SQL column for them,
+/// and each measurement keeps value, status, source timestamp and its whole
+/// payload, including a two-field LocalizedText and a Bad reading's null value.
+ClassMethod TestNoServerTSFlat(ByRef pPass, ByRef pFail)
+{
+    set tClass = ..#TestPackage_".NoSrvFlatSchema"
+    Try {
+        set tSC = ..BuildGeneratedSchema(tClass, "TmpNoSrvFlatSchema", 2, 0)
+        if $$$ISERR(tSC) {
+            set pFail = pFail + 1
+            write "  FAIL could not generate schema: ", $System.Status.GetOneErrorText(tSC), !
+            quit
+        }
+
+        kill tType
+        set tCD = ##class(%Dictionary.CompiledClass).%OpenId(tClass)
+        for i=1:1:tCD.Properties.Count() {
+            set tType(tCD.Properties.GetAt(i).Name) = tCD.Properties.GetAt(i).Type
+        }
+        do ..Check("Alpha is a NoServerTS DataValue", $Get(tType("Alpha")), "OPCUA.Types.NoServerTS.DoubleDataValue", .pPass, .pFail)
+        do ..Check("Gamma is a NoServerTS LocalizedText", $Get(tType("Gamma")), "OPCUA.Types.NoServerTS.LocalizedTextDataValue", .pPass, .pFail)
+
+        set tSpec = ##class(OPCUA.DataSource.Projection).GetOPCUAConfigSpec(tClass)
+        set tEntries = $LI(tSpec, 3), tAllCode2 = 1, tCount = 0
+        for i=2:1:$LL(tEntries) {
+            set tEntry = $LI(tEntries, i)
+            continue:tEntry=""
+            set tCount = tCount + 1
+            if $LI(tEntry, 1) '= 2 set tAllCode2 = 0
+        }
+        do ..Check("projection records 3 columns", tCount, 3, .pPass, .pFail)
+        do ..Check("every column is still read as a full DataValue", tAllCode2, 1, .pPass, .pFail)
+
+        set tFields = ..SqlFields(tClass)
+        for tName = "ALPHA_VALUE", "ALPHA_STATUS", "ALPHA_SOURCETS", "GAMMA_TEXT", "GAMMA_LOCALE" {
+            do ..Check("SQL exposes "_tName, tFields [ (","_tName_","), 1, .pPass, .pFail)
+        }
+        set tAnyServer = tFields [ "SERVERTS"
+        do ..Check("SQL has no server timestamp column at all", tAnyServer, 0, .pPass, .pFail)
+
+        $$$ThrowOnError(..ColumnIndex(tClass, .tIdx, .tColCount))
+        set tMask = ""
+        for i=1:1:tColCount {
+            set tMask = tMask _ $LB($Select($LI(tIdx(i), 1) = "Beta": 0, 1: 1))
+        }
+        kill tWant
+        set tWant("Alpha") = $LB("2026-01-01 00:00:01", "2026-01-01 00:00:02", 7, 21.5)
+        set tWant("Gamma") = $LB("2026-02-02 11:11:11", "2026-02-02 11:11:12", 9, "Hallo", "de-DE")
+        set tInput = $LB("")
+        for i=1:1:tColCount {
+            continue:'+$LI(tMask, i)
+            set tInput = tInput _ $LB(tWant($LI(tIdx(i), 1)))
+        }
+
+        set tWriter = ##class(OPCUA.DataSource.RowWriter).%New()
+        $$$ThrowOnError(tWriter.Initialize(tClass))
+        set tResultIdx = 1
+        set tSC = tWriter.BuildRow(.tInput, tMask, "ns=1;s=DevA", .tResultIdx, .tRow)
+        do ..Check("row builds", $$$ISOK(tSC), 1, .pPass, .pFail)
+        $$$ThrowOnError(tSC)
+        $$$ThrowOnError($classmethod(tClass, "SaveSourcedData", .tRow, .tId))
+
+        set tObj = $classmethod(tClass, "%OpenId", tId)
+        do ..Check("row opens as an object", $IsObject(tObj), 1, .pPass, .pFail)
+        quit:'$IsObject(tObj)
+        do ..Check("Alpha value", tObj.Alpha.Value, 21.5, .pPass, .pFail)
+        do ..Check("Alpha status", tObj.Alpha.Status, 7, .pPass, .pFail)
+        do ..Check("Alpha source timestamp", tObj.Alpha.SourceTimeStamp, "2026-01-01 00:00:01", .pPass, .pFail)
+        do ..Check("Beta is empty for the unresolved column", tObj.Beta.Value, "", .pPass, .pFail)
+        do ..Check("Gamma text", tObj.Gamma.Text, "Hallo", .pPass, .pFail)
+        do ..Check("Gamma locale (second payload field)", tObj.Gamma.Locale, "de-DE", .pPass, .pFail)
+        do ..Check("Gamma status is its own", tObj.Gamma.Status, 9, .pPass, .pFail)
+        do ..Check("Gamma source timestamp is its own", tObj.Gamma.SourceTimeStamp, "2026-02-02 11:11:11", .pPass, .pFail)
+
+        set tRS = ##class(%SQL.Statement).%ExecDirect(,
+            "SELECT Alpha_Value, Alpha_Status, Alpha_SourceTS, Beta_Value, Gamma_Text, Gamma_Locale, Gamma_Status "_
+            "FROM "_..TableName(tClass)_" WHERE ID = ?", tId)
+        do ..Check("SQL returns the row", tRS.%Next(), 1, .pPass, .pFail)
+        do ..Check("SQL Alpha_Value", tRS.%GetData(1), 21.5, .pPass, .pFail)
+        do ..Check("SQL Alpha_Status", tRS.%GetData(2), 7, .pPass, .pFail)
+        do ..Check("SQL Alpha_SourceTS", tRS.%GetData(3), "2026-01-01 00:00:01", .pPass, .pFail)
+        do ..Check("SQL Beta_Value is empty", tRS.%GetData(4), "", .pPass, .pFail)
+        do ..Check("SQL Gamma_Text", tRS.%GetData(5), "Hallo", .pPass, .pFail)
+        do ..Check("SQL Gamma_Locale", tRS.%GetData(6), "de-DE", .pPass, .pFail)
+        do ..Check("SQL Gamma_Status", tRS.%GetData(7), 9, .pPass, .pFail)
+
+        // A Bad reading: status and source timestamp survive, the value is null.
+        set tBadMask = "", tBadInput = $LB("")
+        for i=1:1:tColCount {
+            set tBadMask = tBadMask _ $LB(1)
+            set tName = $LI(tIdx(i), 1)
+            set tBadInput = tBadInput _ $LB($Case(tName,
+                "Alpha":$LB("2026-05-05 05:05:05", "2026-05-05 05:05:06", 2156527616, ),
+                "Beta":$LB("2026-05-05 05:05:05", "2026-05-05 05:05:06", 0, 3),
+                :$LB("2026-05-05 05:05:05", "2026-05-05 05:05:06", 0, "x", "en")))
+        }
+        set tResultIdx = 1
+        set tSC = tWriter.BuildRow(.tBadInput, tBadMask, "ns=1;s=DevB", .tResultIdx, .tRow)
+        do ..Check("row with a Bad reading builds", $$$ISOK(tSC), 1, .pPass, .pFail)
+        $$$ThrowOnError(tSC)
+        $$$ThrowOnError($classmethod(tClass, "SaveSourcedData", .tRow, .tBadId))
+        set tObj = $classmethod(tClass, "%OpenId", tBadId)
+        do ..Check("Bad reading keeps its status", tObj.Alpha.Status, 2156527616, .pPass, .pFail)
+        do ..Check("Bad reading keeps its source timestamp", tObj.Alpha.SourceTimeStamp, "2026-05-05 05:05:05", .pPass, .pFail)
+        do ..Check("Bad reading has no value", tObj.Alpha.Value, "", .pPass, .pFail)
+        do ..Check("Beta beside it keeps its value", tObj.Beta.Value, 3, .pPass, .pFail)
+    } Catch (e) {
+        set pFail = pFail + 1
+        write "  FAIL exception: ", e.DisplayString(), !
+    }
+    do ..DropSchema(tClass)
+}
+
+/// A folder's measurements lose the server timestamp too, and keep their own
+/// value, status and source timestamp beside a flat column.
+ClassMethod TestNoServerTSNested(ByRef pPass, ByRef pFail)
+{
+    set tClass = ..#TestPackage_".NoSrvNestedSchema"
+    Try {
+        set tSC = ..BuildGeneratedSchema(tClass, "TmpNoSrvNestedSchema", 0, 0)
+        if $$$ISERR(tSC) {
+            set pFail = pFail + 1
+            write "  FAIL could not generate nested schema: ", $System.Status.GetOneErrorText(tSC), !
+            quit
+        }
+
+        set tFolderType = tClass_".MotorType"
+        do ..Check("Motor.Temperature is a NoServerTS DataValue",
+            ##class(%Dictionary.CompiledProperty).%OpenId(tFolderType_"||Temperature").Type, "OPCUA.Types.NoServerTS.DoubleDataValue", .pPass, .pFail)
+        set tFields = ..SqlFields(tClass)
+        for tName = "MOTOR_TEMPERATURE_VALUE", "MOTOR_TEMPERATURE_STATUS", "MOTOR_TEMPERATURE_SOURCETS", "HUMIDITY_SOURCETS" {
+            do ..Check("SQL exposes "_tName, tFields [ (","_tName_","), 1, .pPass, .pFail)
+        }
+        do ..Check("SQL has no Motor_Temperature_ServerTS", tFields [ ",MOTOR_TEMPERATURE_SERVERTS,", 0, .pPass, .pFail)
+        do ..Check("SQL has no server timestamp column at all", tFields [ "SERVERTS", 0, .pPass, .pFail)
+
+        $$$ThrowOnError(..ColumnIndex(tClass, .tIdx, .tColCount))
+        kill tWant
+        set tWant("Humidity") = $LB("2026-03-03 01:01:01", "2026-03-03 01:01:02", 1, 45)
+        set tWant("Temperature") = $LB("2026-03-03 02:02:02", "2026-03-03 02:02:03", 2, 21.5)
+        set tWant("Speed") = $LB("2026-03-03 03:03:03", "2026-03-03 03:03:04", 3, 1500)
+        set tMask = "", tInput = $LB("")
+        for i=1:1:tColCount {
+            set tMask = tMask _ $LB(1)
+            set tInput = tInput _ $LB(tWant($LI(tIdx(i), 1)))
+        }
+
+        set tWriter = ##class(OPCUA.DataSource.RowWriter).%New()
+        $$$ThrowOnError(tWriter.Initialize(tClass))
+        set tResultIdx = 1
+        set tSC = tWriter.BuildRow(.tInput, tMask, "ns=2;s=AC1", .tResultIdx, .tRow)
+        do ..Check("nested row builds", $$$ISOK(tSC), 1, .pPass, .pFail)
+        $$$ThrowOnError(tSC)
+        $$$ThrowOnError($classmethod(tClass, "SaveSourcedData", .tRow, .tId))
+
+        set tObj = $classmethod(tClass, "%OpenId", tId)
+        do ..Check("nested row opens", $IsObject(tObj), 1, .pPass, .pFail)
+        quit:'$IsObject(tObj)
+        do ..Check("flat Humidity value", tObj.Humidity.Value, 45, .pPass, .pFail)
+        do ..Check("flat Humidity source timestamp", tObj.Humidity.SourceTimeStamp, "2026-03-03 01:01:01", .pPass, .pFail)
+        do ..Check("Motor.Temperature value", tObj.Motor.Temperature.Value, 21.5, .pPass, .pFail)
+        do ..Check("Motor.Temperature status", tObj.Motor.Temperature.Status, 2, .pPass, .pFail)
+        do ..Check("Motor.Temperature source timestamp", tObj.Motor.Temperature.SourceTimeStamp, "2026-03-03 02:02:02", .pPass, .pFail)
+        do ..Check("Motor.Speed value", tObj.Motor.Speed.Value, 1500, .pPass, .pFail)
+        do ..Check("Motor.Speed keeps its own metadata", tObj.Motor.Speed.Status, 3, .pPass, .pFail)
+        do ..Check("Motor.Speed source timestamp is its own", tObj.Motor.Speed.SourceTimeStamp, "2026-03-03 03:03:03", .pPass, .pFail)
+
+        set tRS = ##class(%SQL.Statement).%ExecDirect(,
+            "SELECT Motor_Temperature_Value, Motor_Temperature_SourceTS, Motor_Speed_Status, Humidity_Value "_
+            "FROM "_..TableName(tClass)_" WHERE ID = ?", tId)
+        do ..Check("SQL returns the nested row", tRS.%Next(), 1, .pPass, .pFail)
+        do ..Check("SQL Motor_Temperature_Value", tRS.%GetData(1), 21.5, .pPass, .pFail)
+        do ..Check("SQL Motor_Temperature_SourceTS", tRS.%GetData(2), "2026-03-03 02:02:02", .pPass, .pFail)
+        do ..Check("SQL Motor_Speed_Status", tRS.%GetData(3), 3, .pPass, .pFail)
+        do ..Check("SQL Humidity_Value", tRS.%GetData(4), 45, .pPass, .pFail)
+    } Catch (e) {
+        set pFail = pFail + 1
+        write "  FAIL exception: ", e.DisplayString(), !
+    }
+    do ..DropSchema(tClass)
+}
+
+/// Upper-cased SQL column names of a class's table, as ",A,B,...,".
+ClassMethod SqlFields(pClassName As %String) As %String [ Private ]
+{
+    set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT * FROM "_..TableName(pClassName)_" WHERE 1=0")
+    set tMeta = tRS.%GetMetadata()
+    set tFields = ","
+    for i=1:1:tMeta.columnCount {
+        set tFields = tFields _ $ZConvert(tMeta.columns.GetAt(i).colName, "U") _ ","
+    }
+    Quit tFields
+}
+
+/// A serial class's storage entries, in order.
+ClassMethod StorageValues(pClassName As %String) As %List [ Private ]
+{
+    set tList = ""
+    set tVals = ##class(%Dictionary.CompiledClass).%OpenId(pClassName).Storages.GetAt(1).Data.GetAt(1).Values
+    for i=1:1:tVals.Count() { set tList = tList _ $LB(tVals.GetAt(i).Value) }
+    Quit tList
+}
+
 // ==================== live poll ====================
 
 /// End-to-end against a real server: generate a schema from node names the mock
 /// server exposes, resolve it, poll, and confirm the stored measurements carry
 /// real values and real timestamps rather than empty metadata.
-ClassMethod TestLiveRow(pURL As %String, ByRef pPass, ByRef pFail)
+///
+/// pIncludeServerTS 0 runs the same poll through a schema without server
+/// timestamps: real values and source timestamps, and no server-TS column.
+ClassMethod TestLiveRow(pURL As %String, ByRef pPass, ByRef pFail, pIncludeServerTS As %Boolean = 1)
 {
     #dim tClient As OPCUA.Client
-    set tClass = ..#TestPackage_".LiveSchema"
+    set tClass = ..#TestPackage_".LiveSchema"_$Select(pIncludeServerTS:"", 1:"NoSrv")
     Try {
-        set tSC = ..BuildLiveSchema(tClass)
+        set tSC = ..BuildLiveSchema(tClass, "TmpLiveMetaSchema"_$Select(pIncludeServerTS:"", 1:"NoSrv"), pIncludeServerTS)
         if $$$ISERR(tSC) {
             set pFail = pFail + 1
             write "  FAIL could not generate live schema: ", $System.Status.GetOneErrorText(tSC), !
@@ -638,7 +899,14 @@ ClassMethod TestLiveRow(pURL As %String, ByRef pPass, ByRef pFail)
         do ..Check("device label stored as NodePath", tObj.NodePath, "DevA", .pPass, .pFail)
         do ..Check("SA1 has a real value", tObj.SA1.Value '= "", 1, .pPass, .pFail)
         do ..Check("SA1 has a source timestamp", tObj.SA1.SourceTimeStamp '= "", 1, .pPass, .pFail)
-        do ..Check("SA1 has a server timestamp", tObj.SA1.ServerTimeStamp '= "", 1, .pPass, .pFail)
+        if pIncludeServerTS {
+            do ..Check("SA1 has a server timestamp", tObj.SA1.ServerTimeStamp '= "", 1, .pPass, .pFail)
+        } else {
+            do ..Check("SA1 is a NoServerTS measurement", tObj.SA1.%ClassName(1), "OPCUA.Types.NoServerTS.IntegerDataValue", .pPass, .pFail)
+            set tFields = ..SqlFields(tClass)
+            do ..Check("SQL has no SA1_ServerTS", tFields [ ",SA1_SERVERTS,", 0, .pPass, .pFail)
+            do ..Check("SQL keeps SA1_SourceTS", tFields [ ",SA1_SOURCETS,", 1, .pPass, .pFail)
+        }
         do ..Check("SA1 status is good", tObj.SA1.Status, 0, .pPass, .pFail)
         do ..Check("SA2 has its own source timestamp", tObj.SA2.SourceTimeStamp '= "", 1, .pPass, .pFail)
         do ..Check("VT5 has a real value", tObj.VT5.Value '= "", 1, .pPass, .pFail)
@@ -647,7 +915,7 @@ ClassMethod TestLiveRow(pURL As %String, ByRef pPass, ByRef pFail)
         // timestamp pair would leave the others blank.
         set tRS = ##class(%SQL.Statement).%ExecDirect(,
             "SELECT COUNT(*) FROM "_..TableName(tClass)_
-            " WHERE SA1_SourceTimeStamp IS NOT NULL AND SA2_SourceTimeStamp IS NOT NULL AND VT5_SourceTimeStamp IS NOT NULL")
+            " WHERE SA1_SourceTS IS NOT NULL AND SA2_SourceTS IS NOT NULL AND VT5_SourceTS IS NOT NULL")
         do tRS.%Next()
         do ..Check("both rows carry a timestamp for every measurement", tRS.%GetData(1), 2, .pPass, .pFail)
     } Catch (e) {
@@ -755,8 +1023,9 @@ ClassMethod TestLiveSubscription(pURL As %String, ByRef pPass, ByRef pFail)
 
 /// Generate a schema through the real wizard path, so the test exercises
 /// OPCUA.REST.SchemaService rather than a hand-built approximation.
-/// pFlat 1 = three flat columns; 0 = one flat column plus a two-leaf folder.
-ClassMethod BuildGeneratedSchema(pClassName As %String, pDSName As %String, pFlat As %Boolean) As %Status [ Private ]
+/// pFlat 1 = three flat columns; 0 = one flat column plus a two-leaf folder;
+/// 2 = the flat set with a LocalizedText column (a two-field payload) as Gamma.
+ClassMethod BuildGeneratedSchema(pClassName As %String, pDSName As %String, pFlat As %Integer, pIncludeServerTS As %Boolean = 1) As %Status [ Private ]
 {
     #dim tSC As %Status = $$$OK
     Try {
@@ -766,7 +1035,7 @@ ClassMethod BuildGeneratedSchema(pClassName As %String, pDSName As %String, pFla
         if pFlat {
             do tCols.%Push(..Column("Alpha", "OPCUA.Types.DoubleDataValue", $LB("Alpha")))
             do tCols.%Push(..Column("Beta", "OPCUA.Types.IntegerDataValue", $LB("Beta")))
-            do tCols.%Push(..Column("Gamma", "OPCUA.Types.StringDataValue", $LB("Gamma")))
+            do tCols.%Push(..Column("Gamma", $Select(pFlat = 2:"OPCUA.Types.LocalizedTextDataValue", 1:"OPCUA.Types.StringDataValue"), $LB("Gamma")))
         } else {
             do tCols.%Push(..Column("Humidity", "OPCUA.Types.IntegerDataValue", $LB("Humidity")))
             do tCols.%Push(..Column("Temperature", "OPCUA.Types.DoubleDataValue", $LB("Motor", "Temperature")))
@@ -774,7 +1043,7 @@ ClassMethod BuildGeneratedSchema(pClassName As %String, pDSName As %String, pFla
         }
 
         kill tColNS
-        set tSC = ##class(OPCUA.REST.SchemaService).GenerateSchemaClass(pClassName, pDSName, tCols, 1, .tColNS, .tSerial)
+        set tSC = ##class(OPCUA.REST.SchemaService).GenerateSchemaClass(pClassName, pDSName, tCols, 1, .tColNS, .tSerial, pIncludeServerTS)
         $$$ThrowOnError(tSC)
         Try { do $classmethod(pClassName, "%KillExtent") } Catch (eKill) {}
     } Catch (e) {
@@ -784,7 +1053,7 @@ ClassMethod BuildGeneratedSchema(pClassName As %String, pDSName As %String, pFla
 }
 
 /// A schema whose columns are node names the plc mock server really exposes.
-ClassMethod BuildLiveSchema(pClassName As %String, pDSName As %String = "TmpLiveMetaSchema") As %Status [ Private ]
+ClassMethod BuildLiveSchema(pClassName As %String, pDSName As %String = "TmpLiveMetaSchema", pIncludeServerTS As %Boolean = 1) As %Status [ Private ]
 {
     #dim tSC As %Status = $$$OK
     Try {
@@ -796,7 +1065,7 @@ ClassMethod BuildLiveSchema(pClassName As %String, pDSName As %String = "TmpLive
         }
 
         kill tColNS
-        set tSC = ##class(OPCUA.REST.SchemaService).GenerateSchemaClass(pClassName, pDSName, tCols, 1, .tColNS, .tSerial)
+        set tSC = ##class(OPCUA.REST.SchemaService).GenerateSchemaClass(pClassName, pDSName, tCols, 1, .tColNS, .tSerial, pIncludeServerTS)
         $$$ThrowOnError(tSC)
         Try { do $classmethod(pClassName, "%KillExtent") } Catch (eKill) {}
     } Catch (e) {

@@ -27,6 +27,9 @@ Parameter DefaultPackage = "OPCUA.DS";
 ///   dataSourceName       optional OPCUADATASOURCE value (defaults to the short name)
 ///   defaultNamespace     optional OPC UA namespace index for columns that omit one
 ///   columns[]            { displayName, inferredType, relativePath[], nodeNs }
+///   includeServerTimestamp  optional, default true. false types every column as an
+///                       OPCUA.Types.NoServerTS measurement, so the table has no
+///                       *_ServerTS columns
 /// }
 ///
 /// Deliberately touches no production and writes no device metadata.
@@ -67,7 +70,11 @@ ClassMethod Create(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 			set:tNS'="" tColNS(i) = +tNS
 		}
 
-		set tSC = ..GenerateSchemaClass(tClassName, tDataSourceName, tColumns, tDefaultNS, .tColNS, .tSerialClasses)
+		// JSON false arrives as 0; absent means the default, true.
+		set tIncludeServerTS = pBody.%Get("includeServerTimestamp")
+		set tIncludeServerTS = $Case($ZConvert(tIncludeServerTS, "L"), "":1, "false":0, "0":0, :1)
+
+		set tSC = ..GenerateSchemaClass(tClassName, tDataSourceName, tColumns, tDefaultNS, .tColNS, .tSerialClasses, tIncludeServerTS)
 		Quit:$$$ISERR(tSC)
 
 		set pResult.created = 1
@@ -76,6 +83,7 @@ ClassMethod Create(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		set pResult.tableName = ..TableName(tClassName)
 		set pResult.columnCount = tColumns.%Size()
 		set pResult.serialClasses = $Get(tSerialClasses, 0)
+		do pResult.%Set("includeServerTimestamp", tIncludeServerTS, "boolean")
 
 	} Catch (e) {
 		set tSC = e.AsStatus()
@@ -337,7 +345,10 @@ ClassMethod RequireUsableDevices(pBody As %DynamicObject, pSchemaClass As %Strin
 /// pColNamespaces(i) optionally overrides the OPC UA namespace for the column at
 /// 0-based index i; columns without an entry use pDefaultNS. This is how the
 /// wizard deploy path preserves the per-node namespaces it browsed.
-ClassMethod GenerateSchemaClass(pClassName As %String, pDataSourceName As %String, pColumns As %DynamicArray, pDefaultNS As %Integer, ByRef pColNamespaces, Output pSerialClasses) As %Status
+///
+/// pIncludeServerTS 0 types every measurement, flat or nested, as its
+/// OPCUA.Types.NoServerTS counterpart, which has no ServerTimeStamp property.
+ClassMethod GenerateSchemaClass(pClassName As %String, pDataSourceName As %String, pColumns As %DynamicArray, pDefaultNS As %Integer, ByRef pColNamespaces, Output pSerialClasses, pIncludeServerTS As %Boolean = 1) As %Status
 {
 	#dim tSC As %Status = $$$OK
 	kill pSerialClasses
@@ -364,12 +375,12 @@ ClassMethod GenerateSchemaClass(pClassName As %String, pDataSourceName As %Strin
 
 		// Serial classes must exist before the main class references them.
 		if tHasNesting {
-			set tSC = ..GenerateSerialClasses(pClassName, pDefaultNS, .tFolderColumns, .pSerialClasses)
+			set tSC = ..GenerateSerialClasses(pClassName, pDefaultNS, .tFolderColumns, .pSerialClasses, pIncludeServerTS)
 			Quit:$$$ISERR(tSC)
 		}
 
 		set tClassDef = ##class(%Dictionary.ClassDefinition).%New(pClassName)
-		set tClassDef.Description = "Auto-generated OPC UA device schema with per-measurement value, quality and timestamps."
+		set tClassDef.Description = "Auto-generated OPC UA device schema with per-measurement value, quality and "_$Select(pIncludeServerTS:"timestamps.", 1:"source timestamp (no server timestamp).")
 		// Extend DeviceSchema (not Definition) so the class is discoverable by the
 		// DataSourceClass dropdown, which filters on this superclass.
 		set tClassDef.Super = "%Persistent,OPCUA.DataSource.DeviceSchema"
@@ -409,7 +420,7 @@ ClassMethod GenerateSchemaClass(pClassName As %String, pDataSourceName As %Strin
 				do tProp.Parameters.SetAt(tFolderName, "OPCUANODENAME")
 				do tClassDef.Properties.Insert(tProp)
 			} else {
-				set tType = ..MapToDataValueType(tInferredType)
+				set tType = ..MapToDataValueType(tInferredType, pIncludeServerTS)
 				set tChildNS = $Get(pColNamespaces(i), pDefaultNS)
 				set tLeafName = tDisplayName
 				if $IsObject($Get(tRelPath)) && (tRelPath.%Size() = 1) {
@@ -439,7 +450,7 @@ ClassMethod GenerateSchemaClass(pClassName As %String, pDataSourceName As %Strin
 }
 
 /// Generate and compile %SerialObject classes for nested folder columns.
-ClassMethod GenerateSerialClasses(pMainClassName As %String, pDefaultNS As %Integer, ByRef pFolderColumns, Output pSerialClasses) As %Status
+ClassMethod GenerateSerialClasses(pMainClassName As %String, pDefaultNS As %Integer, ByRef pFolderColumns, Output pSerialClasses, pIncludeServerTS As %Boolean = 1) As %Status
 {
 	#dim tSC As %Status = $$$OK
 	Try {
@@ -471,7 +482,7 @@ ClassMethod GenerateSerialClasses(pMainClassName As %String, pDefaultNS As %Inte
 			for i=0:1:tColumns.%Size()-1 {
 				set tSubCol = tColumns.%Get(i)
 				set tLeafName = tSubCol.%Get("leafName")
-				set tType = ..MapToDataValueType(tSubCol.%Get("inferredType"))
+				set tType = ..MapToDataValueType(tSubCol.%Get("inferredType"), pIncludeServerTS)
 				set tPropName = ##class(OPCUA.DataSource.Generator).SanitizePropertyName(tLeafName, .tUsedNames)
 
 				set tProp = ##class(%Dictionary.PropertyDefinition).%New()
@@ -521,7 +532,19 @@ ClassMethod SerialClassName(pMainClassName As %String, pFolderName As %String) A
 /// Preserve the OPC UA DataValue wrapper, including its status and timestamps.
 /// Plain type aliases remain accepted in API requests, but produce wrappers too.
 /// Unknown/unprobed types keep the existing string fallback.
-ClassMethod MapToDataValueType(pInferredType As %String) As %String
+///
+/// pIncludeServerTS 0 returns the OPCUA.Types.NoServerTS counterpart instead.
+/// Either family is accepted as input and mapped to the requested one.
+ClassMethod MapToDataValueType(pInferredType As %String, pIncludeServerTS As %Boolean = 1) As %String
+{
+	set tType = ..MapToFullDataValueType($Replace(pInferredType, "OPCUA.Types.NoServerTS.", "OPCUA.Types.", 1, 1))
+	Quit:pIncludeServerTS tType
+	set tShort = "OPCUA.Types.NoServerTS."_$Extract(tType, 13, *)
+	Quit $Select(##class(%Dictionary.CompiledClass).%ExistsId(tShort):tShort, 1:"OPCUA.Types.NoServerTS.StringDataValue")
+}
+
+/// Map an inferred type onto an OPCUA.Types measurement that keeps its server timestamp.
+ClassMethod MapToFullDataValueType(pInferredType As %String) As %String [ Private ]
 {
 	if $Extract(pInferredType, 1, 12) = "OPCUA.Types." {
 		if ##class(%Dictionary.CompiledClass).%ExistsId(pInferredType) {

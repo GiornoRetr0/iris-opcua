@@ -29,6 +29,10 @@ Property DataColumnPositions As %List [ Private ];
 /// In the same leaf order used by Resolver.GetSchemaColumns() and device masks.
 Property FullDataValues As %List [ Private ];
 
+/// 1 for each leaf typed as an OPCUA.Types.NoServerTS measurement, whose
+/// stored DataValue drops the server timestamp; 0 otherwise. Same leaf order.
+Property OmitServerTS As %List [ Private ];
+
 /// Column labels for log messages ("Folder/Name", or "Name" for a flat column),
 /// in the same leaf order as the masks.
 Property ColumnLabels As %List [ Private ];
@@ -64,9 +68,13 @@ Method Initialize(pDSClass As %String) As %Status
 
 		// Derive the nesting layout from the class rather than from stored
 		// metadata, so it can never go stale relative to the compiled schema.
-		set tSC = ##class(OPCUA.DataSource.Resolver).DeriveNestingSpec(tDSClass, .tNesting)
+		set tSC = ##class(OPCUA.DataSource.Resolver).DeriveNestingSpec(tDSClass, .tNesting, .tLeafTypes)
 		Quit:$$$ISERR(tSC)
 		set ..NestingSpec = tNesting
+		set ..OmitServerTS = ""
+		for i=1:1:$LL(tLeafTypes) {
+			set ..OmitServerTS = ..OmitServerTS _ $LB(##class(OPCUA.DataSource.Resolver).OmitsServerTimeStamp($ListGet(tLeafTypes, i)))
+		}
 
 		// Read the existing projection's leaf types rather than guessing from the
 		// pipeline version. This also keeps already-deployed plain schemas working.
@@ -174,6 +182,12 @@ Method BuildRow(ByRef pInput As %List, pMask As %List, pPath As %String, ByRef p
 				// source timestamp, server timestamp, status, value (or array values).
 				// A Bad reading has no value, so element 4 is null: $ListGet, not $List.
 				set tLeafValues(tLeafIdx) = $Select($LI(..FullDataValues, iCol):tDV, 1:$ListGet(tDV, 4))
+				// A NoServerTS measurement stores everything but element 2. The range
+				// form keeps null elements (a Bad reading's value) and every payload
+				// field after the status.
+				if $LI(..FullDataValues, iCol) && $ListGet(..OmitServerTS, iCol) {
+					set tLeafValues(tLeafIdx) = $List(tDV, 1, 1) _ $List(tDV, 3, *)
+				}
 
 				// Severity is the top two bits of the StatusCode; 3 is reserved and
 				// counts as Bad.

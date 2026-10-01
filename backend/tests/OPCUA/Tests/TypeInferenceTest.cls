@@ -209,7 +209,7 @@ ClassMethod TestStorage(pURL As %String, ByRef pPass, ByRef pFail) [ Private ]
         do ..Check("matrix rows are lists", $ListValid($ListGet(tObj.Matrix.Double.Values, 1)), 1, .pPass, .pFail)
 
         // And the SQL projection reads the same row.
-        set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT Scalar_Boolean_Value, Scalar_Boolean_ServerTimeStamp, Scalar_NodeId_IdentifierType, Matrix_Double_NumberOfDimensions FROM "_..TableName(tClass)_" WHERE ID = ?", tId)
+        set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT Scalar_Boolean_Value, Scalar_Boolean_ServerTS, Scalar_NodeId_IdentifierType, Matrix_Double_NumberOfDimensions FROM "_..TableName(tClass)_" WHERE ID = ?", tId)
         do ..Check("SQL query runs", tRS.%SQLCODE, 0, .pPass, .pFail)
         if tRS.%Next() {
             do ..Check("SQL sees the Boolean value", tRS.%GetData(1), 0, .pPass, .pFail)

@@ -225,7 +225,7 @@ ClassMethod MapSerialFolders(pSchemaClass As %String, Output pFolderMap) As %Sta
 			set tProp = tClassDef.Properties.GetAt(i)
 			set tType = tProp.Type
 			continue:$Extract(tType,1)="%"
-			continue:$Extract(tType,1,12)="OPCUA.Types."
+			continue:..IsMeasurementType(tType)
 			continue:$Extract(tType,1,16)="OPCUA.Structure."
 
 			Try {
@@ -263,10 +263,15 @@ ClassMethod MapSerialFolders(pSchemaClass As %String, Output pFolderMap) As %Sta
 /// so the services can index resolved values directly.
 ///
 /// Returns "" when the schema has no nested folders (flat layout).
-ClassMethod DeriveNestingSpec(pSchemaClass As %String, Output pNestingSpec As %List) As %Status
+///
+/// pLeafTypes is the property type of each leaf, in the same leaf order, and is
+/// filled for flat schemas too. RowWriter uses it to tell measurements that
+/// keep their server timestamp from those that do not.
+ClassMethod DeriveNestingSpec(pSchemaClass As %String, Output pNestingSpec As %List, Output pLeafTypes As %List) As %Status
 {
 	#dim tSC As %Status = $$$OK
 	set pNestingSpec = ""
+	set pLeafTypes = ""
 	Try {
 		set tClassDef = ##class(%Dictionary.CompiledClass).%OpenId(pSchemaClass)
 		if '$IsObject(tClassDef) {
@@ -296,7 +301,7 @@ ClassMethod DeriveNestingSpec(pSchemaClass As %String, Output pNestingSpec As %L
 
 			set tType = $Get(tPropType(tName))
 			set tIsSerial = 0
-			if (tType '= "") && ($Extract(tType,1)'="%") && ($Extract(tType,1,12)'="OPCUA.Types.") {
+			if (tType '= "") && ($Extract(tType,1)'="%") && '..IsMeasurementType(tType) {
 				Try {
 					set tIsSerial = $classmethod(tType, "%Extends", "%SerialObject")
 				} Catch (eInner) {
@@ -307,6 +312,7 @@ ClassMethod DeriveNestingSpec(pSchemaClass As %String, Output pNestingSpec As %L
 			if 'tIsSerial {
 				set tLeafIdx = tLeafIdx + 1
 				set pNestingSpec = pNestingSpec _ $LB($LB("leaf", tLeafIdx))
+				set pLeafTypes = pLeafTypes _ $LB(tType)
 				continue
 			}
 
@@ -316,12 +322,17 @@ ClassMethod DeriveNestingSpec(pSchemaClass As %String, Output pNestingSpec As %L
 			set tInnerSpec = ""
 			set tSerialDef = ##class(%Dictionary.CompiledClass).%OpenId(tType)
 			if $IsObject(tSerialDef) {
+				kill tInnerType
+				for j=1:1:tSerialDef.Properties.Count() {
+					set tInnerType(tSerialDef.Properties.GetAt(j).Name) = tSerialDef.Properties.GetAt(j).Type
+				}
 				set tSerialEntries = tSerialDef.Storages.GetAt(1).Data.GetAt(1).Values
 				for j=1:1:tSerialEntries.Count() {
 					set tInnerName = tSerialEntries.GetAt(j).Value
 					continue:$Extract(tInnerName,1)="%"
 					set tLeafIdx = tLeafIdx + 1
 					set tInnerSpec = tInnerSpec _ $LB($LB("leaf", tLeafIdx))
+					set pLeafTypes = pLeafTypes _ $LB($Get(tInnerType(tInnerName)))
 				}
 			}
 			set pNestingSpec = pNestingSpec _ $LB($LB("serial", $Get(tPropNode(tName), tName), tInnerSpec))
@@ -334,6 +345,31 @@ ClassMethod DeriveNestingSpec(pSchemaClass As %String, Output pNestingSpec As %L
 		set tSC = e.AsStatus()
 	}
 	Quit tSC
+}
+
+/// Is this property type a measurement (an OPCUA.Types DataValue, with or
+/// without its server timestamp) rather than a folder or a plain value?
+ClassMethod IsMeasurementType(pType As %String) As %Boolean
+{
+	set tIs = 0
+	Try {
+		set tIs = $classmethod(pType, "%Extends", "OPCUA.Types.AbstractDataValue") || $classmethod(pType, "%Extends", "OPCUA.Types.NoServerTS.AbstractDataValue")
+	} Catch (e) {
+		set tIs = 0
+	}
+	Quit tIs
+}
+
+/// Is this a measurement type stored without its server timestamp?
+ClassMethod OmitsServerTimeStamp(pType As %String) As %Boolean
+{
+	set tIs = 0
+	Try {
+		set tIs = $classmethod(pType, "%Extends", "OPCUA.Types.NoServerTS.AbstractDataValue")
+	} Catch (e) {
+		set tIs = 0
+	}
+	Quit tIs
 }
 
 /// Resolve a schema and a device list into a concrete adapter specification by

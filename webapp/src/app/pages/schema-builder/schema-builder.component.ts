@@ -287,6 +287,20 @@ const MAX_DEPTH = 2;
           </div>
         </div>
 
+        <!-- Fixed at creation, like the columns: unticked, the measurement classes
+             have no ServerTimeStamp property, so the SQL columns do not exist. -->
+        <label class="flex items-start gap-2.5 mb-6 cursor-pointer">
+          <input type="checkbox" [ngModel]="includeServerTimestamp()" (ngModelChange)="includeServerTimestamp.set($event)"
+                 class="mt-0.5 w-3.5 h-3.5 rounded border-slate-300 text-primary focus:ring-primary" />
+          <span>
+            <span class="block text-sm font-semibold text-on-surface">Store server timestamp</span>
+            <span class="block text-xs text-on-surface-variant">
+              Each column keeps value, status and source timestamp. Untick to leave out the
+              <code class="font-mono">_ServerTS</code> columns entirely.
+            </span>
+          </span>
+        </label>
+
         <div class="flex items-center justify-between gap-4 pt-5 border-t border-outline-variant/10">
           <!-- The reason the button is disabled, beside the button. The device-binding
                screen already does this — it put "Remove SA1 to continue" directly next to
@@ -406,6 +420,7 @@ export class SchemaBuilderComponent implements OnInit {
   columns = signal<DraftColumn[]>([]);
   schemaName = signal('');
   packagePath = signal('OPCUA.DS');
+  includeServerTimestamp = signal(true);
   saving = signal(false);
   error = signal('');
 
@@ -682,6 +697,7 @@ export class SchemaBuilderComponent implements OnInit {
             name: this.schemaName().trim(),
             packagePath: this.packagePath().trim() || 'OPCUA.DS',
             defaultNamespace: defaultNs,
+            includeServerTimestamp: this.includeServerTimestamp(),
             columns: cols.map((c) => ({
               displayName: c.displayName,
               relativePath: c.relativePath,
