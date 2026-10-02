@@ -543,7 +543,7 @@ ClassMethod LogTail(pPath As %String) As %String [ Internal, Private ]
 		Set name = ##class(%File).GetFilename(pPath)
 		While 's.AtEnd {
 			Set line = s.ReadLine()
-			Set:(line[name)||(line["cannot open shared object")||(line["dlopen")||(line["LoadLibrary")) hint = $ZStrip(line, "<>W")
+			Set:(line[name)||(line["cannot open shared object")||(line["dlopen")||(line["LoadLibrary") hint = $ZStrip(line, "<>W")
 		}
 	} Catch {}
 	Quit $Extract(hint, 1, 500)
