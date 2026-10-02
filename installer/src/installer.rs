@@ -281,7 +281,7 @@ impl<'a> Installer<'a> {
             block(
                 "Unsupported server platform",
                 format!(
-                    "IRIS reports {p}. This installer supports Linux x86-64 and ARM64 servers."
+                    "IRIS reports {p}. This installer supports Linux x86-64 and ARM64 servers and Windows x86-64 servers."
                 ),
             );
         }
@@ -327,7 +327,7 @@ impl<'a> Installer<'a> {
         }
 
         let mut files = Vec::new();
-        if let Target::Linux(_) = target {
+        if !matches!(target, Target::Unsupported(_)) {
             match self.payload.artifacts(&target) {
                 Ok(artifacts) => {
                     let names: Vec<&str> = artifacts.iter().map(|a| a.name).collect();

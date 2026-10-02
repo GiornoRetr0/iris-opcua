@@ -54,8 +54,8 @@ printf 'zn "OPCUA"\nset rs=##class(%%SQL.Statement).%%ExecDirect(,"SELECT TOP 10
 | `backend/tests/OPCUA/Tests/` | Test classes (`OPCUA.Tests.*`) |
 | `backend/examples/Examples/` | Demo Business Services (PollingExample, SubscriptionExample, SecureExample, ArrayExample, etc.) |
 | `backend/native/linux-{amd64,arm64}/` | Prebuilt Unix shared objects (`.so`), picked by `TARGETARCH` |
-| `backend/native/windows-x64/` | Prebuilt Windows DLLs |
-| `installer/` | Rust terminal installer (`iris-opcua-setup`); embeds `backend/src/OPCUA/`, the Linux native libraries and its own `objectscript/IRISConfig/ClientInstaller.cls` |
+| `backend/native/windows-x64/` | Prebuilt Windows DLLs; `IrisOPCUA.dll` is cross-built with llvm-mingw (UCRT) by `opc-ua-master/docker/build-win64.sh` |
+| `installer/` | Rust terminal installer (`iris-opcua-setup`); embeds `backend/src/OPCUA/`, the Linux and Windows native libraries and its own `objectscript/IRISConfig/ClientInstaller.cls` |
 | `webapp/src/app/` | Angular 19 console (standalone components, signals, Tailwind) |
 | `webapp/src/app/core/models/opcua.models.ts` | All TypeScript interfaces (`TreeNode`, `Schema`, `DeviceValidation`, `PipelineHealth`, etc.) |
 | `webapp/src/app/pages/schema-library/`, `schema-builder/` | Schema list + creation |

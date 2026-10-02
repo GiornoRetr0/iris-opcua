@@ -36,7 +36,7 @@ cargo build --release          # → target/release/iris-opcua-setup
 cargo test                     # unit tests (no IRIS needed)
 ```
 
-The build embeds `backend/src/OPCUA/`, `installer/objectscript/IRISConfig/ClientInstaller.cls` and `backend/native/linux-{amd64,arm64}/` from the checkout, so rebuild after changing them. To install from a checkout without rebuilding, run `iris-opcua-setup --dist /path/to/iris-opcua`.
+The build embeds `backend/src/OPCUA/`, `installer/objectscript/IRISConfig/ClientInstaller.cls` and `backend/native/{linux-amd64,linux-arm64,windows-x64}/` from the checkout, so rebuild after changing them. To install from a checkout without rebuilding, run `iris-opcua-setup --dist /path/to/iris-opcua`.
 
 ## Run
 
@@ -98,7 +98,8 @@ A remembered password is only used for the URL, user, and IRIS instance (instanc
 
 ## Limitations
 
-- **Server platforms:** Linux x86-64 and ARM64 only. Windows and macOS IRIS servers are detected and refused. The CLI itself builds for Linux, macOS, and Windows.
+- **Server platforms:** Linux x86-64 and ARM64, and Windows x86-64. macOS and other IRIS servers are detected and refused. The CLI itself builds for Linux, macOS, and Windows, and any of them can install into any supported server.
+- **Windows servers:** `IrisOPCUA.dll` cannot be replaced while IRIS has it loaded, so an upgrade that the installer reports as a conflict must be done with the instance stopped.
 - **TLS:** only certificates from public CAs (the bundled Mozilla roots) are trusted. An IRIS web server whose certificate comes from an internal CA fails with a TLS error.
 - **Atelier API:** it must be enabled and routed by the web server. Its 401 cannot tell a wrong password from an account without `%Development`.
 - **Upgrades:** a native library that differs from the supplied one is never replaced automatically.

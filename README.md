@@ -101,11 +101,11 @@ After changing ObjectScript or native libraries, rebuild with `docker compose up
 
 Installation on your own instance requires an IRIS administrator. Validate your target IRIS/OS/library combination in staging before deployment.
 
-**Terminal installer (Linux IRIS servers).** [`installer/`](installer/README.md) installs and verifies everything in steps 1–4 over the IRIS web server, with no shell access to the IRIS host:
+**Terminal installer (Linux and Windows IRIS servers).** [`installer/`](installer/README.md) installs and verifies everything in steps 1–4 over the IRIS web server, with no shell access to the IRIS host:
 
 Download the single-file binary for your machine from [GitHub Releases](https://github.com/GiornoRetr0/iris-opcua/releases) and run it. It has everything it installs built in, so no clone or build is needed (see [its README](installer/README.md#download) for the file names, checksums and the macOS/Windows first-run prompts). To build it yourself: `cd installer && cargo build --release`.
 
-It asks for a connection (name, base URL, username, password), shows a review before changing anything, and ends with the API URL to enter in the webapp. See its README for the privileges it needs and exactly what it changes. It has been tested against IRIS 2025.3 on Linux ARM64. The manual path below remains available and is the only path for Windows servers.
+It asks for a connection (name, base URL, username, password), shows a review before changing anything, and ends with the API URL to enter in the webapp. See its README for the privileges it needs and exactly what it changes. It has been tested against IRIS 2025.3 on Linux ARM64. Windows x64 server support is new; see the installer README for what has been verified. The manual path below remains available.
 
 ### 1. Prepare a dedicated namespace
 
@@ -136,7 +136,7 @@ Select files for the **IRIS host's OS and CPU**, not the browser machine:
 |---|---|
 | Linux x86-64 | `backend/native/linux-amd64/` |
 | Linux ARM64 | `backend/native/linux-arm64/` |
-| Windows x64 | `backend/native/windows-x64/` — compatibility caveat below |
+| Windows x64 | `backend/native/windows-x64/` |
 
 On Linux, install `irisopcua.so` and its required companion libraries from the matching directory into the instance's binary directory. Check dependencies on that host:
 
@@ -147,7 +147,7 @@ ldd /path/to/iris/bin/libopen62541.so.0
 
 Resolve any `not found` dependencies. The Docker image also installs `libmbedtls-dev`; the required packages depend on the target OS. Do not overwrite existing instance libraries without checking compatibility.
 
-On Windows, the connector uses `IrisOPCUA.dll` and `open62541.dll`. The supplied `libcrypto-1_1-x64.dll` is supplemental: **do not overwrite IRIS's existing copy**. The [Windows notes](backend/native/windows-x64/README.md) warn that the binaries and source may be from different revisions. Confirm a matching build for the current console; the legacy Studio export does not replace the current REST classes.
+On Windows, copy `IrisOPCUA.dll`, `open62541.dll` and `libcrypto-1_1-x64.dll` into the instance's binary directory. The supplied `libcrypto-1_1-x64.dll` is supplemental: **do not overwrite IRIS's existing copy**. `IrisOPCUA.dll` is built from the same sources as the Linux library (see the [Windows notes](backend/native/windows-x64/README.md)). The legacy Studio export does not replace the current REST classes.
 
 No native macOS library set is included. On macOS, use the Linux Docker environment. The repository does not yet provide a tested compatibility matrix for client installations.
 

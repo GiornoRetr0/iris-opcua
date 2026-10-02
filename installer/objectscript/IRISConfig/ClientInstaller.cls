@@ -24,11 +24,11 @@ Parameter ApiResource = "OPCUA_API";
 /// One role per namespace, so installing a second namespace never widens an existing role.
 Parameter ApiRolePrefix = "OPCUA_API_";
 
-/// Native files the CLI may stage into the IRIS bin directory. Nothing else is writable.
-Parameter NativeFiles = "irisopcua.so,libopen62541.so.0,libcrypto.so.1.1";
+/// Native files the CLI may stage into the IRIS bin directory, Linux then Windows. Nothing else is writable.
+Parameter NativeFiles = "irisopcua.so,libopen62541.so.0,libcrypto.so.1.1,IrisOPCUA.dll,open62541.dll,libcrypto-1_1-x64.dll";
 
 /// Crypto libraries are never replaced: an existing copy belongs to IRIS or the OS.
-Parameter CryptoFiles = "libcrypto.so.1.1";
+Parameter CryptoFiles = "libcrypto.so.1.1,libcrypto-1_1-x64.dll";
 
 /// Instance identity, platform, privileges and whether IRIS can write its bin directory.
 ClassMethod Info() As %String(MAXLEN="") [ SqlProc ]
@@ -232,7 +232,7 @@ ClassMethod RegisterLibrary(pNS As %String) As %String(MAXLEN="") [ SqlProc ]
 		Quit:'..Guard(r)
 		Set pNS = $ZConvert(pNS, "U")
 		If '..NamespaceReady(pNS, r) Quit
-		Set path = $System.Util.BinaryDirectory()_"irisopcua.so"
+		Set path = $System.Util.BinaryDirectory()_..LibraryFile()
 		If '##class(%File).Exists(path) { Set r.message = path_" is missing. Install the native libraries first." Quit }
 		Set home = $Namespace, $Namespace = pNS
 		Set sc = ##class(OPCUA.Utils).Install(path)
@@ -382,6 +382,12 @@ ClassMethod AllowedFile(pName As %String) As %Boolean [ Internal, Private ]
 ClassMethod IsCrypto(pName As %String) As %Boolean [ Internal, Private ]
 {
 	Quit $ListFind($ListFromString(..#CryptoFiles), pName) > 0
+}
+
+/// The connector library's file name on this server's platform.
+ClassMethod LibraryFile() As %String [ Internal, Private ]
+{
+	Quit $Select($System.Version.GetOS() = "Windows":"IrisOPCUA.dll", 1:"irisopcua.so")
 }
 
 ClassMethod StagingPath(pName As %String) As %String [ Internal, Private ]
@@ -537,7 +543,7 @@ ClassMethod LogTail(pPath As %String) As %String [ Internal, Private ]
 		Set name = ##class(%File).GetFilename(pPath)
 		While 's.AtEnd {
 			Set line = s.ReadLine()
-			Set:(line[name)||(line["cannot open shared object")||(line["dlopen") hint = $ZStrip(line, "<>W")
+			Set:(line[name)||(line["cannot open shared object")||(line["dlopen")||(line["LoadLibrary")) hint = $ZStrip(line, "<>W")
 		}
 	} Catch {}
 	Quit $Extract(hint, 1, 500)

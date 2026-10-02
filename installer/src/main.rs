@@ -681,7 +681,7 @@ fn inspect(app: &mut App, s: &Session) -> Option<Overview> {
             &format!("IRIS connection        {}", short_version(&info.version)),
         );
         match info.target() {
-            t @ payload::Target::Linux(_) => {
+            t @ (payload::Target::Linux(_) | payload::Target::Windows) => {
                 f.status(Status::Ok, &format!("Server platform        {}", t.label()))
             }
             payload::Target::Unsupported(p) => f.status(

@@ -51,19 +51,12 @@ pub enum Arch {
     Arm64,
 }
 
-impl Arch {
-    fn dir(self) -> &'static str {
-        match self {
-            Arch::Amd64 => "amd64",
-            Arch::Arm64 => "arm64",
-        }
-    }
-}
-
 /// What the server platform means for native artifacts.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Target {
     Linux(Arch),
+    /// x86-64; IRIS has no Windows ARM build.
+    Windows,
     Unsupported(String),
 }
 
@@ -72,27 +65,45 @@ impl Target {
         match self {
             Target::Linux(Arch::Amd64) => "Linux x86-64".into(),
             Target::Linux(Arch::Arm64) => "Linux ARM64".into(),
+            Target::Windows => "Windows x86-64".into(),
             Target::Unsupported(p) => p.clone(),
         }
+    }
+
+    /// The `backend/native/` directory and the files it ships, in dependency order.
+    fn native(&self) -> Option<(&'static str, &'static [&'static str])> {
+        let dir = match self {
+            Target::Linux(Arch::Amd64) => "linux-amd64",
+            Target::Linux(Arch::Arm64) => "linux-arm64",
+            Target::Windows => "windows-x64",
+            Target::Unsupported(_) => return None,
+        };
+        files::PLATFORMS.iter().find(|(d, _)| *d == dir).copied()
     }
 }
 
 /// Map IRIS's `$System.Version.GetOS()` / `GetPlatform()` to a supported target.
-/// Only Linux is supported so far; Windows and macOS servers are reported as such.
+/// Linux x86-64/ARM64 and Windows x86-64 are supported; anything else is reported as such.
 pub fn target_for(os: &str, platform: &str) -> Target {
     let p = platform.to_ascii_lowercase();
+    let arm = p.contains("arm64") || p.contains("aarch64");
     if os.eq_ignore_ascii_case("windows") {
-        return Target::Unsupported(format!(
-            "Windows ({platform}) — Windows servers are not supported by this installer yet"
-        ));
+        if arm || p.contains("32-bit") || p.contains("x86-32") {
+            return Target::Unsupported(format!(
+                "Windows ({platform}) — only 64-bit x86 Windows servers are supported"
+            ));
+        }
+        return Target::Windows;
     }
     if p.contains("mac") || p.contains("aix") || p.contains("solaris") {
-        return Target::Unsupported(format!("{platform} — only Linux servers are supported"));
+        return Target::Unsupported(format!(
+            "{platform} — only Linux and Windows servers are supported"
+        ));
     }
     if !os.eq_ignore_ascii_case("unix") {
         return Target::Unsupported(format!("{os} ({platform})"));
     }
-    if p.contains("arm64") || p.contains("aarch64") {
+    if arm {
         Target::Linux(Arch::Arm64)
     } else if p.contains("x86-64")
         || p.contains("x86_64")
@@ -197,14 +208,13 @@ impl Payload {
     }
 
     pub fn artifacts(&self, target: &Target) -> Result<Vec<Artifact>, String> {
-        let arch = match target {
-            Target::Linux(a) => *a,
-            Target::Unsupported(p) => return Err(format!("No native artifacts for {p}.")),
+        let Some((dir, names)) = target.native() else {
+            return Err(format!("No native artifacts for {}.", target.label()));
         };
-        files::NATIVE
+        names
             .iter()
             .map(|name| {
-                let rel = files::native(arch.dir(), name);
+                let rel = files::native(dir, name);
                 let bytes = self
                     .files
                     .get(&rel)
@@ -219,16 +229,16 @@ impl Payload {
     }
 
     /// A file on this machine an administrator can copy to the server. Built-in files are
-    /// written to `local/native/<arch>/` first.
+    /// written to `local/native/<platform>/` first.
     pub fn artifact_file(&self, target: &Target, a: &Artifact) -> Result<PathBuf, String> {
-        let Target::Linux(arch) = target else {
+        let Some((dir, _)) = target.native() else {
             return Err("unsupported platform".into());
         };
-        let rel = files::native(arch.dir(), a.name);
+        let rel = files::native(dir, a.name);
         if let Some(root) = &self.root {
             return Ok(root.join(rel));
         }
-        let dir = self.extract_dir.join(arch.dir());
+        let dir = self.extract_dir.join(dir);
         std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         let path = dir.join(a.name);
         if std::fs::read(&path).map(|b| b != a.bytes).unwrap_or(true) {
@@ -268,8 +278,13 @@ mod tests {
             target_for("UNIX", "Red Hat Enterprise Linux 9 for x86-64"),
             Target::Linux(Arch::Amd64)
         );
-        assert!(matches!(
+        assert_eq!(
             target_for("Windows", "Microsoft Windows 64-bit"),
+            Target::Windows
+        );
+        assert_eq!(target_for("Windows", "Windows (x86-64)"), Target::Windows);
+        assert!(matches!(
+            target_for("Windows", "Windows for ARM64"),
             Target::Unsupported(_)
         ));
         assert!(matches!(
@@ -294,8 +309,12 @@ mod tests {
         assert!(docs
             .iter()
             .all(|d| d.name.starts_with("OPCUA.") && !d.name.starts_with("OPCUA.Tests.")));
-        for arch in [Arch::Amd64, Arch::Arm64] {
-            let a = p.artifacts(&Target::Linux(arch)).unwrap();
+        for t in [
+            Target::Linux(Arch::Amd64),
+            Target::Linux(Arch::Arm64),
+            Target::Windows,
+        ] {
+            let a = p.artifacts(&t).unwrap();
             assert_eq!(a.len(), 3);
             assert!(a
                 .iter()
