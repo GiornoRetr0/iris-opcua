@@ -1,5 +1,5 @@
-//! The installer payload — ObjectScript sources and native libraries — and the
-//! artifact choice for the server platform IRIS reports.
+//! The installer payload — ObjectScript sources, native libraries and the console
+//! build — and the artifact choice for the server platform IRIS reports.
 //!
 //! The payload is built into the binary (see `build.rs`), so a downloaded executable
 //! needs no repository. `--dist <checkout>` reads the same files from a checkout instead.
@@ -21,6 +21,7 @@ const REQUIRED: &[&str] = &[
     "backend/src/OPCUA/Utils.cls",
     "backend/src/OPCUA/Client.cls",
     "backend/src/OPCUA/REST/Handler.cls",
+    files::CONSOLE_INDEX,
 ];
 
 pub struct Payload {
@@ -41,6 +42,14 @@ pub struct Doc {
 #[derive(Debug, Clone)]
 pub struct Artifact {
     pub name: &'static str,
+    pub sha256: String,
+    pub bytes: Vec<u8>,
+}
+
+/// One file of the console, by its path below the console's directory.
+#[derive(Debug, Clone)]
+pub struct ConsoleFile {
+    pub path: String,
     pub sha256: String,
     pub bytes: Vec<u8>,
 }
@@ -207,6 +216,33 @@ impl Payload {
         includes.chain(classes).map(|r| self.doc(r)).collect()
     }
 
+    /// The console build plus a generated `config.json` naming its REST API. Ordered for
+    /// installation: `index.html` last, so a page never references a bundle not yet in place.
+    pub fn console_files(&self, api_path: &str) -> Result<Vec<ConsoleFile>, String> {
+        let prefix = format!("{}/", files::CONSOLE_DIR);
+        let mut out: Vec<ConsoleFile> = self
+            .files
+            .iter()
+            .filter_map(|(rel, bytes)| Some((rel.strip_prefix(&prefix)?, bytes)))
+            .filter(|(path, _)| *path != "index.html" && *path != "config.json")
+            .map(|(path, bytes)| console_file(path, bytes.to_vec()))
+            .collect();
+        if out.is_empty() {
+            return Err(format!("The console is missing from {}.", self.origin()));
+        }
+        if let Some(licenses) = self.files.get(files::CONSOLE_LICENSES) {
+            out.push(console_file("3rdpartylicenses.txt", licenses.to_vec()));
+        }
+        let config = serde_json::json!({ "apiBaseUrl": api_path }).to_string();
+        out.push(console_file("config.json", config.into_bytes()));
+        let index = self
+            .files
+            .get(files::CONSOLE_INDEX)
+            .ok_or_else(|| format!("{} is missing from the payload", files::CONSOLE_INDEX))?;
+        out.push(console_file("index.html", index.to_vec()));
+        Ok(out)
+    }
+
     pub fn artifacts(&self, target: &Target) -> Result<Vec<Artifact>, String> {
         let Some((dir, names)) = target.native() else {
             return Err(format!("No native artifacts for {}.", target.label()));
@@ -245,6 +281,14 @@ impl Payload {
             std::fs::write(&path, &a.bytes).map_err(|e| format!("{}: {e}", path.display()))?;
         }
         Ok(path)
+    }
+}
+
+fn console_file(path: &str, bytes: Vec<u8>) -> ConsoleFile {
+    ConsoleFile {
+        path: path.to_string(),
+        sha256: sha256_hex(&bytes),
+        bytes,
     }
 }
 
@@ -320,6 +364,11 @@ mod tests {
                 .iter()
                 .all(|x| x.sha256.len() == 64 && !x.bytes.is_empty()));
         }
+        let c = p.console_files("/csp/opcua/api").unwrap();
+        assert_eq!(c.last().unwrap().path, "index.html");
+        assert!(c.iter().any(|f| f.path.ends_with(".js")));
+        let config = c.iter().find(|f| f.path == "config.json").unwrap();
+        assert_eq!(config.bytes, br#"{"apiBaseUrl":"/csp/opcua/api"}"#);
     }
 
     #[test]

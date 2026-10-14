@@ -10,6 +10,9 @@ Include %occInclude
 /// Inspection procedures change nothing. Mutating procedures refuse to run without
 /// the installer privileges, and never modify a resource this class did not create.
 ///
+/// Console files are written only into the directory <method>PrepareUi</method> claimed, and
+/// pruning only ever deletes inside it.
+///
 /// Separate from <class>IRISConfig.Installer</class>, the Docker demo installer, on purpose.
 Class IRISConfig.ClientInstaller
 {
@@ -282,13 +285,144 @@ ClassMethod CreateApp(pPath As %String, pNS As %String) As %String(MAXLEN="") [ 
 	Quit r.%ToJSON()
 }
 
-/// Read-only check of an installation: classes, library registration and load, REST application.
-ClassMethod Verify(pNS As %String, pPath As %String) As %String(MAXLEN="") [ SqlProc ]
+/// Classify the console path: missing, reusable, or a conflict. Reports where its files go.
+ClassMethod InspectUi(pPath As %String, pNS As %String) As %String(MAXLEN="") [ SqlProc ]
+{
+	Set r = ..Result("ui")
+	Try {
+		Set pNS = $ZConvert(pNS, "U")
+		If '..ValidAppPath(pPath) { Set r.message = "Invalid web application path '"_pPath_"'. Use a path such as /csp/opcua/ui." Quit }
+		Set r.app = ..DescribeUi(pPath, pNS)
+		Do r.%Set("ok", 1, "boolean")
+	} Catch e { Do ..Fail(r, e) }
+	Quit r.%ToJSON()
+}
+
+/// Claim the console directory for this installer and create it. Refuses a directory holding
+/// files this class did not put there.
+ClassMethod PrepareUi(pPath As %String, pNS As %String) As %String(MAXLEN="") [ SqlProc ]
+{
+	Set r = ..Result("ui")
+	Try {
+		Quit:'..Guard(r)
+		Set pNS = $ZConvert(pNS, "U")
+		If '..ValidAppPath(pPath) { Set r.message = "Invalid web application path '"_pPath_"'." Quit }
+		Set d = ..DescribeUi(pPath, pNS)
+		If d.state = "conflict" { Set r.message = d.reason Quit }
+		Set dir = d.directory, r.directory = dir
+		If 'd.owned && ##class(%File).DirectoryExists(dir) && '..DirEmpty(dir) {
+			Set r.message = "Directory "_dir_" already holds files this installer did not put there. It was not touched; choose another console path."
+			Quit
+		}
+		Set ^IRISConfig.ClientInstaller("ui", pPath) = dir
+		If '##class(%File).DirectoryExists(dir) && '##class(%File).CreateDirectoryChain(dir) { Set r.message = "Could not create "_dir_". IRIS needs write access to its csp directory." Quit }
+		Do r.%Set("ok", 1, "boolean")
+	} Catch e { Do ..Fail(r, e) }
+	Quit r.%ToJSON()
+}
+
+/// Write one base64 chunk of console file <var>pRel</var> (relative, '/'-separated) to its staging file.
+ClassMethod StageUiChunk(pPath As %String, pRel As %String, pB64 As %String(MAXLEN=""), pFirst As %Integer) As %String(MAXLEN="") [ SqlProc ]
+{
+	Set r = ..Result("ui")
+	Try {
+		Quit:'..Guard(r)
+		If '..UiReady(pPath, r) Quit
+		If '..ValidUiFile(pRel) { Set r.message = "Invalid console file name '"_pRel_"'." Quit }
+		Set s = ##class(%Stream.FileBinary).%New()
+		$$$ThrowOnError(s.LinkToFile(..UiFile(..UiDir(pPath), pRel, 1)_".part"))
+		If pFirst { Do s.Clear() } Else { Do s.MoveToEnd() }
+		$$$ThrowOnError(s.Write($System.Encryption.Base64Decode(pB64)))
+		$$$ThrowOnError(s.%Save())
+		Set r.size = s.Size
+		Do r.%Set("ok", 1, "boolean")
+	} Catch e { Do ..Fail(r, e) }
+	Quit r.%ToJSON()
+}
+
+/// Verify every staged file against <var>pManifest</var> (JSON array of {path, sha256}), then move them
+/// into place in manifest order and delete files the manifest no longer lists (stale bundles).
+/// Nothing moves unless every file verifies, so a broken upload leaves the current console working.
+ClassMethod CommitUi(pPath As %String, pManifest As %String(MAXLEN="")) As %String(MAXLEN="") [ SqlProc ]
+{
+	Set r = ..Result("ui")
+	Try {
+		Quit:'..Guard(r)
+		If '..UiReady(pPath, r) Quit
+		Set dir = ..UiDir(pPath), list = ##class(%DynamicArray).%FromJSON(pManifest)
+		Kill keep
+		For i=0:1:list.%Size()-1 {
+			Set f = list.%Get(i), rel = f.path
+			If '..ValidUiFile(rel) { Set r.message = "Invalid console file name '"_rel_"'." Return r.%ToJSON() }
+			Set staged = ..UiFile(dir, rel)_".part"
+			If '##class(%File).Exists(staged) { Set r.message = "No staged upload for "_rel_"." Return r.%ToJSON() }
+			Set got = ..FileSha(staged)
+			If got '= $ZConvert(f.sha256, "L") {
+				Do ##class(%File).Delete(staged)
+				Set r.message = "Upload of "_rel_" is corrupt (SHA-256 "_got_", expected "_f.sha256_"). Retry the installation."
+				Return r.%ToJSON()
+			}
+			Set keep(rel) = 1
+		}
+		For i=0:1:list.%Size()-1 {
+			Set final = ..UiFile(dir, list.%Get(i).path)
+			Do:##class(%File).Exists(final) ##class(%File).Delete(final)
+			If '##class(%File).Rename(final_".part", final) { Set r.message = "Could not move "_final_".part into place." Return r.%ToJSON() }
+		}
+		Do ..ListFiles(dir, "", .all)
+		Set removed = 0, rel = ""
+		For {
+			Set rel = $Order(all(rel))
+			Quit:rel=""
+			Continue:$Data(keep(rel))
+			Do ##class(%File).Delete(all(rel))
+			Set removed = removed + 1
+		}
+		Set r.directory = dir, r.installed = list.%Size(), r.removed = removed
+		Do r.%Set("ok", 1, "boolean")
+	} Catch e { Do ..Fail(r, e) }
+	Quit r.%ToJSON()
+}
+
+/// Create the console's web application, or reuse a matching one. It serves files only: with
+/// CSP/ZEN disabled no class or page of the namespace runs through it, so it needs no login, role
+/// or UnknownUser. The console signs in to the REST application, which keeps its own security.
+ClassMethod CreateUiApp(pPath As %String, pNS As %String) As %String(MAXLEN="") [ SqlProc ]
+{
+	Set r = ..Result("ui")
+	Try {
+		Quit:'..Guard(r)
+		Set pNS = $ZConvert(pNS, "U")
+		If '..ValidAppPath(pPath) { Set r.message = "Invalid web application path '"_pPath_"'." Quit }
+		If '..NamespaceReady(pNS, r) Quit
+		Set d = ..DescribeUi(pPath, pNS)
+		If d.state = "conflict" { Set r.message = d.reason Quit }
+		If d.state = "reuse" { Set r.action = "reuse" Do r.%Set("ok", 1, "boolean") Quit }
+		Set p("NameSpace") = pNS
+		Set p("Path") = d.directory
+		Set p("Description") = "OPC UA Console (created by the terminal installer)"
+		Set p("Enabled") = 1
+		Set p("AutheEnabled") = 64
+		Set p("CSPZENEnabled") = 0
+		Set p("ServeFiles") = 1
+		Set p("Recurse") = 1
+		Set p("IsNameSpaceDefault") = 0
+		$$$ThrowOnError(##class(Security.Applications).Create(pPath, .p))
+		Set ^IRISConfig.ClientInstaller("app", pPath) = pNS
+		Set r.action = "created"
+		Do r.%Set("ok", 1, "boolean")
+	} Catch e { Do ..Fail(r, e) }
+	Quit r.%ToJSON()
+}
+
+/// Read-only check of an installation: classes, library registration and load, REST application,
+/// and the console when <var>pUiPath</var> is given.
+ClassMethod Verify(pNS As %String, pPath As %String, pUiPath As %String = "") As %String(MAXLEN="") [ SqlProc ]
 {
 	Set r = ..Result("verify")
 	Try {
 		Set pNS = $ZConvert(pNS, "U")
-		If '..ValidNamespace(pNS) || '..ValidAppPath(pPath) { Set r.message = "Invalid namespace or path." Quit }
+		If '..ValidNamespace(pNS) || '..ValidAppPath(pPath) || ((pUiPath '= "") && '..ValidAppPath(pUiPath)) { Set r.message = "Invalid namespace or path." Quit }
 		Set d = ..DescribeNamespace(pNS)
 		Set r.namespace = d
 		Set checks = []
@@ -314,6 +448,12 @@ ClassMethod Verify(pNS As %String, pPath As %String) As %String(MAXLEN="") [ Sql
 		// Whether this account may use the application: tells an access problem from a routing problem.
 		Do r.%Set("apiAccess", (a.resource = "") || $System.Security.Check(a.resource, "USE"), "boolean")
 		Do checks.%Push(..Check("app", a.state = "reuse", $Case(a.state, "reuse":"REST application "_pPath_" serves "_pNS, "missing":"REST application "_pPath_" does not exist", :a.reason)))
+		If pUiPath '= "" {
+			Set u = ..DescribeUi(pUiPath, pNS)
+			Set r.ui = u
+			Set uiOk = (u.state = "reuse") && ##class(%File).Exists(..UiFile(u.directory, "index.html")) && ##class(%File).Exists(..UiFile(u.directory, "config.json"))
+			Do checks.%Push(..Check("ui", uiOk, $Case(u.state, "reuse":$Select(uiOk:"Console "_pUiPath_" serves "_u.directory, 1:"Console files are missing from "_u.directory), "missing":"Console application "_pUiPath_" does not exist", :u.reason)))
+		}
 		Set r.checks = checks
 		Set all = 1
 		For i=0:1:checks.%Size()-1 Set all = all && checks.%Get(i).ok
@@ -492,6 +632,85 @@ ClassMethod DescribeApp(pPath As %String, pNS As %String) As %DynamicObject [ In
 		Set d.state = "conflict", d.reason = "Web application "_pPath_" exists but is disabled. Enable it in the Management Portal, then retry."
 	} Else { Set d.state = "reuse" }
 	Quit d
+}
+
+/// state: missing | reuse | conflict. Reusable only as a file-only application of this namespace
+/// serving <method>UiDir</method>.
+ClassMethod DescribeUi(pPath As %String, pNS As %String) As %DynamicObject [ Internal, Private ]
+{
+	Set dir = ..UiDir(pPath)
+	Set d = {"path":(pPath), "directory":(dir), "state":"missing", "reason":""}
+	Do d.%Set("owned", $Get(^IRISConfig.ClientInstaller("ui", pPath)) = dir, "boolean")
+	If '##class(Security.Applications).Exists(pPath) {
+		If 'd.owned && ##class(%File).DirectoryExists(dir) && '..DirEmpty(dir) {
+			Set d.state = "conflict", d.reason = "Directory "_dir_" already holds other files. It was not touched; choose another console path."
+		}
+		Quit d
+	}
+	$$$ThrowOnError(##class(Security.Applications).Get(pPath, .p))
+	Set d.namespace = $Get(p("NameSpace"))
+	Do d.%Set("enabled", +$Get(p("Enabled")), "boolean")
+	Set same = ($ZConvert(d.namespace, "U") = pNS) && ($Get(p("DispatchClass")) = "") && '$Get(p("CSPZENEnabled")) && (##class(%File).NormalizeDirectory($Get(p("Path"))) = dir)
+	If 'same {
+		Set d.state = "conflict", d.reason = "Web application "_pPath_" already exists for "_d.namespace_". It was not changed; choose another path."
+	} ElseIf 'd.enabled {
+		Set d.state = "conflict", d.reason = "Web application "_pPath_" exists but is disabled. Enable it in the Management Portal, then retry."
+	} Else { Set d.state = "reuse" }
+	Quit d
+}
+
+/// Staging and committing console files needs a directory <method>PrepareUi</method> claimed.
+ClassMethod UiReady(pPath As %String, r As %DynamicObject) As %Boolean [ Internal, Private ]
+{
+	If '..ValidAppPath(pPath) { Set r.message = "Invalid web application path '"_pPath_"'." Quit 0 }
+	If $Get(^IRISConfig.ClientInstaller("ui", pPath)) '= ..UiDir(pPath) { Set r.message = "The console directory for "_pPath_" was not prepared by this installer." Quit 0 }
+	Quit 1
+}
+
+/// The console's files mirror its web path under the instance's csp directory:
+/// /csp/opcua/ui → &lt;install&gt;/csp/opcua/ui/.
+ClassMethod UiDir(pPath As %String) As %String [ Internal, Private ]
+{
+	Set rel = $Select($Extract(pPath, 1, 5) = "/csp/":$Extract(pPath, 6, *), 1:$Extract(pPath, 2, *))
+	Set dir = ##class(%File).SubDirectoryName($System.Util.InstallDirectory(), "csp", 1)
+	For i=1:1:$Length(rel, "/") Set dir = ##class(%File).SubDirectoryName(dir, $Piece(rel, "/", i), 1)
+	Quit ##class(%File).NormalizeDirectory(dir)
+}
+
+/// Absolute path of console file <var>pRel</var>; <var>pCreate</var> creates its subdirectories.
+ClassMethod UiFile(pDir As %String, pRel As %String, pCreate As %Boolean = 0) As %String [ Internal, Private ]
+{
+	Set dir = pDir, n = $Length(pRel, "/")
+	For i=1:1:n-1 Set dir = ##class(%File).SubDirectoryName(dir, $Piece(pRel, "/", i), 1)
+	If pCreate && '##class(%File).DirectoryExists(dir) && '##class(%File).CreateDirectoryChain(dir) {
+		$$$ThrowStatus($$$ERROR($$$GeneralError, "Could not create "_dir))
+	}
+	Quit ##class(%File).NormalizeFilename($Piece(pRel, "/", n), dir)
+}
+
+/// Plain relative names only: no segment may start with '.', so nothing escapes the directory.
+ClassMethod ValidUiFile(pRel As %String) As %Boolean [ Internal, Private ]
+{
+	Quit $Match(pRel, "[A-Za-z0-9_-][A-Za-z0-9_.-]*(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*")
+}
+
+ClassMethod DirEmpty(pDir As %String) As %Boolean [ Internal, Private ]
+{
+	Set rs = ##class(%ResultSet).%New("%File:FileSet")
+	$$$ThrowOnError(rs.Execute(pDir, "*", "", 1))
+	Quit 'rs.Next()
+}
+
+/// Every file below <var>pDir</var>: <var>pOut</var>(relative path) = absolute path.
+ClassMethod ListFiles(pDir As %String, pRel As %String, ByRef pOut) [ Internal, Private ]
+{
+	Set rs = ##class(%ResultSet).%New("%File:FileSet")
+	$$$ThrowOnError(rs.Execute(pDir, "*", "", 1))
+	While rs.Next() {
+		Set name = rs.Get("ItemName"), rel = $Select(pRel = "":name, 1:pRel_"/"_name)
+		If rs.Get("Type") = "D" { Do ..ListFiles(rs.Get("Name"), rel, .pOut) }
+		Else { Set pOut(rel) = rs.Get("Name") }
+	}
 }
 
 ClassMethod NamespaceReady(pNS As %String, r As %DynamicObject) As %Boolean [ Internal, Private ]

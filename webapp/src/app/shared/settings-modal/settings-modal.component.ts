@@ -1,4 +1,4 @@
-import { Component, inject, signal, output } from '@angular/core';
+import { Component, inject, signal, output, input, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ConfigService } from '../../core/services/config.service';
@@ -272,9 +272,15 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div class="md:col-span-2">
                     <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">API Base URL</label>
-                    <input type="text" [(ngModel)]="gatewayForm.apiBaseUrl"
+                    <input type="text" [(ngModel)]="gatewayForm.apiBaseUrl" [readonly]="hosted"
                            class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
+                           [class.opacity-60]="hosted"
                            placeholder="http://localhost:52773/csp/opcua/api">
+                    @if (hosted) {
+                      <p class="text-xs text-on-surface-variant mt-1.5 ml-1">
+                        Set by the installer: IRIS serves this console next to its API. Sign in with your IRIS account below.
+                      </p>
+                    }
                   </div>
                   <div>
                     <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">IRIS API Username</label>
@@ -377,11 +383,14 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
     </div>
   `,
 })
-export class SettingsModalComponent {
+export class SettingsModalComponent implements OnInit {
   private configService = inject(ConfigService);
   private api = inject(ApiService);
 
   closed = output<void>();
+  initialTab = input<'servers' | 'gateway'>('servers');
+
+  readonly hosted = this.configService.hosted;
 
   activeTab = signal<'servers' | 'gateway'>('servers');
   testing = signal(false);
@@ -430,6 +439,10 @@ export class SettingsModalComponent {
     if (svrs.length > 0) {
       this.selectServer(svrs[0]);
     }
+  }
+
+  ngOnInit(): void {
+    this.activeTab.set(this.initialTab());
   }
 
   /**

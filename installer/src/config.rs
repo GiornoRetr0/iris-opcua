@@ -151,8 +151,6 @@ pub struct Setup {
     pub namespace: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app_path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub api_url: Option<String>,
     /// `running:<step>` while a mutation is under way, `failed:<step>` or `done` after it.
     /// A hint only: the next run inspects IRIS before trusting it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -198,6 +196,19 @@ impl Connection {
             .app_path
             .clone()
             .unwrap_or_else(|| DEFAULT_APP_PATH.into())
+    }
+
+    /// Where IRIS serves the console: beside the REST application.
+    pub fn ui_path(&self) -> String {
+        ui_path_for(&self.app_path())
+    }
+}
+
+/// `/csp/opcua/api` → `/csp/opcua/ui`; any other REST path `p` → `p-ui`.
+pub fn ui_path_for(app_path: &str) -> String {
+    match app_path.strip_suffix("/api") {
+        Some(base) if !base.is_empty() => format!("{base}/ui"),
+        _ => format!("{app_path}-ui"),
     }
 }
 
@@ -398,6 +409,10 @@ mod tests {
                 && !valid_app_path("/a//b")
                 && !valid_app_path("/a b")
         );
+        assert_eq!(ui_path_for("/csp/opcua/api"), "/csp/opcua/ui");
+        assert_eq!(ui_path_for("/plant/rest"), "/plant/rest-ui");
+        assert_eq!(ui_path_for("/api"), "/api-ui");
+        assert!(valid_app_path(&ui_path_for("/csp/opcua2/api")));
     }
 
     #[test]

@@ -1,7 +1,7 @@
-//! `iris-opcua-setup`: installs and verifies the IRIS OPC UA backend on an existing
-//! IRIS instance, over the Atelier REST API, then hands off to the webapp.
+//! `iris-opcua-setup`: installs and verifies the IRIS OPC UA backend and its web
+//! console on an existing IRIS instance, over the Atelier REST API, then opens the console.
 //!
-//! OPC UA servers, certificates, schemas and pipelines are configured in the webapp,
+//! OPC UA servers, certificates, schemas and pipelines are configured in the console,
 //! never here.
 
 mod atelier;
@@ -17,6 +17,7 @@ use config::{BaseUrl, Connection, Instance, Setup, Store, UrlInput};
 use installer::{FileAction, Info, Installer, Ping, Plan, Verification};
 use payload::Payload;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use ui::{action_key, back_key, disabled, gap, item, quit_key, section, Frame, Status};
 
 const HELP: &str = "\
@@ -572,7 +573,7 @@ fn session_menu(app: &mut App, s: Session) -> Next {
                 "Resume setup"
             }
             Health::Partial => "Repair installation",
-            Health::Healthy(_) => "Webapp settings",
+            Health::Healthy(_) => "Open OPC UA Console",
         };
         let entries = [
             item("1", recommended, "recommended"),
@@ -652,7 +653,7 @@ fn inspect(app: &mut App, s: &Session) -> Option<Overview> {
                 .iter()
                 .any(|n| n.name.eq_ignore_ascii_case(&ns));
             let v = if exists {
-                Some(inst.verify(&ns, &path))
+                Some(inst.verify(&ns, &path, &conn.ui_path()))
             } else {
                 None
             };
@@ -783,20 +784,28 @@ fn check(app: &App, s: &Session) {
         );
         let wait = Frame::new(&title).context(&ctx(conn));
         let r = ui::busy(&wait, "Verifying", || {
-            inst.verify(&conn.namespace(), &conn.app_path()).map(|v| {
-                let p = v
-                    .check("app")
-                    .is_some_and(|c| c.ok)
-                    .then(|| inst.ping(&conn.app_path(), v.api_access));
-                (v, p)
-            })
+            inst.verify(&conn.namespace(), &conn.app_path(), &conn.ui_path())
+                .map(|v| {
+                    let p = v
+                        .check("app")
+                        .is_some_and(|c| c.ok)
+                        .then(|| inst.ping(&conn.app_path(), v.api_access));
+                    let c = v
+                        .check("ui")
+                        .is_some_and(|c| c.ok)
+                        .then(|| inst.console_reachable(&conn.ui_path()));
+                    (v, p, c)
+                })
         });
         let mut f = Frame::new(&title).context(&ctx(conn));
         match r {
-            Ok((v, p)) => {
+            Ok((v, p, c)) => {
                 checks_into(&mut f, &v);
                 if let Some(p) = p {
                     ping_into(&mut f, conn, &p);
+                }
+                if let Some(c) = c {
+                    console_into(&mut f, conn, c);
                 }
             }
             Err(e) => f.status(Status::Fail, &log::redact(&e)),
@@ -831,7 +840,7 @@ fn ping_into(f: &mut Frame, conn: &Connection, p: &Ping) -> bool {
                 &format!("API at {url} refused {}", conn.username),
             );
             f.detail(&format!(
-                "The account lacks the {} resource the REST application requires. Grant the {} role (created by this installer) to the IRIS accounts that use the webapp.",
+                "The account lacks the {} resource the REST application requires. Grant the {} role (created by this installer) to the IRIS accounts that use the console.",
                 installer_resource(),
                 installer_role(&conn.namespace())
             ));
@@ -855,6 +864,55 @@ fn ping_into(f: &mut Frame, conn: &Connection, p: &Ping) -> bool {
     }
 }
 
+/// Add whether a browser can load the console, signed out.
+fn console_into(f: &mut Frame, conn: &Connection, reachable: bool) {
+    let url = console_url(conn);
+    if reachable {
+        f.status(
+            Status::Ok,
+            &format!("Console responds at {url} (checked from this machine)"),
+        );
+    } else {
+        f.status(Status::Action, &format!("Console not reachable at {url}"));
+        f.detail(&format!(
+            "IRIS has the console application, but the page did not load. The web server or gateway in front of IRIS probably does not route {}; add that path to its IRIS application paths.",
+            conn.ui_path()
+        ));
+    }
+}
+
+/// The address a browser opens. IRIS serves no default page for a directory, so it names index.html.
+fn console_url(conn: &Connection) -> String {
+    format!("{}{}/index.html", conn.base_url, conn.ui_path())
+}
+
+/// Open `url` in this machine's default browser. Never blocks: the browser is not waited for.
+fn open_browser(url: &str) -> Result<(), String> {
+    let mut cmd = if cfg!(target_os = "macos") {
+        Command::new("open")
+    } else if cfg!(windows) {
+        // Not `cmd /c start`: that would parse the URL as shell syntax.
+        let mut c = Command::new("rundll32");
+        c.arg("url.dll,FileProtocolHandler");
+        c
+    } else {
+        // Without a desktop session, xdg-open may start a text browser inside this terminal.
+        if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
+            return Err("no graphical session on this machine".into());
+        }
+        Command::new("xdg-open")
+    };
+    let mut child = cmd
+        .arg(url)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    std::thread::spawn(move || child.wait());
+    Ok(())
+}
+
 fn installer_resource() -> &'static str {
     "OPCUA_API"
 }
@@ -872,14 +930,12 @@ fn setup(app: &mut App, s: &Session, info: &Info) -> Option<Next> {
         let (ns, path) = choose_namespace(app, s, info)?;
         {
             let c = &mut app.store.connections[s.idx];
-            if c.setup.app_path.as_deref() != Some(path.as_str()) {
-                c.setup.api_url = None;
-            }
             c.setup.namespace = Some(ns.clone());
             c.setup.app_path = Some(path.clone());
         }
         let _ = save(app);
         let conn = app.store.connections[s.idx].clone();
+        let ui_path = conn.ui_path();
         let inst = Installer {
             client: &s.client,
             payload: &app.payload,
@@ -891,7 +947,7 @@ fn setup(app: &mut App, s: &Session, info: &Info) -> Option<Next> {
                 &wait,
                 &format!("Checking namespace {ns}, privileges and native files"),
                 || match inst.info() {
-                    Ok(fresh) => inst.preflight(&fresh, &ns, &path),
+                    Ok(fresh) => inst.preflight(&fresh, &ns, &path, &ui_path),
                     Err(e) => Err(vec![installer::Blocker {
                         title: "Inspection failed".into(),
                         body: e,
@@ -1062,7 +1118,7 @@ fn advanced(conn: &Connection, current: &str) -> String {
     loop {
         let mut f = Frame::new("Advanced settings").context(&ctx(conn));
         f.error = error.take();
-        f.text("REST application path — the web path the webapp calls. Change it only if the default is taken or your web gateway needs another path.");
+        f.text("REST application path — the web path the console calls. Change it only if the default is taken or your web gateway needs another path. The console is served beside it: /csp/opcua/api puts it at /csp/opcua/ui.");
         let p = ui::input(&f, "REST application path", current);
         if config::valid_app_path(&p) {
             return p;
@@ -1114,6 +1170,16 @@ fn review(app: &App, s: &Session, plan: &Plan) -> Review {
         &plan.app_path,
         if plan.create_app { "create" } else { "reuse" },
     );
+    row(
+        &mut f,
+        "Console",
+        &plan.ui_path,
+        if plan.create_ui {
+            "upload and create"
+        } else {
+            "upload (replace files)"
+        },
+    );
     f.blank();
     for (a, action, dest) in &plan.files {
         let what = match action {
@@ -1130,6 +1196,7 @@ fn review(app: &App, s: &Session, plan: &Plan) -> Review {
             installer_role(&plan.namespace)
         ));
     }
+    f.dim("The console app serves static files only (no code runs through it); signing in happens against the REST app.");
     let entries = [
         item("I", "Install", "apply the changes above"),
         item("B", "Back", "change the namespace"),
@@ -1181,13 +1248,14 @@ impl Lock {
     }
 }
 
-const STEPS: [&str; 6] = [
+const STEPS: [&str; 7] = [
     "Native libraries installed",
     "Namespace ready",
     "ObjectScript imported and compiled",
     "Native connector registered and loaded",
     "REST application configured",
-    "Backend verified",
+    "OPC UA Console installed",
+    "Installation verified",
 ];
 
 /// The install screen: every step with its current state.
@@ -1266,20 +1334,23 @@ fn apply(app: &mut App, s: &Session, plan: &Plan) -> Applied {
                 }
                 note
             }),
-            _ => inst.verify(&plan.namespace, &plan.app_path).and_then(|v| {
-                if v.ok {
-                    verification = Some(v);
-                    Ok(String::new())
-                } else {
-                    Err(v
-                        .checks
-                        .iter()
-                        .filter(|c| !c.ok)
-                        .map(|c| c.message.clone())
-                        .collect::<Vec<_>>()
-                        .join("; "))
-                }
-            }),
+            5 => inst.install_console(plan),
+            _ => inst
+                .verify(&plan.namespace, &plan.app_path, &plan.ui_path)
+                .and_then(|v| {
+                    if v.ok {
+                        verification = Some(v);
+                        Ok(String::new())
+                    } else {
+                        Err(v
+                            .checks
+                            .iter()
+                            .filter(|c| !c.ok)
+                            .map(|c| c.message.clone())
+                            .collect::<Vec<_>>()
+                            .join("; "))
+                    }
+                }),
         });
         match r {
             Ok(note) => {
@@ -1329,145 +1400,99 @@ fn set_progress(app: &mut App, s: &Session, p: &str) {
 
 fn handoff(app: &mut App, s: &Session, v: Verification) -> Option<Next> {
     let mut v = v;
-    let mut ping = {
+    let inst = Installer {
+        client: &s.client,
+        payload: &app.payload,
+    };
+    let (mut ping, mut console) = {
         let conn = &app.store.connections[s.idx];
-        let inst = Installer {
-            client: &s.client,
-            payload: &app.payload,
-        };
-        let wait = Frame::new("Checking the API").context(&ctx(conn));
-        ui::busy(&wait, "Calling the OPC UA API", || {
-            inst.ping(&conn.app_path(), v.api_access)
+        let wait = Frame::new("Checking the console").context(&ctx(conn));
+        ui::busy(&wait, "Loading the console and calling its API", || {
+            (
+                inst.ping(&conn.app_path(), v.api_access),
+                inst.console_reachable(&conn.ui_path()),
+            )
         })
     };
-    if app.store.connections[s.idx].setup.api_url.is_none() {
-        let reachable = matches!(ping, Ping::Ok);
-        let url = choose_api_url(app, s, reachable);
-        app.store.connections[s.idx].setup.api_url = Some(url);
-        let _ = save(app);
-    }
     let mut notice = None;
     loop {
         let conn = app.store.connections[s.idx].clone();
-        let reachable = matches!(ping, Ping::Ok);
+        let url = console_url(&conn);
+        let reachable = console && matches!(ping, Ping::Ok);
         let mut f = Frame::new(if reachable {
-            "Backend installed"
+            "OPC UA backend and console installed"
         } else {
-            "Backend installed; HTTP access not yet verified"
+            "Installed; HTTP access not yet verified"
         })
         .context(&ctx(&conn));
         f.notice = notice.take();
         checks_into(&mut f, &v);
         ping_into(&mut f, &conn, &ping);
+        console_into(&mut f, &conn, console);
         f.blank();
-        f.heading("In the webapp, open Settings → IRIS API Gateway and enter:");
+        f.heading("Open the OPC UA Console:");
         f.blank();
-        let checked = format!("{}{}", conn.base_url, conn.app_path());
-        let api = conn
-            .setup
-            .api_url
-            .clone()
-            .unwrap_or_else(|| checked.clone());
-        let label = if api == checked && reachable {
-            "(checked from this machine)"
-        } else {
-            "(not checked)"
-        };
-        f.kv("API Base URL", &format!("{api}  {}", label));
+        f.kv("Address", &url);
         f.kv(
-            "Username",
+            "Sign in as",
             &format!(
                 "an IRIS account with the {} role",
                 installer_role(&conn.namespace())
             ),
         );
         f.blank();
-        f.text("Then configure your OPC UA servers in the webapp.");
+        f.text("Then add your OPC UA servers in the console. Browsers that reach IRIS under another host name use that name instead; the console finds its API on its own.");
         let entries = [
+            item("O", "Open OPC UA Console", "in your browser"),
+            gap(),
             item("1", "Show connection details", ""),
             item("2", "Run checks again", "read-only"),
-            item("3", "Change the API Base URL", ""),
-            item("4", "Export setup summary", "no passwords"),
+            item("3", "Export setup summary", "no passwords"),
             gap(),
             item("B", "Back to the overview", ""),
             quit_key(),
         ];
-        match ui::menu(&f, &entries, "B").as_str() {
+        match ui::menu(&f, &entries, "O").as_str() {
+            "O" => {
+                notice = Some(match open_browser(&url) {
+                    Ok(()) => (Status::Ok, format!("Opened {url} in your browser.")),
+                    Err(e) => {
+                        log::write(&format!("open browser: {e}"));
+                        (
+                            Status::Action,
+                            format!("Could not open a browser ({e}). Open {url} yourself."),
+                        )
+                    }
+                })
+            }
             "1" => details(app, s),
             "2" => {
-                let inst = Installer {
-                    client: &s.client,
-                    payload: &app.payload,
-                };
                 let wait = Frame::new("Checking the installation").context(&ctx(&conn));
                 let r = ui::busy(&wait, "Verifying", || {
-                    inst.verify(&conn.namespace(), &conn.app_path()).map(|nv| {
-                        let p = inst.ping(&conn.app_path(), nv.api_access);
-                        (nv, p)
-                    })
+                    inst.verify(&conn.namespace(), &conn.app_path(), &conn.ui_path())
+                        .map(|nv| {
+                            let p = inst.ping(&conn.app_path(), nv.api_access);
+                            let c = inst.console_reachable(&conn.ui_path());
+                            (nv, p, c)
+                        })
                 });
                 match r {
-                    Ok((nv, p)) if nv.ok => {
+                    Ok((nv, p, c)) if nv.ok => {
                         v = nv;
                         ping = p;
+                        console = c;
                         notice = Some((Status::Ok, "Checks ran again.".into()));
                     }
                     Ok(_) => return None,
                     Err(e) => notice = Some((Status::Fail, log::redact(&e))),
                 }
             }
-            "3" => {
-                let url = choose_api_url(app, s, reachable);
-                app.store.connections[s.idx].setup.api_url = Some(url);
-                let _ = save(app);
-            }
-            "4" => notice = Some(export(app, s)),
+            "3" => notice = Some(export(app, s)),
             "B" => return None,
             _ => {
                 ui::show(&f);
                 return Some(Next::Quit);
             }
-        }
-    }
-}
-
-/// The API address the webapp should use: proposed, and changeable.
-fn choose_api_url(app: &App, s: &Session, reachable: bool) -> String {
-    let conn = &app.store.connections[s.idx];
-    let checked = format!("{}{}", conn.base_url, conn.app_path());
-    let proposed = conn
-        .setup
-        .api_url
-        .clone()
-        .filter(|u| u.ends_with(&conn.app_path()))
-        .unwrap_or_else(|| checked.clone());
-    let mut f = Frame::new("API address for the webapp").context(&ctx(conn));
-    f.text("The webapp needs the address of the OPC UA REST API. This tool proposes the address it used itself:");
-    f.blank();
-    let label = if proposed == checked && reachable {
-        "(checked from this machine)"
-    } else {
-        "(not checked)"
-    };
-    f.kv("Proposed", &format!("{proposed}  {label}"));
-    f.blank();
-    f.dim("Keep it unless browsers reach IRIS through another address, such as a proxy or a different host name.");
-    let entries = [
-        item("1", "Use the proposed address", ""),
-        item("2", "Enter a different address", ""),
-    ];
-    if ui::menu(&f, &entries, "1") == "1" {
-        return proposed;
-    }
-    let mut error = None;
-    loop {
-        let mut g = Frame::new("API address for the webapp").context(&ctx(conn));
-        g.error = error.take();
-        g.text("Enter the full address browsers use for the OPC UA REST API, for example https://iris.example.com/csp/opcua/api.");
-        let a = ui::input(&g, "API Base URL", &proposed);
-        match config::parse_base_url(&a) {
-            Ok(UrlInput::Full(u)) => return u.as_string(),
-            _ => error = Some("Enter a full http(s):// URL.".into()),
         }
     }
 }
@@ -1483,10 +1508,7 @@ fn summary_lines(c: &Connection) -> Vec<(String, String)> {
         ("Server platform".into(), inst.platform),
         ("Namespace".into(), c.namespace()),
         ("REST path".into(), c.app_path()),
-        (
-            "API Base URL".into(),
-            c.setup.api_url.clone().unwrap_or_default(),
-        ),
+        ("Console".into(), console_url(c)),
         ("API role".into(), installer_role(&c.namespace())),
         (
             "Setup status".into(),

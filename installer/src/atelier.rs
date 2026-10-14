@@ -186,6 +186,12 @@ impl Client {
         Ok((code, body))
     }
 
+    /// GET without credentials, as a browser opening the console does.
+    pub fn get_anonymous(&self, path: &str) -> Result<(u16, String), Error> {
+        let (code, _, body) = self.request("GET", path, None, false)?;
+        Ok((code, body))
+    }
+
     fn json(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, Error> {
         let (code, headers, text) = self.request(method, path, body, true)?;
         match code {

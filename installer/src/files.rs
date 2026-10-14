@@ -20,17 +20,31 @@ pub const PLATFORMS: &[(&str, &[&str])] = &[
 pub const SOURCE_ROOTS: &[&str] = &["backend/src", "installer/objectscript"];
 pub const CLIENT_INSTALLER: &str = "installer/objectscript/IRISConfig/ClientInstaller.cls";
 pub const APPLICATION_DIR: &str = "backend/src/OPCUA";
+/// The OPC UA Console's production build (`npx ng build` in `webapp/`), served by IRIS.
+pub const CONSOLE_DIR: &str = "webapp/dist/webapp/browser";
+/// The console's entry page; its absence means the console was not built.
+pub const CONSOLE_INDEX: &str = "webapp/dist/webapp/browser/index.html";
+/// Licence notices of the bundled third-party code; the build writes them beside `browser/`.
+pub const CONSOLE_LICENSES: &str = "webapp/dist/webapp/3rdpartylicenses.txt";
 
 /// `backend/native/<platform>/<name>`.
 pub fn native(platform: &str, name: &str) -> String {
     format!("backend/native/{platform}/{name}")
 }
 
-/// The installer class, every OPCUA class and include file, and the native libraries
-/// of every platform. Sorted, `/`-separated.
+/// The installer class, every OPCUA class and include file, the native libraries of
+/// every platform, and the console build when present. Sorted, `/`-separated.
 pub fn list(root: &Path) -> io::Result<Vec<String>> {
     let mut out = vec![CLIENT_INSTALLER.to_string()];
-    walk(root, APPLICATION_DIR, &mut out)?;
+    walk(root, APPLICATION_DIR, &mut out, &|n| {
+        n.ends_with(".cls") || n.ends_with(".inc")
+    })?;
+    if root.join(CONSOLE_DIR).is_dir() {
+        walk(root, CONSOLE_DIR, &mut out, &|_| true)?;
+        if root.join(CONSOLE_LICENSES).is_file() {
+            out.push(CONSOLE_LICENSES.to_string());
+        }
+    }
     for (platform, names) in PLATFORMS {
         for name in *names {
             out.push(native(platform, name));
@@ -40,14 +54,19 @@ pub fn list(root: &Path) -> io::Result<Vec<String>> {
     Ok(out)
 }
 
-fn walk(root: &Path, rel: &str, out: &mut Vec<String>) -> io::Result<()> {
+fn walk(
+    root: &Path,
+    rel: &str,
+    out: &mut Vec<String>,
+    keep: &dyn Fn(&str) -> bool,
+) -> io::Result<()> {
     for entry in std::fs::read_dir(root.join(rel))? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
         let child = format!("{rel}/{name}");
         if entry.file_type()?.is_dir() {
-            walk(root, &child, out)?;
-        } else if name.ends_with(".cls") || name.ends_with(".inc") {
+            walk(root, &child, out, keep)?;
+        } else if keep(&name) {
             out.push(child);
         }
     }
