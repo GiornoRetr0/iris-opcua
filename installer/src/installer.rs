@@ -1,6 +1,7 @@
 //! Inspect, plan, apply and verify, by calling `IRISConfig.ClientInstaller` over Atelier.
 
 use crate::atelier::{Client, Error};
+use crate::config;
 use crate::files;
 use crate::log;
 use crate::payload::{self, Artifact, ConsoleFile, Payload, Target};
@@ -443,7 +444,8 @@ impl<'a> Installer<'a> {
     /// application. Files are staged and verified before any replaces the current console.
     pub fn install_console(&self, plan: &Plan) -> Result<String, String> {
         let path = &plan.ui_path;
-        let console = self.payload.console_files(&plan.app_path)?;
+        let api = config::relative_path(path, &plan.app_path);
+        let console = self.payload.console_files(&api)?;
         self.call_ok("PrepareUi", &[json!(path), json!(plan.namespace)])?;
         for f in &console {
             self.stage_console_file(path, f)?;

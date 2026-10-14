@@ -212,6 +212,18 @@ pub fn ui_path_for(app_path: &str) -> String {
     }
 }
 
+/// `to` as seen from the web application directory `from`: `/csp/opcua/ui`, `/csp/opcua/api`
+/// → `../api`. The console resolves it against its own address, so it survives a web server
+/// that mounts IRIS under a prefix (`/iris262/csp/...`), which the installer cannot see.
+pub fn relative_path(from: &str, to: &str) -> String {
+    let from: Vec<&str> = from.split('/').filter(|s| !s.is_empty()).collect();
+    let to: Vec<&str> = to.split('/').filter(|s| !s.is_empty()).collect();
+    let common = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    let mut parts = vec![".."; from.len() - common];
+    parts.extend(&to[common..]);
+    parts.join("/")
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Store {
     #[serde(default = "store_version")]
@@ -413,6 +425,9 @@ mod tests {
         assert_eq!(ui_path_for("/plant/rest"), "/plant/rest-ui");
         assert_eq!(ui_path_for("/api"), "/api-ui");
         assert!(valid_app_path(&ui_path_for("/csp/opcua2/api")));
+        assert_eq!(relative_path("/csp/opcua/ui", "/csp/opcua/api"), "../api");
+        assert_eq!(relative_path("/plant/rest-ui", "/plant/rest"), "../rest");
+        assert_eq!(relative_path("/a/ui", "/b/c/api"), "../../b/c/api");
     }
 
     #[test]

@@ -49,6 +49,8 @@ You define a connection with:
 - a **base URL**: `http(s)://host(:port)/pathPrefix`, or just a host name, in which case you are asked for the scheme. If you leave out the port, you get a warning and the URL is used exactly as typed. No port is assumed.
 - a **username** and **password**.
 
+On a complete installation, **Update installation** runs setup again with this installer's payload: classes are re-imported and recompiled and the console is replaced, with the same review first. The native-library rule below still applies, so a changed library stops the update.
+
 ## What the IRIS account needs
 
 | Privilege | Used for |
@@ -79,7 +81,7 @@ The last row is only automatic for accounts with the `%All` role. IRIS does not 
   - An existing application with the same path is reused only if it serves the same namespace with the same dispatch class. Its settings are never changed.
 - **OPC UA Console** (beside the REST path: `/csp/opcua/api` → `/csp/opcua/ui`, open at `/csp/opcua/ui/index.html`):
   - The Angular build goes into `<install>/csp/opcua/ui/`, mirroring the web path. Each file is staged and checked against its SHA-256; nothing replaces the current console until every file verifies, and `index.html` moves last. Files the new build no longer has are deleted, only inside that directory.
-  - A generated `config.json` beside `index.html` names the REST path, so the console calls its API on the same origin with no setup and no proxy.
+  - A generated `config.json` beside `index.html` names the REST path relative to the console (`../api`), so it survives a web server that mounts IRIS under a prefix such as `/iris262`, and the console calls its API on the same origin with no setup and no proxy.
   - Its web application serves static files only: CSP/ZEN is disabled, so no class or page of the namespace runs through it. It is therefore unauthenticated and needs no role or UnknownUser. Users sign in inside the console with their IRIS account, against the REST application.
   - A directory holding files the tool did not put there, or an existing application with that path that is not such a file-only application of the namespace, is refused and left unchanged.
 - **Ownership record:** `^IRISConfig.ClientInstaller` in `%SYS` records what the tool created, so reruns can reuse its own resources and never adopt foreign ones.

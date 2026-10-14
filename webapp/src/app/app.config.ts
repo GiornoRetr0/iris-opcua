@@ -9,6 +9,7 @@ export const appConfig: ApplicationConfig = {
     provideZoneChangeDetection({ eventCoalescing: true }),
     // Hash URLs: a static IRIS web application has no index.html fallback, so a
     // path route would 404 on reload. Also keeps the console path-independent.
+    // Relies on index.html having no <base>; see the note there.
     provideRouter(routes, withHashLocation()),
     provideHttpClient(),
   ],

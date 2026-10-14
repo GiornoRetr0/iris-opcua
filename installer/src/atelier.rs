@@ -2,11 +2,19 @@
 //!
 //! Credentials travel only in the `Authorization` header. Redirects are not followed,
 //! so the header is never replayed to another address.
+//!
+//! Atelier keeps a CSP session per client, and each session holds an IRIS licence until it
+//! times out. The client therefore returns the session cookie on every Atelier call and ends
+//! the session when dropped; ignoring it once left hundreds of sessions holding every licence.
 
 use base64::Engine;
 use serde_json::{json, Value};
 use std::fmt;
+use std::sync::Mutex;
 use std::time::Duration;
+
+/// The calls that share the Atelier session; other paths (the OPC UA API, the console) never get its cookie.
+const ATELIER: &str = "/api/atelier/";
 
 /// What went wrong talking to the server, in terms the user can act on.
 #[derive(Debug)]
@@ -56,6 +64,8 @@ pub struct Client {
     base: String,
     auth: String,
     secret: String,
+    /// `name=value` pairs IRIS set on Atelier responses, sent back as one `Cookie` header.
+    cookies: Mutex<Vec<String>>,
 }
 
 impl Client {
@@ -74,6 +84,7 @@ impl Client {
             base: base.to_string(),
             auth: format!("Basic {token}"),
             secret: password.to_string(),
+            cookies: Mutex::new(Vec::new()),
         }
     }
 
@@ -231,11 +242,16 @@ impl Client {
         auth: bool,
     ) -> Result<(u16, Headers, String), Error> {
         let url = format!("{}{}", self.base, path);
+        let session = auth && path.starts_with(ATELIER);
+        let cookie = if session { self.cookie_header() } else { None };
         let result = match (method, body) {
             ("GET", _) => {
                 let mut r = self.agent.get(&url);
                 if auth {
                     r = r.header("Authorization", &self.auth);
+                }
+                if let Some(c) = &cookie {
+                    r = r.header("Cookie", c);
                 }
                 r.call()
             }
@@ -247,12 +263,23 @@ impl Client {
                 if auth {
                     r = r.header("Authorization", &self.auth);
                 }
+                if let Some(c) = &cookie {
+                    r = r.header("Cookie", c);
+                }
                 let bytes = body.map(|b| b.to_string()).unwrap_or_default();
                 r.content_type("application/json").send(bytes.as_bytes())
             }
         };
         let mut resp = result.map_err(|e| classify(&e, &self.secret))?;
         let code = resp.status().as_u16();
+        if session {
+            self.keep_cookies(
+                resp.headers()
+                    .get_all("set-cookie")
+                    .iter()
+                    .filter_map(|v| v.to_str().ok()),
+            );
+        }
         let headers = Headers {
             location: resp
                 .headers()
@@ -272,6 +299,37 @@ impl Client {
             .read_to_string()
             .map_err(|e| classify(&e, &self.secret))?;
         Ok((code, headers, text))
+    }
+}
+
+impl Client {
+    fn cookie_header(&self) -> Option<String> {
+        let jar = self.cookies.lock().unwrap_or_else(|e| e.into_inner());
+        (!jar.is_empty()).then(|| jar.join("; "))
+    }
+
+    fn keep_cookies<'h>(&self, set_cookies: impl Iterator<Item = &'h str>) {
+        let mut jar = self.cookies.lock().unwrap_or_else(|e| e.into_inner());
+        for sc in set_cookies {
+            let Some((name, value)) = sc.split(';').next().and_then(|p| p.trim().split_once('='))
+            else {
+                continue;
+            };
+            jar.retain(|c| c.split('=').next() != Some(name));
+            // An emptied cookie is IRIS ending the session.
+            if !value.is_empty() {
+                jar.push(format!("{name}={value}"));
+            }
+        }
+    }
+}
+
+impl Drop for Client {
+    /// End the Atelier session now rather than leave it holding a licence until it times out.
+    fn drop(&mut self) {
+        if self.cookie_header().is_some() {
+            let _ = self.request("GET", &format!("{ATELIER}?IRISLogout=end"), None, true);
+        }
     }
 }
 
@@ -381,6 +439,36 @@ mod tests {
         assert!(!c
             .redact("Authorization failed with pw-123")
             .contains("pw-123"));
+    }
+
+    #[test]
+    fn session_cookie_is_kept_replaced_and_cleared() {
+        let c = Client::new("http://h:1", "u", "p");
+        assert_eq!(c.cookie_header(), None);
+        c.keep_cookies(
+            [
+                "CSPSESSIONID-SP-80-UP-api-atelier-=abc; path=/api/atelier/; httpOnly;",
+                "CSPWSERVERID=x",
+            ]
+            .into_iter(),
+        );
+        assert_eq!(
+            c.cookie_header().as_deref(),
+            Some("CSPSESSIONID-SP-80-UP-api-atelier-=abc; CSPWSERVERID=x")
+        );
+        c.keep_cookies(["CSPSESSIONID-SP-80-UP-api-atelier-=def; path=/"].into_iter());
+        assert_eq!(
+            c.cookie_header().as_deref(),
+            Some("CSPWSERVERID=x; CSPSESSIONID-SP-80-UP-api-atelier-=def")
+        );
+        c.keep_cookies(
+            [
+                "CSPSESSIONID-SP-80-UP-api-atelier-=; expires=Thu, 01 Jan 1970 00:00:00 GMT",
+                "CSPWSERVERID=",
+            ]
+            .into_iter(),
+        );
+        assert_eq!(c.cookie_header(), None);
     }
 
     #[test]

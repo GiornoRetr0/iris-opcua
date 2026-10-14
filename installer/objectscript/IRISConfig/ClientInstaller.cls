@@ -387,6 +387,8 @@ ClassMethod CommitUi(pPath As %String, pManifest As %String(MAXLEN="")) As %Stri
 /// Create the console's web application, or reuse a matching one. It serves files only: with
 /// CSP/ZEN disabled no class or page of the namespace runs through it, so it needs no login, role
 /// or UnknownUser. The console signs in to the REST application, which keeps its own security.
+/// ServeFilesTimeout is 0: by default IRIS lets browsers cache files for an hour, so after an
+/// upgrade they would keep running the previous index.html.
 ClassMethod CreateUiApp(pPath As %String, pNS As %String) As %String(MAXLEN="") [ SqlProc ]
 {
 	Set r = ..Result("ui")
@@ -397,7 +399,16 @@ ClassMethod CreateUiApp(pPath As %String, pNS As %String) As %String(MAXLEN="") 
 		If '..NamespaceReady(pNS, r) Quit
 		Set d = ..DescribeUi(pPath, pNS)
 		If d.state = "conflict" { Set r.message = d.reason Quit }
-		If d.state = "reuse" { Set r.action = "reuse" Do r.%Set("ok", 1, "boolean") Quit }
+		If d.state = "reuse" {
+			If d.owned {
+				$$$ThrowOnError(##class(Security.Applications).Get(pPath, .p))
+				If $Get(p("ServeFilesTimeout")) '= 0 {
+					Kill p Set p("ServeFilesTimeout") = 0
+					$$$ThrowOnError(##class(Security.Applications).Modify(pPath, .p))
+				}
+			}
+			Set r.action = "reuse" Do r.%Set("ok", 1, "boolean") Quit
+		}
 		Set p("NameSpace") = pNS
 		Set p("Path") = d.directory
 		Set p("Description") = "OPC UA Console (created by the terminal installer)"
@@ -406,6 +417,7 @@ ClassMethod CreateUiApp(pPath As %String, pNS As %String) As %String(MAXLEN="") 
 		Set p("CSPZENEnabled") = 0
 		Set p("ServeFiles") = 1
 		Set p("Recurse") = 1
+		Set p("ServeFilesTimeout") = 0
 		Set p("IsNameSpaceDefault") = 0
 		$$$ThrowOnError(##class(Security.Applications).Create(pPath, .p))
 		Set ^IRISConfig.ClientInstaller("app", pPath) = pNS

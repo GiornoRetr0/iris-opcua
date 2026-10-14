@@ -216,8 +216,9 @@ impl Payload {
         includes.chain(classes).map(|r| self.doc(r)).collect()
     }
 
-    /// The console build plus a generated `config.json` naming its REST API. Ordered for
-    /// installation: `index.html` last, so a page never references a bundle not yet in place.
+    /// The console build plus a generated `config.json` naming its REST API, relative to the
+    /// console. Ordered for installation: `index.html` last, so a page never references a
+    /// bundle not yet in place.
     pub fn console_files(&self, api_path: &str) -> Result<Vec<ConsoleFile>, String> {
         let prefix = format!("{}/", files::CONSOLE_DIR);
         let mut out: Vec<ConsoleFile> = self
@@ -364,11 +365,11 @@ mod tests {
                 .iter()
                 .all(|x| x.sha256.len() == 64 && !x.bytes.is_empty()));
         }
-        let c = p.console_files("/csp/opcua/api").unwrap();
+        let c = p.console_files("../api").unwrap();
         assert_eq!(c.last().unwrap().path, "index.html");
         assert!(c.iter().any(|f| f.path.ends_with(".js")));
         let config = c.iter().find(|f| f.path == "config.json").unwrap();
-        assert_eq!(config.bytes, br#"{"apiBaseUrl":"/csp/opcua/api"}"#);
+        assert_eq!(config.bytes, br#"{"apiBaseUrl":"../api"}"#);
     }
 
     #[test]

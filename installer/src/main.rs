@@ -575,12 +575,20 @@ fn session_menu(app: &mut App, s: Session) -> Next {
             Health::Partial => "Repair installation",
             Health::Healthy(_) => "Open OPC UA Console",
         };
-        let entries = [
+        let healthy = matches!(ov.health, Health::Healthy(_));
+        let mut entries = vec![
             item("1", recommended, "recommended"),
             item("2", "Check installation", "read-only"),
-            back_key(),
-            quit_key(),
         ];
+        if healthy {
+            // A healthy install otherwise offers no way to apply a newer installer's payload.
+            entries.push(item(
+                "3",
+                "Update installation",
+                "reinstall from this installer",
+            ));
+        }
+        entries.extend([back_key(), quit_key()]);
         match ui::menu(&f, &entries, "1").as_str() {
             "1" => {
                 let next = match ov.health {
@@ -592,6 +600,11 @@ fn session_menu(app: &mut App, s: Session) -> Next {
                 }
             }
             "2" => check(app, &s),
+            "3" if healthy => {
+                if let Some(n) = setup(app, &s, &ov.info) {
+                    return n;
+                }
+            }
             "B" => {
                 log::write("signed out");
                 return Next::SignIn;
@@ -1373,7 +1386,7 @@ fn apply(app: &mut App, s: &Session, plan: &Plan) -> Applied {
                 }
                 let entries = [
                     item("R", "Retry", "inspects first, repeats nothing that worked"),
-                    item("B", "Back to the overview", ""),
+                    back_key(),
                     quit_key(),
                 ];
                 return match ui::menu(&f, &entries, "R").as_str() {
@@ -1448,8 +1461,7 @@ fn handoff(app: &mut App, s: &Session, v: Verification) -> Option<Next> {
             item("1", "Show connection details", ""),
             item("2", "Run checks again", "read-only"),
             item("3", "Export setup summary", "no passwords"),
-            gap(),
-            item("B", "Back to the overview", ""),
+            back_key(),
             quit_key(),
         ];
         match ui::menu(&f, &entries, "O").as_str() {

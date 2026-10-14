@@ -7,7 +7,11 @@ import { InjectionToken } from '@angular/core';
  * the console behaves as a standalone app configured in Settings.
  */
 export interface RuntimeConfig {
-  /** Path of the REST API on the same origin, e.g. `/csp/opcua/api`. */
+  /**
+   * Path of the REST API on the same origin, e.g. `/iris262/csp/opcua/api`. The
+   * installer writes it relative to the console (`../api`), since a web server may
+   * mount IRIS under a prefix it cannot see; resolved here against the page.
+   */
   apiBaseUrl?: string;
 }
 
@@ -21,7 +25,8 @@ export async function loadRuntimeConfig(): Promise<RuntimeConfig> {
     const res = await fetch('config.json', { cache: 'no-store' });
     if (!res.ok) return {};
     const cfg = await res.json();
-    return typeof cfg?.apiBaseUrl === 'string' && cfg.apiBaseUrl ? { apiBaseUrl: cfg.apiBaseUrl } : {};
+    if (typeof cfg?.apiBaseUrl !== 'string' || !cfg.apiBaseUrl) return {};
+    return { apiBaseUrl: new URL(cfg.apiBaseUrl, document.baseURI).pathname };
   } catch {
     // Not hosted: the dev server answers with index.html, which is not JSON.
     return {};

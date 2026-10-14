@@ -214,7 +214,7 @@ npm ci
 npm run build
 ```
 
-The terminal installer does this step for you: IRIS serves the console from a file-only web application beside the REST API. To host it yourself instead, publish the contents of `webapp/dist/webapp/browser/` on your HTTPS web server. The build uses relative paths and hash routes (`#/schemas`), so it works under any directory and needs no `index.html` fallback. A `config.json` next to `index.html` containing `{"apiBaseUrl": "/csp/opcua/api"}` fixes the API address and skips the step below.
+The terminal installer does this step for you: IRIS serves the console from a file-only web application beside the REST API. To host it yourself instead, publish the contents of `webapp/dist/webapp/browser/` on your HTTPS web server. The build uses relative paths and hash routes (`#/schemas`), so it works under any directory and needs no `index.html` fallback. A `config.json` next to `index.html` containing `{"apiBaseUrl": "../api"}` (resolved against the console's own URL; an absolute path such as `/csp/opcua/api` also works) fixes the API address and skips the step below.
 
 Prefer a same-origin deployment, with the web server proxying the API. If frontend and API use different origins, configure and verify CORS/preflight handling for your frontend origin, the `Authorization` header, and API methods. **The Angular development proxy is not part of the production build.**
 
