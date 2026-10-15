@@ -1,5 +1,5 @@
 import { ApplicationConfig, provideZoneChangeDetection } from '@angular/core';
-import { provideRouter } from '@angular/router';
+import { provideRouter, withHashLocation } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 
 import { routes } from './app.routes';
@@ -7,7 +7,10 @@ import { routes } from './app.routes';
 export const appConfig: ApplicationConfig = {
   providers: [
     provideZoneChangeDetection({ eventCoalescing: true }),
-    provideRouter(routes),
+    // Hash URLs: a static IRIS web application has no index.html fallback, so a
+    // path route would 404 on reload. Also keeps the console path-independent.
+    // Relies on index.html having no <base>; see the note there.
+    provideRouter(routes, withHashLocation()),
     provideHttpClient(),
   ],
 };

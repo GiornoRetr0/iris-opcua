@@ -1,5 +1,6 @@
-import { Injectable, signal, computed } from '@angular/core';
+import { Injectable, signal, inject } from '@angular/core';
 import { AppConfig, ServerProfile } from '../models/opcua.models';
+import { RUNTIME_CONFIG } from '../runtime-config';
 
 /**
  * Where configuration lives, and it is worth being explicit about the shape of
@@ -42,7 +43,26 @@ const DEFAULTS: AppConfig = {
 
 @Injectable({ providedIn: 'root' })
 export class ConfigService {
-  private _config = signal<AppConfig>({ ...DEFAULTS });
+  private readonly runtime = inject(RUNTIME_CONFIG);
+
+  /**
+   * IRIS serves this console next to its REST API (installed by the terminal
+   * installer). The API address is then fixed by the installation, and there is
+   * no default account: the user signs in with their own IRIS account.
+   */
+  readonly hosted = !!this.runtime.apiBaseUrl;
+
+  /**
+   * Several namespaces may each host a console on one IRIS origin, sharing one
+   * localStorage. Keyed by API path so their server lists stay apart.
+   */
+  private readonly storageKey = this.hosted ? `${STORAGE_KEY}::${this.runtime.apiBaseUrl}` : STORAGE_KEY;
+
+  private readonly defaults: AppConfig = this.hosted
+    ? { ...DEFAULTS, apiBaseUrl: this.runtime.apiBaseUrl!, apiUsername: '', apiPassword: '' }
+    : DEFAULTS;
+
+  private _config = signal<AppConfig>({ ...this.defaults });
 
   readonly config = this._config.asReadonly();
 
@@ -52,8 +72,8 @@ export class ConfigService {
 
   load(): void {
     try {
-      let raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
+      let raw = localStorage.getItem(this.storageKey);
+      if (!raw && !this.hosted) {
         // One-time migration off the old key. Written under the new key
         // immediately so this branch is taken exactly once.
         const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
@@ -65,7 +85,7 @@ export class ConfigService {
       }
       if (raw) {
         const saved = JSON.parse(raw);
-        const merged = { ...DEFAULTS };
+        const merged = { ...this.defaults };
         for (const key of Object.keys(saved)) {
           if (saved[key] !== '' && saved[key] != null) {
             (merged as any)[key] = saved[key];
@@ -89,7 +109,7 @@ export class ConfigService {
           }];
         }
 
-        this._config.set(merged);
+        this._config.set(this.pin(merged));
       }
     } catch {
       // ignore corrupt storage
@@ -97,13 +117,18 @@ export class ConfigService {
   }
 
   save(partial: Partial<AppConfig>): void {
-    const updated = { ...this._config(), ...partial };
+    const updated = this.pin({ ...this._config(), ...partial });
     this._config.set(updated);
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      localStorage.setItem(this.storageKey, JSON.stringify(updated));
     } catch {
       // storage full or unavailable
     }
+  }
+
+  /** A hosted console always calls the API it was installed with. */
+  private pin(cfg: AppConfig): AppConfig {
+    return this.hosted ? { ...cfg, apiBaseUrl: this.runtime.apiBaseUrl! } : cfg;
   }
 
   get(): AppConfig {

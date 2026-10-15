@@ -1,5 +1,5 @@
-//! The installer payload — ObjectScript sources and native libraries — and the
-//! artifact choice for the server platform IRIS reports.
+//! The installer payload — ObjectScript sources, native libraries and the console
+//! build — and the artifact choice for the server platform IRIS reports.
 //!
 //! The payload is built into the binary (see `build.rs`), so a downloaded executable
 //! needs no repository. `--dist <checkout>` reads the same files from a checkout instead.
@@ -21,6 +21,7 @@ const REQUIRED: &[&str] = &[
     "backend/src/OPCUA/Utils.cls",
     "backend/src/OPCUA/Client.cls",
     "backend/src/OPCUA/REST/Handler.cls",
+    files::CONSOLE_INDEX,
 ];
 
 pub struct Payload {
@@ -45,25 +46,26 @@ pub struct Artifact {
     pub bytes: Vec<u8>,
 }
 
+/// One file of the console, by its path below the console's directory.
+#[derive(Debug, Clone)]
+pub struct ConsoleFile {
+    pub path: String,
+    pub sha256: String,
+    pub bytes: Vec<u8>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Arch {
     Amd64,
     Arm64,
 }
 
-impl Arch {
-    fn dir(self) -> &'static str {
-        match self {
-            Arch::Amd64 => "amd64",
-            Arch::Arm64 => "arm64",
-        }
-    }
-}
-
 /// What the server platform means for native artifacts.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Target {
     Linux(Arch),
+    /// x86-64; IRIS has no Windows ARM build.
+    Windows,
     Unsupported(String),
 }
 
@@ -72,27 +74,45 @@ impl Target {
         match self {
             Target::Linux(Arch::Amd64) => "Linux x86-64".into(),
             Target::Linux(Arch::Arm64) => "Linux ARM64".into(),
+            Target::Windows => "Windows x86-64".into(),
             Target::Unsupported(p) => p.clone(),
         }
+    }
+
+    /// The `backend/native/` directory and the files it ships, in dependency order.
+    fn native(&self) -> Option<(&'static str, &'static [&'static str])> {
+        let dir = match self {
+            Target::Linux(Arch::Amd64) => "linux-amd64",
+            Target::Linux(Arch::Arm64) => "linux-arm64",
+            Target::Windows => "windows-x64",
+            Target::Unsupported(_) => return None,
+        };
+        files::PLATFORMS.iter().find(|(d, _)| *d == dir).copied()
     }
 }
 
 /// Map IRIS's `$System.Version.GetOS()` / `GetPlatform()` to a supported target.
-/// Only Linux is supported so far; Windows and macOS servers are reported as such.
+/// Linux x86-64/ARM64 and Windows x86-64 are supported; anything else is reported as such.
 pub fn target_for(os: &str, platform: &str) -> Target {
     let p = platform.to_ascii_lowercase();
+    let arm = p.contains("arm64") || p.contains("aarch64");
     if os.eq_ignore_ascii_case("windows") {
-        return Target::Unsupported(format!(
-            "Windows ({platform}) — Windows servers are not supported by this installer yet"
-        ));
+        if arm || p.contains("32-bit") || p.contains("x86-32") {
+            return Target::Unsupported(format!(
+                "Windows ({platform}) — only 64-bit x86 Windows servers are supported"
+            ));
+        }
+        return Target::Windows;
     }
     if p.contains("mac") || p.contains("aix") || p.contains("solaris") {
-        return Target::Unsupported(format!("{platform} — only Linux servers are supported"));
+        return Target::Unsupported(format!(
+            "{platform} — only Linux and Windows servers are supported"
+        ));
     }
     if !os.eq_ignore_ascii_case("unix") {
         return Target::Unsupported(format!("{os} ({platform})"));
     }
-    if p.contains("arm64") || p.contains("aarch64") {
+    if arm {
         Target::Linux(Arch::Arm64)
     } else if p.contains("x86-64")
         || p.contains("x86_64")
@@ -196,15 +216,42 @@ impl Payload {
         includes.chain(classes).map(|r| self.doc(r)).collect()
     }
 
+    /// The console build plus a generated `config.json` naming its REST API, relative to the
+    /// console. Ordered for installation: `index.html` last, so a page never references a
+    /// bundle not yet in place.
+    pub fn console_files(&self, api_path: &str) -> Result<Vec<ConsoleFile>, String> {
+        let prefix = format!("{}/", files::CONSOLE_DIR);
+        let mut out: Vec<ConsoleFile> = self
+            .files
+            .iter()
+            .filter_map(|(rel, bytes)| Some((rel.strip_prefix(&prefix)?, bytes)))
+            .filter(|(path, _)| *path != "index.html" && *path != "config.json")
+            .map(|(path, bytes)| console_file(path, bytes.to_vec()))
+            .collect();
+        if out.is_empty() {
+            return Err(format!("The console is missing from {}.", self.origin()));
+        }
+        if let Some(licenses) = self.files.get(files::CONSOLE_LICENSES) {
+            out.push(console_file("3rdpartylicenses.txt", licenses.to_vec()));
+        }
+        let config = serde_json::json!({ "apiBaseUrl": api_path }).to_string();
+        out.push(console_file("config.json", config.into_bytes()));
+        let index = self
+            .files
+            .get(files::CONSOLE_INDEX)
+            .ok_or_else(|| format!("{} is missing from the payload", files::CONSOLE_INDEX))?;
+        out.push(console_file("index.html", index.to_vec()));
+        Ok(out)
+    }
+
     pub fn artifacts(&self, target: &Target) -> Result<Vec<Artifact>, String> {
-        let arch = match target {
-            Target::Linux(a) => *a,
-            Target::Unsupported(p) => return Err(format!("No native artifacts for {p}.")),
+        let Some((dir, names)) = target.native() else {
+            return Err(format!("No native artifacts for {}.", target.label()));
         };
-        files::NATIVE
+        names
             .iter()
             .map(|name| {
-                let rel = files::native(arch.dir(), name);
+                let rel = files::native(dir, name);
                 let bytes = self
                     .files
                     .get(&rel)
@@ -219,22 +266,30 @@ impl Payload {
     }
 
     /// A file on this machine an administrator can copy to the server. Built-in files are
-    /// written to `local/native/<arch>/` first.
+    /// written to `local/native/<platform>/` first.
     pub fn artifact_file(&self, target: &Target, a: &Artifact) -> Result<PathBuf, String> {
-        let Target::Linux(arch) = target else {
+        let Some((dir, _)) = target.native() else {
             return Err("unsupported platform".into());
         };
-        let rel = files::native(arch.dir(), a.name);
+        let rel = files::native(dir, a.name);
         if let Some(root) = &self.root {
             return Ok(root.join(rel));
         }
-        let dir = self.extract_dir.join(arch.dir());
+        let dir = self.extract_dir.join(dir);
         std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         let path = dir.join(a.name);
         if std::fs::read(&path).map(|b| b != a.bytes).unwrap_or(true) {
             std::fs::write(&path, &a.bytes).map_err(|e| format!("{}: {e}", path.display()))?;
         }
         Ok(path)
+    }
+}
+
+fn console_file(path: &str, bytes: Vec<u8>) -> ConsoleFile {
+    ConsoleFile {
+        path: path.to_string(),
+        sha256: sha256_hex(&bytes),
+        bytes,
     }
 }
 
@@ -268,8 +323,13 @@ mod tests {
             target_for("UNIX", "Red Hat Enterprise Linux 9 for x86-64"),
             Target::Linux(Arch::Amd64)
         );
-        assert!(matches!(
+        assert_eq!(
             target_for("Windows", "Microsoft Windows 64-bit"),
+            Target::Windows
+        );
+        assert_eq!(target_for("Windows", "Windows (x86-64)"), Target::Windows);
+        assert!(matches!(
+            target_for("Windows", "Windows for ARM64"),
             Target::Unsupported(_)
         ));
         assert!(matches!(
@@ -294,13 +354,22 @@ mod tests {
         assert!(docs
             .iter()
             .all(|d| d.name.starts_with("OPCUA.") && !d.name.starts_with("OPCUA.Tests.")));
-        for arch in [Arch::Amd64, Arch::Arm64] {
-            let a = p.artifacts(&Target::Linux(arch)).unwrap();
+        for t in [
+            Target::Linux(Arch::Amd64),
+            Target::Linux(Arch::Arm64),
+            Target::Windows,
+        ] {
+            let a = p.artifacts(&t).unwrap();
             assert_eq!(a.len(), 3);
             assert!(a
                 .iter()
                 .all(|x| x.sha256.len() == 64 && !x.bytes.is_empty()));
         }
+        let c = p.console_files("../api").unwrap();
+        assert_eq!(c.last().unwrap().path, "index.html");
+        assert!(c.iter().any(|f| f.path.ends_with(".js")));
+        let config = c.iter().find(|f| f.path == "config.json").unwrap();
+        assert_eq!(config.bytes, br#"{"apiBaseUrl":"../api"}"#);
     }
 
     #[test]

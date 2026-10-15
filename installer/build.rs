@@ -1,5 +1,5 @@
-//! Embeds the installer payload (ObjectScript sources and native libraries from the
-//! repository) in the binary, so a downloaded executable needs no checkout.
+//! Embeds the installer payload (ObjectScript sources, native libraries and the console
+//! build from the repository) in the binary, so a downloaded executable needs no checkout.
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -19,8 +19,14 @@ fn main() {
         "backend/src/OPCUA",
         "installer/objectscript",
         "backend/native",
+        files::CONSOLE_DIR,
     ] {
         println!("cargo:rerun-if-changed={}", root.join(dir).display());
+    }
+    if !root.join(files::CONSOLE_INDEX).is_file() {
+        println!(
+            "cargo:warning=The OPC UA Console is not built, so this installer cannot install it. Run `npm ci && npx ng build` in webapp/, then build again."
+        );
     }
     let list = files::list(root).expect("reading the payload from the repository");
     let mut code = String::from("pub static FILES: &[(&str, &[u8])] = &[\n");

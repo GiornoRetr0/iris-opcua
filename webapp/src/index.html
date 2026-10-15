@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <title>OPC UA Console</title>
-  <base href="/">
+  <!-- No <base>: hash routes push "#/x", which a base would resolve against the
+       directory, dropping index.html. IRIS serves no default page, so reload 404s. -->
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/png" href="intersystems-logo.png">
   <!-- Inter font -->

@@ -1,8 +1,10 @@
 //! Inspect, plan, apply and verify, by calling `IRISConfig.ClientInstaller` over Atelier.
 
 use crate::atelier::{Client, Error};
+use crate::config;
+use crate::files;
 use crate::log;
-use crate::payload::{self, Artifact, Payload, Target};
+use crate::payload::{self, Artifact, ConsoleFile, Payload, Target};
 use base64::Engine;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -134,6 +136,8 @@ pub struct Plan {
     pub create_namespace: bool,
     pub app_path: String,
     pub create_app: bool,
+    pub ui_path: String,
+    pub create_ui: bool,
     pub target: Target,
     pub files: Vec<(Artifact, FileAction, String)>,
 }
@@ -258,8 +262,14 @@ impl<'a> Installer<'a> {
         serde_json::from_value(v["files"].clone()).map_err(|e| format!("InspectFiles: {e}"))
     }
 
-    pub fn verify(&self, ns: &str, path: &str) -> Result<Verification, String> {
-        let v = self.call("Verify", &[json!(ns), json!(path)])?;
+    pub fn inspect_ui(&self, path: &str, ns: &str) -> Result<App, String> {
+        let v = self.call_ok("InspectUi", &[json!(path), json!(ns)])?;
+        serde_json::from_value(v["app"].clone()).map_err(|e| format!("InspectUi: {e}"))
+    }
+
+    /// Checks the backend, and the console at `ui_path`.
+    pub fn verify(&self, ns: &str, path: &str, ui_path: &str) -> Result<Verification, String> {
+        let v = self.call("Verify", &[json!(ns), json!(path), json!(ui_path)])?;
         if v["checks"].is_null() {
             return Err(v["message"].as_str().unwrap_or("Verify failed").to_string());
         }
@@ -267,7 +277,13 @@ impl<'a> Installer<'a> {
     }
 
     /// Read-only preflight. Returns the plan, or every blocker found.
-    pub fn preflight(&self, info: &Info, ns: &str, app_path: &str) -> Result<Plan, Vec<Blocker>> {
+    pub fn preflight(
+        &self,
+        info: &Info,
+        ns: &str,
+        app_path: &str,
+        ui_path: &str,
+    ) -> Result<Plan, Vec<Blocker>> {
         let mut blockers = Vec::new();
         let mut block = |t: &str, b: String| {
             blockers.push(Blocker {
@@ -281,7 +297,7 @@ impl<'a> Installer<'a> {
             block(
                 "Unsupported server platform",
                 format!(
-                    "IRIS reports {p}. This installer supports Linux x86-64 and ARM64 servers."
+                    "IRIS reports {p}. This installer supports Linux x86-64 and ARM64 servers and Windows x86-64 servers."
                 ),
             );
         }
@@ -291,10 +307,15 @@ impl<'a> Installer<'a> {
         }
         let absent = self.payload.missing_files();
         if !absent.is_empty() {
+            let console = if absent.iter().any(|f| f == files::CONSOLE_INDEX) {
+                " The OPC UA Console was not built: run `npm ci && npx ng build` in webapp/, then rebuild this installer."
+            } else {
+                ""
+            };
             block(
                 "Source payload incomplete",
                 format!(
-                    "Missing from {}: {}",
+                    "Missing from {}: {}.{console}",
                     self.payload.origin(),
                     absent.join(", ")
                 ),
@@ -326,8 +347,15 @@ impl<'a> Installer<'a> {
             Err(e) => block("REST application check failed", e),
         }
 
+        let mut create_ui = false;
+        match self.inspect_ui(ui_path, ns) {
+            Ok(a) if a.state == "conflict" => block("Console conflict", a.reason),
+            Ok(a) => create_ui = a.state == "missing",
+            Err(e) => block("Console check failed", e),
+        }
+
         let mut files = Vec::new();
-        if let Target::Linux(_) = target {
+        if !matches!(target, Target::Unsupported(_)) {
             match self.payload.artifacts(&target) {
                 Ok(artifacts) => {
                     let names: Vec<&str> = artifacts.iter().map(|a| a.name).collect();
@@ -384,6 +412,8 @@ impl<'a> Installer<'a> {
                 create_namespace,
                 app_path: app_path.into(),
                 create_app,
+                ui_path: ui_path.into(),
+                create_ui,
                 target,
                 files,
             })
@@ -408,6 +438,67 @@ impl<'a> Installer<'a> {
         }
         let v = self.call_ok("CommitFile", &[json!(a.name), json!(a.sha256)])?;
         Ok(v["action"].as_str().unwrap_or("installed").to_string())
+    }
+
+    /// Upload the console into the directory IRIS serves it from, then create its web
+    /// application. Files are staged and verified before any replaces the current console.
+    pub fn install_console(&self, plan: &Plan) -> Result<String, String> {
+        let path = &plan.ui_path;
+        let api = config::relative_path(path, &plan.app_path);
+        let console = self.payload.console_files(&api)?;
+        self.call_ok("PrepareUi", &[json!(path), json!(plan.namespace)])?;
+        for f in &console {
+            self.stage_console_file(path, f)?;
+        }
+        let manifest: Vec<Value> = console
+            .iter()
+            .map(|f| json!({"path": f.path, "sha256": f.sha256}))
+            .collect();
+        let c = self.call_ok(
+            "CommitUi",
+            &[json!(path), json!(Value::Array(manifest).to_string())],
+        )?;
+        let a = self.call_ok("CreateUiApp", &[json!(path), json!(plan.namespace)])?;
+        log::write(&format!(
+            "console: {} files in {}",
+            console.len(),
+            c["directory"].as_str().unwrap_or("")
+        ));
+        Ok(format!(
+            "{} files; {} {path}",
+            console.len(),
+            a["action"].as_str().unwrap_or("")
+        ))
+    }
+
+    fn stage_console_file(&self, path: &str, f: &ConsoleFile) -> Result<(), String> {
+        let engine = base64::engine::general_purpose::STANDARD;
+        // An empty file still needs one call, to create it.
+        let chunks: Vec<&[u8]> = if f.bytes.is_empty() {
+            vec![&[]]
+        } else {
+            f.bytes.chunks(CHUNK).collect()
+        };
+        for (i, chunk) in chunks.into_iter().enumerate() {
+            self.call_ok(
+                "StageUiChunk",
+                &[
+                    json!(path),
+                    json!(f.path),
+                    json!(engine.encode(chunk)),
+                    json!(if i == 0 { 1 } else { 0 }),
+                ],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Unauthenticated `GET {base}{ui}/index.html`: what a browser sees before signing in.
+    pub fn console_reachable(&self, ui_path: &str) -> bool {
+        matches!(
+            self.client.get_anonymous(&format!("{ui_path}/index.html")),
+            Ok((200, body)) if body.contains("<app-root")
+        )
     }
 
     pub fn create_namespace(&self, ns: &str) -> Result<String, String> {
