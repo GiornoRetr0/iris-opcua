@@ -266,6 +266,10 @@ ClassMethod TestDeployDoesNotAutostart(pURL As %String, ByRef pPass, ByRef pFail
 ClassMethod TestOtherProductionNotStopped(ByRef pPass, ByRef pFail) [ Private ]
 {
     set tOther = ..#OtherProductionClass
+    // Starting a production records it as the namespace's last production, which
+    // then names the default for config item lookups (FindItemByConfigName). Put
+    // the previous one back, or that default outlives the deleted class.
+    set tLastProduction = $Get(^Ens.Configuration("csp", "LastProduction"))
     Try {
         set tSC = ##class(Ens.Director).StopProduction(10, 1)
         do ..Check("pipeline production stops", $$$ISOK(tSC), 1, .pPass, .pFail)
@@ -296,6 +300,7 @@ ClassMethod TestOtherProductionNotStopped(ByRef pPass, ByRef pFail) [ Private ]
     do ##class(Ens.Director).GetProductionStatus(.tRunning, .tState)
     if tRunning = tOther do ##class(Ens.Director).StopProduction(10, 1)
     if ##class(%Dictionary.ClassDefinition).%ExistsId(tOther) do $System.OBJ.Delete(tOther, "-d")
+    if tLastProduction '= "" set ^Ens.Configuration("csp", "LastProduction") = tLastProduction
 }
 
 /// Start the pipeline production again if it was running before the suite, or
