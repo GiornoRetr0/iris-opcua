@@ -407,8 +407,7 @@ Method OnTask() As %Status
 					$$$LOGWARNING("Maximum number of sequential empty results exceeded. Disconnecting.")
 
 					// Disconnecting deletes the subscription: the session is closed with
-					// deleteSubscriptions = true. See DeleteSubscriptionSet before adding
-					// an explicit delete here.
+					// deleteSubscriptions = true, so no DeleteSubscriptionSet is needed.
 					try {
 						set tSC = ..Client.Disconnect()
 					} catch (e) {

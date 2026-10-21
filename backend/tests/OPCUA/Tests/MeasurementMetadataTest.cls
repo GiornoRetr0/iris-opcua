@@ -1196,14 +1196,26 @@ ClassMethod TestLiveSubscription(pURL As %String, ByRef pPass, ByRef pFail)
         do ..Check("subscribed SA1 has a server timestamp", tObj.SA1.ServerTimeStamp '= "", 1, .pPass, .pFail)
         do ..Check("subscribed SA2 has its own source timestamp", tObj.SA2.SourceTimeStamp '= "", 1, .pPass, .pFail)
         do ..Check("subscribed VT5 has a value", tObj.VT5.Value '= "", 1, .pPass, .pFail)
+
+        // An explicit delete leaves the client usable: a new subscription on it
+        // needs no reset. With a native library older than 2026-10-21 the
+        // Disconnect() below kills this process (signal 11) instead.
+        set tSC = tClient.DeleteSubscriptionSet(tHandle)
+        do ..Check("DeleteSubscriptionSet succeeds", $$$ISOK(tSC), 1, .pPass, .pFail)
+        set tPublishing = 200, tLifetime = 10000, tKeepAlive = 10
+        set tSC = tClient.CreateSubscriptionSetB(.tHandle, tSpec, .tPublishing, .tLifetime, .tKeepAlive, 100, tSampling, 1, 0)
+        do ..Check("a new subscription after the delete needs no reset", $$$ISOK(tSC), 1, .pPass, .pFail)
+        if $$$ISOK(tSC) {
+            hang 0.5
+            set tSC = tClient.PollSubscriptionSet(.tList, tHandle, 1000, 0, 1)
+            do ..Check("the new subscription polls", $$$ISOK(tSC), 1, .pPass, .pFail)
+        }
     } Catch (e) {
         set pFail = pFail + 1
         write "  FAIL exception: ", e.DisplayString(), !
     }
     // Tear down the way the subscription adapter does: Disconnect alone, which
-    // deletes the subscription on the server. Calling DeleteSubscriptionSet()
-    // and then Disconnect() aborts the process with a double free inside the
-    // native library (see OPCUA.Client.DeleteSubscriptionSet).
+    // deletes the subscription on the server.
     if $IsObject($Get(tClient)) {
         do tClient.Disconnect()
     }
