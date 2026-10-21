@@ -6,6 +6,8 @@ Items marked ✔ were checked against the running IRIS instance or confirmed in 
 code by hand. Everything else comes from reading the code; "plausible" means likely
 but not reproduced. No code was changed as part of this audit.
 
+Items marked ✅ have since been fixed; each one notes the fix and how it was verified.
+
 ## Summary
 
 The code is in better shape than most AI-generated ObjectScript. The classic syntax
@@ -20,7 +22,7 @@ leftover data).
 
 | # | Problem | Where | What goes wrong |
 |---|---|---|---|
-| 1 ✔ | **Every error from the native library shows the wrong message** | `Client.cls:65`, `Constants.inc:184` | Error code 29000 means something else in IRIS 2025.3. Every connect, browse or poll error reads *"Context class '<real error>' does not exist"*, in the event log and in REST responses. Use `$$$GeneralError` instead. |
+| 1 ✔ ✅ | ~~**Every error from the native library shows the wrong message**~~ **Fixed 2026-10-21** | `Client.cls:65`, `Constants.inc:184` | Error code 29000 means something else in IRIS 2025.3. Every connect, browse or poll error reads *"Context class '<real error>' does not exist"*, in the event log and in REST responses. Use `$$$GeneralError` instead. **Fix:** `DecodeError` now returns `$$$ERROR($$$GeneralError,tMsgTxt)`. `OPCUACLIENT` (29000) and the unused `OPCUAParameterMustBe` (29001, also an IRIS system error) are commented out in `Constants.inc`, so they can't be reused. Verified on IRIS 2025.3: the `OPCUA` and `Examples` packages compile clean, and a real failed connect now reads `ERROR #5001: OPC UA Error 0x80AE0000 [BadConnectionClosed] … Unable to connect to '…'`. The Studio export in `legacy/windows-studio/` still has the old code. |
 | 2 ✔ | **A device child whose name is only digits breaks the whole device** | `Resolver.cls:552` `NameKey()` | `NameKey("42")` returns an empty string. Using that as a subscript crashes the browse, so **every** column on that device is stored as NULL. Also, a name like `"10:30 Shift"` becomes `"30 Shift"`. |
 | 3 ✔ | **Deleting a schema keeps its rows** | `SchemaService.cls:161` | `$System.OBJ.Delete(cls,"-d")` has no `e` flag, so the data global survives, and the returned status is ignored. The storage global name comes from the class name (`^OPCUA.DS.AirConsD`). A new schema with the same name would therefore inherit the old rows under a different column layout. |
 | 4 ✔ | **Enabling a pipeline force-stops any other running production** | `DeployService.cls:396-404` | It calls `StopProduction(,1)` with no warning. On a client server this takes their unrelated production offline. `PortalPipelineTest` triggers it too, and never restores the original production. |

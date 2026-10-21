@@ -61,8 +61,9 @@ ClassMethod DecodeError(list As %String) As %Status [ Final ]
 		Set tTypeTxt=$$$Text("Undefined Error")
 	}
 	
-	//Quit $$$ERROR($$$OPCUACLIENT,tCode,tTypeTxt,tMsgTxt)
-	Quit $$$ERROR($$$OPCUACLIENT,tMsgTxt)
+	// $$$GeneralError (5001), not a private code: 29000 is an IRIS system error
+	// ("Context class '%1' does not exist") and would replace this message
+	Quit $$$ERROR($$$GeneralError,tMsgTxt)
 }
 
 /// Loads the IrisOPCUA library if necessary
