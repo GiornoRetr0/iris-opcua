@@ -50,6 +50,9 @@ ClassMethod Run(pURL As %String = "opc.tcp://plc") As %Boolean
     write !, "=== No server timestamp: nested folder (offline) ===", !
     do ..TestNoServerTSNested(.tPass, .tFail)
 
+    write !, "=== Schema delete removes its rows (offline) ===", !
+    do ..TestSchemaDelete(.tPass, .tFail)
+
     write !, "=== Live poll against ", pURL, " ===", !
     do ..TestLiveRow(pURL, .tPass, .tFail)
 
@@ -788,6 +791,54 @@ ClassMethod TestNoServerTSNested(ByRef pPass, ByRef pFail)
         do ..Check("SQL Motor_Temperature_SourceTS", tRS.%GetData(2), "2026-03-03 02:02:02", .pPass, .pFail)
         do ..Check("SQL Motor_Speed_Status", tRS.%GetData(3), 3, .pPass, .pFail)
         do ..Check("SQL Humidity_Value", tRS.%GetData(4), 45, .pPass, .pFail)
+    } Catch (e) {
+        set pFail = pFail + 1
+        write "  FAIL exception: ", e.DisplayString(), !
+    }
+    do ..DropSchema(tClass)
+}
+
+// ==================== schema delete ====================
+
+/// Deleting a schema removes its rows. The data global is named after the
+/// class, so rows left behind would reappear in a new schema of the same name.
+ClassMethod TestSchemaDelete(ByRef pPass, ByRef pFail)
+{
+    set tClass = ..#TestPackage_".DeleteSchema"
+    Try {
+        set tSC = ..BuildGeneratedSchema(tClass, "TmpDeleteSchema", 0)
+        if $$$ISERR(tSC) {
+            set pFail = pFail + 1
+            write "  FAIL could not generate schema: ", $System.Status.GetOneErrorText(tSC), !
+            quit
+        }
+        set tGlobal = $LI(^OPCUA.DataSource(tClass), 2)
+        set tSerial = ##class(%Dictionary.CompiledProperty).%OpenId(tClass_"||Motor").Type
+
+        // Element 1 is the %%CLASSNAME slot, empty as in every RowWriter row.
+        set tRow = $LB("")
+        $$$ThrowOnError($classmethod(tClass, "SaveSourcedData", .tRow, .tId))
+        do ..Check("row is stored before delete", $Data(@tGlobal) > 0, 1, .pPass, .pFail)
+
+        set tSC = ##class(OPCUA.REST.SchemaService).Delete({"className": (tClass)}, .tResult)
+        do ..Check("Delete succeeds", $$$ISOK(tSC), 1, .pPass, .pFail)
+        if $$$ISERR(tSC) {
+            write "       ", $System.Status.GetOneErrorText(tSC), !
+            quit
+        }
+        do ..Check("Delete reports deleted", tResult.deleted, 1, .pPass, .pFail)
+        do ..Check("data global is gone", $Data(@tGlobal), 0, .pPass, .pFail)
+        do ..Check("schema class is gone", ##class(%Dictionary.ClassDefinition).%ExistsId(tClass), 0, .pPass, .pFail)
+        do ..Check("folder serial class is gone", ##class(%Dictionary.ClassDefinition).%ExistsId(tSerial), 0, .pPass, .pFail)
+        do ..Check("projection entry is gone", $Data(^OPCUA.DataSource(tClass)), 0, .pPass, .pFail)
+
+        // A new schema with the same name, and a different layout, must start empty.
+        set tCols = []
+        do tCols.%Push(..Column("Pressure", "OPCUA.Types.DoubleDataValue", $LB("Pressure")))
+        $$$ThrowOnError(##class(OPCUA.REST.SchemaService).GenerateSchemaClass(tClass, "TmpDeleteSchema", tCols, 1, .tColNS, .tSerials))
+        set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT COUNT(*) FROM "_..TableName(tClass))
+        do tRS.%Next()
+        do ..Check("recreated schema has no rows", tRS.%GetData(1), 0, .pPass, .pFail)
     } Catch (e) {
         set pFail = pFail + 1
         write "  FAIL exception: ", e.DisplayString(), !

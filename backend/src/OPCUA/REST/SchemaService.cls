@@ -157,8 +157,16 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 			Quit
 		}
 
+		// Remove the rows first: deleting the class leaves its data global, whose
+		// name comes from the class name, so a new schema with the same name would
+		// inherit them under a different column layout. %KillExtent, not the "e"
+		// delete flag: that deletes row by row, and refuses if any row won't open.
+		set tSC = $classmethod(tClassName, "%KillExtent")
+		Quit:$$$ISERR(tSC)
+
 		do ##class(OPCUA.REST.PipelineService).DeleteSerialSubclasses(tClassName)
-		do $System.OBJ.Delete(tClassName, "-d")
+		set tSC = $System.OBJ.Delete(tClassName, "-d")
+		Quit:$$$ISERR(tSC)
 		kill ^OPCUA.DataSource(tClassName)
 
 		set pResult.deleted = 1
