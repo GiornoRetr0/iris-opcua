@@ -56,6 +56,9 @@ ClassMethod Run(pURL As %String = "opc.tcp://plc") As %Boolean
     write !, "=== Short or gapped result list (offline) ===", !
     do ..TestShortInput(.tPass, .tFail)
 
+    write !, "=== Projection reports its own errors (offline) ===", !
+    do ..TestProjectionErrors(.tPass, .tFail)
+
     write !, "=== Live poll against ", pURL, " ===", !
     do ..TestLiveRow(pURL, .tPass, .tFail)
 
@@ -879,6 +882,59 @@ ClassMethod TestShortInput(ByRef pPass, ByRef pFail)
         write "  FAIL exception: ", e.DisplayString(), !
     }
     do ..DropSchema(tClass)
+}
+
+// ==================== projection errors ====================
+
+/// A property with no OPCUANAMESPACE, and no class default, fails the compile
+/// with the Projection's own message. It used to fail with <UNDEFINED> cls. A
+/// schema with no data columns compiles: ProcessObj used to throw <UNDEFINED> tSC.
+ClassMethod TestProjectionErrors(ByRef pPass, ByRef pFail)
+{
+    set tClass = ..#TestPackage_".ProjectionSchema"
+    Try {
+        set tSC = ..CompileDefinition(tClass, "Temp", 0)
+        do ..Check("missing namespace fails the compile", $$$ISERR(tSC), 1, .pPass, .pFail)
+        set tText = $System.Status.GetErrorText(tSC)
+        do ..Check("error is the Projection's message", tText [ "OPCUANAMESPACE parameter is not defined for property Temp", 1, .pPass, .pFail)
+        do ..Check("error names the real class parameter", tText [ "OPCUDEFAULTANAMESPACE", 1, .pPass, .pFail)
+        do ..Check("error is not an <UNDEFINED>", tText [ "<UNDEFINED>", 0, .pPass, .pFail)
+        do ..DropSchema(tClass)
+
+        set tSC = ..CompileDefinition(tClass, "NodePath", 1)
+        do ..Check("schema with no data columns compiles", $$$ISOK(tSC), 1, .pPass, .pFail)
+        if $$$ISERR(tSC) write "       ", $System.Status.GetErrorText(tSC), !
+    } Catch (e) {
+        set pFail = pFail + 1
+        write "  FAIL exception: ", e.DisplayString(), !
+    }
+    do ..DropSchema(tClass)
+}
+
+/// Define and compile a one-property Definition subclass. pPlain 1 types the
+/// property %String, which the Projection skips when it is NodePath.
+ClassMethod CompileDefinition(pClassName As %String, pPropName As %String, pPlain As %Boolean) As %Status [ Private ]
+{
+    #dim tSC As %Status = $$$OK
+    Try {
+        do ..DropSchema(pClassName)
+        set tDef = ##class(%Dictionary.ClassDefinition).%New(pClassName)
+        set tDef.Super = "%Persistent,OPCUA.DataSource.Definition"
+        set tParam = ##class(%Dictionary.ParameterDefinition).%New()
+        set tParam.Name = "OPCUADATASOURCE"
+        set tParam.Default = "TmpProjectionSchema"
+        do tDef.Parameters.Insert(tParam)
+        set tProp = ##class(%Dictionary.PropertyDefinition).%New()
+        set tProp.Name = pPropName
+        set tProp.Type = $Select(pPlain:"%String", 1:"OPCUA.Types.DoubleDataValue")
+        do tProp.Parameters.SetAt(pPropName, "OPCUANODENAME")
+        do tDef.Properties.Insert(tProp)
+        $$$ThrowOnError(tDef.%Save())
+        set tSC = $System.OBJ.Compile(pClassName, "ck-d")
+    } Catch (e) {
+        set tSC = e.AsStatus()
+    }
+    Quit tSC
 }
 
 // ==================== schema delete ====================
