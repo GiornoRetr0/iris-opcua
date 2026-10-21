@@ -106,6 +106,12 @@ ClassMethod TestParsing(ByRef pPass, ByRef pFail)
     // An entirely unusable setting is an error
     set tSC = ##class(OPCUA.DataSource.Resolver).ParseDeviceNodePaths("", .tDevices, .tErrors)
     do ..Check("empty setting is an error", $$$ISERR(tSC), 1, .pPass, .pFail)
+
+    // --- name keys: exact, nothing stripped ---
+    // A digits-only name once keyed to "" and broke the whole device's browse.
+    do ..Check("NameKey keeps a digits-only name", ##class(OPCUA.DataSource.Resolver).NameKey("42"), "42", .pPass, .pFail)
+    do ..Check("NameKey keeps a leading N: part", ##class(OPCUA.DataSource.Resolver).NameKey("10:30 Shift"), "10:30 Shift", .pPass, .pFail)
+    do ..Check("NameKey is case-sensitive", ##class(OPCUA.DataSource.Resolver).NameKey("Temp")=##class(OPCUA.DataSource.Resolver).NameKey("temp"), 0, .pPass, .pFail)
 }
 
 /// Parse one path, flattening the status into an error string for readability.

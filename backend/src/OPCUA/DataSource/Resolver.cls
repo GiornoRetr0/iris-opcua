@@ -546,12 +546,14 @@ ClassMethod BrowseIntoMap(pClient As OPCUA.Client, pNS As %Integer, pId, pIdType
 
 /// Build the lookup key for a node name.
 ///
-/// A BrowseName arrives from the server as "<namespaceIndex>:<name>" in some
-/// stacks and bare in others, so strip any numeric namespace prefix. Matching is
-/// case-sensitive, as OPC UA BrowseNames are.
+/// The key is the name itself: matching is exact and case-sensitive, as OPC UA
+/// BrowseNames are. Do not strip a "<namespaceIndex>:" prefix. The native library
+/// delivers a BrowseName as $LB(name, nsIndex), so no prefix ever arrives, and
+/// stripping one turned a digits-only name ("42") into an empty subscript and
+/// "10:30 Shift" into "30 Shift".
 ClassMethod NameKey(pName As %String) As %String [ CodeMode = expression ]
 {
-$Select($Piece(pName, ":", 1) ? 1.N: $Piece(pName, ":", 2, *), 1: pName)
+pName
 }
 
 }
