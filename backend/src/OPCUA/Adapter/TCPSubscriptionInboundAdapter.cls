@@ -404,18 +404,11 @@ Method OnTask() As %Status
 
 				if ..QtySequentialEmptyResults >= ..ReestablishOnEmptyResult {
 
-					$$$LOGWARNING("Maximum number of sequential empty results exceeded. Disconnecting.")	
+					$$$LOGWARNING("Maximum number of sequential empty results exceeded. Disconnecting.")
 
-					try {
-						set tSC = ..Client.ReadBulkClear(..QueryHandle)
-					} catch (e) {
-						set tSC = e.AsStatus()
-					}
-
-					if $$$ISERR(tSC) {
-						$$$TRACE("Ignoring error encountered when deleting old subscription : "_$SYSTEM.Status.GetErrorText(tSC))
-					}
-
+					// Disconnecting deletes the subscription: the session is closed with
+					// deleteSubscriptions = true. See DeleteSubscriptionSet before adding
+					// an explicit delete here.
 					try {
 						set tSC = ..Client.Disconnect()
 					} catch (e) {
@@ -444,16 +437,6 @@ Method OnTask() As %Status
 	} 
 
 	Quit $$$OK
-}
-
-/// Used internally to disconnect the OPC-UA client.
-Method OnTearDown() As %Status
-{
-	try {
-		do ..Client.ReadBulkClear(..QueryHandle)	// Perhaps unnecessary
-	} catch (e) {}
-
-	return ##super()
 }
 
 }

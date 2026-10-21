@@ -1200,12 +1200,11 @@ ClassMethod TestLiveSubscription(pURL As %String, ByRef pPass, ByRef pFail)
         set pFail = pFail + 1
         write "  FAIL exception: ", e.DisplayString(), !
     }
-    // Tear down exactly the way TCPSubscriptionInboundAdapter.OnTearDown() does.
-    // Calling DeleteSubscriptionSet() and then Disconnect() aborts the process
-    // with a double free inside the native library, so the shipping adapter does
-    // not do it either and neither does this test.
+    // Tear down the way the subscription adapter does: Disconnect alone, which
+    // deletes the subscription on the server. Calling DeleteSubscriptionSet()
+    // and then Disconnect() aborts the process with a double free inside the
+    // native library (see OPCUA.Client.DeleteSubscriptionSet).
     if $IsObject($Get(tClient)) {
-        Try { do tClient.ReadBulkClear(tHandle) } Catch (eClear) {}
         do tClient.Disconnect()
     }
     do ..DropSchema(tClass)

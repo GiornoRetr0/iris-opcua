@@ -823,6 +823,12 @@ Method PollSubscriptionSet(Output Results As %List, QueryHandle As %Integer, Pol
 }
 
 /// Deletes a set of subscriptions with a given server.
+///
+/// Do not call this before <method>Disconnect</method> or <method>%Close</method>:
+/// the native library frees the subscription here but keeps a pointer to it, and
+/// frees it again when the client is reset or closed, which aborts the process.
+/// Disconnecting is enough on its own. It closes the session with
+/// deleteSubscriptions = true, so the server drops every subscription.
 Method DeleteSubscriptionSet(QueryHandle As %Integer) As %Status [ Final ]
 {
 	#dim tSC As %Status = $$$OK
