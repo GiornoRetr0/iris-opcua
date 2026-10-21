@@ -31,10 +31,24 @@ Parameter DeployItemName = "ZZPortalDeployTest";
 
 Parameter ProductionClass = "OPCUA.Pipeline.Production";
 
+/// A throwaway production standing in for someone else's, in test 6.
+Parameter OtherProductionClass = "OPCUA.Tests.TmpOtherProduction";
+
 /// Run the whole suite. Returns 1 if every check passed.
 ClassMethod Run(pURL As %String = "opc.tcp://plc") As %Boolean
 {
     set tPass = 0, tFail = 0
+
+    // Starting the pipeline production would be refused, and this suite never
+    // stops a production it does not own.
+    set tSC = ##class(OPCUA.REST.DeployService).CheckNoOtherProduction()
+    if $$$ISERR(tSC) {
+        write "  FAIL cannot run: ", $System.Status.GetOneErrorText(tSC), !
+        quit 0
+    }
+    // Put the pipeline production back the way it was found.
+    do ##class(Ens.Director).GetProductionStatus(.tRunning, .tState)
+    set tWasRunning = (tRunning = ..#ProductionClass) && (tState = 1)
 
     Try {
         do ..Cleanup()
@@ -54,12 +68,16 @@ ClassMethod Run(pURL As %String = "opc.tcp://plc") As %Boolean
         write !, "=== 5. deploy creates the pipeline stopped ===", !
         do ..TestDeployDoesNotAutostart(pURL, .tPass, .tFail)
 
+        write !, "=== 6. enabling never stops another production ===", !
+        do ..TestOtherProductionNotStopped(.tPass, .tFail)
+
     } Catch (e) {
         set tFail = tFail + 1
         write "  FAIL exception: ", e.DisplayString(), !
     }
 
     do ..Cleanup()
+    do ..RestoreProduction(tWasRunning)
 
     write !, "-----------------------------------------", !
     write "passed: ", tPass, "   failed: ", tFail, !
@@ -240,6 +258,59 @@ ClassMethod TestDeployDoesNotAutostart(pURL As %String, ByRef pPass, ByRef pFail
     do ..Check("no rows collected before it is started", ..RowCountFor(..#DeploySchemaClass), 0, .pPass, .pFail)
 }
 
+/// Enabling a pipeline while another production holds the namespace is refused,
+/// and that production keeps running. It used to be force-stopped.
+///
+/// Uses the disabled item test 5 deployed, and a throwaway empty production as
+/// the "other" one, so nothing outside this suite is touched.
+ClassMethod TestOtherProductionNotStopped(ByRef pPass, ByRef pFail) [ Private ]
+{
+    set tOther = ..#OtherProductionClass
+    Try {
+        set tSC = ##class(Ens.Director).StopProduction(10, 1)
+        do ..Check("pipeline production stops", $$$ISOK(tSC), 1, .pPass, .pFail)
+        Quit:$$$ISERR(tSC)
+
+        set tSC = ..BuildOtherProduction()
+        do ..Check("other production compiles", $$$ISOK(tSC), 1, .pPass, .pFail)
+        Quit:$$$ISERR(tSC)
+        set tSC = ##class(Ens.Director).StartProduction(tOther)
+        do ..Check("other production starts", $$$ISOK(tSC), 1, .pPass, .pFail)
+        Quit:$$$ISERR(tSC)
+
+        set tSC = ##class(OPCUA.REST.PipelineService).Toggle({"name": (..#DeployItemName)}, .tRes)
+        do ..Check("enable is refused", $$$ISERR(tSC), 1, .pPass, .pFail)
+        do ..Check("refusal names the other production", $System.Status.GetOneErrorText(tSC) [ tOther, 1, .pPass, .pFail)
+        do ..Check("refused pipeline stays disabled", ..ItemEnabled(..#DeployItemName), 0, .pPass, .pFail)
+
+        set tSC = ##class(OPCUA.REST.DeployService).StartOrUpdateProduction()
+        do ..Check("StartOrUpdateProduction is refused", $$$ISERR(tSC), 1, .pPass, .pFail)
+
+        do ##class(Ens.Director).GetProductionStatus(.tRunning, .tState)
+        do ..Check("other production is still running", (tRunning = tOther) && (tState = 1), 1, .pPass, .pFail)
+    } Catch (e) {
+        set pFail = pFail + 1
+        write "  FAIL exception: ", e.DisplayString(), !
+    }
+
+    do ##class(Ens.Director).GetProductionStatus(.tRunning, .tState)
+    if tRunning = tOther do ##class(Ens.Director).StopProduction(10, 1)
+    if ##class(%Dictionary.ClassDefinition).%ExistsId(tOther) do $System.OBJ.Delete(tOther, "-d")
+}
+
+/// Start the pipeline production again if it was running before the suite, or
+/// stop it if the suite started it.
+ClassMethod RestoreProduction(pWasRunning As %Boolean) [ Private ]
+{
+    do ##class(Ens.Director).GetProductionStatus(.tRunning, .tState)
+    set tIsRunning = (tRunning = ..#ProductionClass) && (tState = 1)
+    if pWasRunning && 'tIsRunning {
+        do ##class(Ens.Director).StartProduction(..#ProductionClass)
+    } elseif 'pWasRunning && tIsRunning {
+        do ##class(Ens.Director).StopProduction(10, 1)
+    }
+}
+
 // ==================== fixtures ====================
 
 /// A schema whose columns match nodes the plc mock server exposes, written the
@@ -319,6 +390,29 @@ ClassMethod EnsureProduction() As %Status [ Private ]
         $$$ThrowOnError(tSC)
         set tSC = $System.OBJ.Compile(..#ProductionClass, "ck-d")
         $$$ThrowOnError(tSC)
+    } Catch (e) {
+        set tSC = e.AsStatus()
+    }
+    Quit tSC
+}
+
+/// An empty production for <method>TestOtherProductionNotStopped</method>.
+ClassMethod BuildOtherProduction() As %Status [ Private ]
+{
+    #dim tSC As %Status = $$$OK
+    Try {
+        // A leftover from an interrupted run would make %Save fail
+        if ##class(%Dictionary.ClassDefinition).%ExistsId(..#OtherProductionClass) {
+            $$$ThrowOnError($System.OBJ.Delete(..#OtherProductionClass, "-d"))
+        }
+        set tClassDef = ##class(%Dictionary.ClassDefinition).%New(..#OtherProductionClass)
+        set tClassDef.Super = "Ens.Production"
+        set tXData = ##class(%Dictionary.XDataDefinition).%New()
+        set tXData.Name = "ProductionDefinition"
+        do tXData.Data.Write("<Production Name="""_..#OtherProductionClass_"""></Production>")
+        do tClassDef.XDatas.Insert(tXData)
+        $$$ThrowOnError(tClassDef.%Save())
+        $$$ThrowOnError($System.OBJ.Compile(..#OtherProductionClass, "ck-d"))
     } Catch (e) {
         set tSC = e.AsStatus()
     }

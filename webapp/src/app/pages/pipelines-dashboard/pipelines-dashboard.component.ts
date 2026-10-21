@@ -142,6 +142,18 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
       </div>
       }
 
+      @if (actionError()) {
+        <div class="mb-6 flex items-start gap-3 bg-error-container/40 border border-error/20 rounded-xl px-4 py-3">
+          <span class="material-symbols-outlined text-error text-xl">error</span>
+          <div class="flex-1">
+            <p class="text-sm font-semibold text-on-error-container">{{ actionError() }}</p>
+          </div>
+          <button (click)="actionError.set('')" class="text-on-error-container/60 hover:text-on-error-container">
+            <span class="material-symbols-outlined text-lg">close</span>
+          </button>
+        </div>
+      }
+
       <!-- Pipeline Cards -->
       <div class="space-y-6">
         @if (loading()) {
@@ -586,9 +598,14 @@ export class PipelinesDashboardComponent implements OnInit, OnDestroy {
     this.router.navigate(['/pipelines/new']);
   }
 
+  /** Why the last enable/disable was refused, e.g. another production holds the namespace. */
+  actionError = signal('');
+
   togglePipeline(pipeline: Pipeline): void {
+    this.actionError.set('');
     this.api.togglePipeline(pipeline.name).subscribe({
       next: () => this.loadPipelines(),
+      error: (err) => this.actionError.set(err?.error?.error || err?.message || 'Request failed'),
     });
   }
 

@@ -277,6 +277,12 @@ ClassMethod Toggle(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		}
 
 		set tNewState = 'tItem.Enabled
+
+		// Check before saving, so a refused enable leaves the pipeline disabled
+		if tNewState {
+			set tSC = ##class(OPCUA.REST.DeployService).CheckNoOtherProduction()
+			Quit:$$$ISERR(tSC)
+		}
 		set tItem.Enabled = tNewState
 
 		set tSC = tProd.%Save()

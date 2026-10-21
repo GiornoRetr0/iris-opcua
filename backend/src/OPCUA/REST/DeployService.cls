@@ -383,6 +383,8 @@ ClassMethod AddSettingIfNotEmpty(pItem As Ens.Config.Item, pTarget As %String, p
 }
 
 /// Start the production, or update it if already running.
+/// Refuses, without stopping anything, while another production holds the
+/// namespace (see <method>CheckNoOtherProduction</method>).
 ClassMethod StartOrUpdateProduction() As %Status
 {
 	set tSC = ##class(Ens.Director).GetProductionStatus(.tProdName, .tState)
@@ -393,15 +395,29 @@ ClassMethod StartOrUpdateProduction() As %Status
 		Quit ##class(Ens.Director).UpdateProduction()
 	}
 
-	if (tProdName '= "") && (tState = 1) {
-		// A different production is running — stop it first
-		set tSC = ##class(Ens.Director).StopProduction(, 1)
-		if $$$ISERR(tSC) Quit tSC
-		hang 1
-	}
+	// Never stop someone else's production to make room for ours
+	set tSC = ..CheckNoOtherProduction()
+	Quit:$$$ISERR(tSC) tSC
 
 	// Start our production
 	Quit ##class(Ens.Director).StartProduction(..#ProductionClass)
+}
+
+/// Error if a production other than ours holds this namespace.
+///
+/// A namespace runs one production at a time, so ours cannot start while another
+/// is running, suspended or troubled. That one may belong to someone else, so it
+/// is reported, not stopped.
+ClassMethod CheckNoOtherProduction() As %Status
+{
+	do ##class(Ens.Director).GetProductionStatus(.tProdName, .tState)
+	if (tProdName = "") || (tProdName = ..#ProductionClass) Quit $$$OK
+
+	// State: Running = 1, Suspended = 3, Troubled = 4
+	set tStateText = $Case(tState, 1:"running", 3:"suspended", 4:"troubled", :"")
+	if tStateText = "" Quit $$$OK
+
+	Quit $$$ERROR($$$GeneralError, "Production '"_tProdName_"' is "_tStateText_" in namespace "_$Namespace_". A namespace runs one production at a time, and pipelines run in '"_..#ProductionClass_"'. Stop '"_tProdName_"' first; it was not changed.")
 }
 
 }
