@@ -598,15 +598,22 @@ export class PipelinesDashboardComponent implements OnInit, OnDestroy {
     this.router.navigate(['/pipelines/new']);
   }
 
-  /** Why the last enable/disable was refused, e.g. another production holds the namespace. */
+  /**
+   * Why the last enable/disable or delete failed, e.g. another production holds
+   * the namespace. Without it a refused action looked like a click that did nothing.
+   */
   actionError = signal('');
 
   togglePipeline(pipeline: Pipeline): void {
     this.actionError.set('');
     this.api.togglePipeline(pipeline.name).subscribe({
       next: () => this.loadPipelines(),
-      error: (err) => this.actionError.set(err?.error?.error || err?.message || 'Request failed'),
+      error: (err) => this.actionError.set(this.message(err)),
     });
+  }
+
+  private message(err: any): string {
+    return err?.error?.error || err?.message || 'Request failed';
   }
 
   editPipeline(pipeline: Pipeline): void {
@@ -643,8 +650,10 @@ export class PipelinesDashboardComponent implements OnInit, OnDestroy {
     const p = this.pendingDelete();
     if (!p) return;
     this.pendingDelete.set(null);
+    this.actionError.set('');
     this.api.deletePipeline(p.name).subscribe({
       next: () => this.loadPipelines(),
+      error: (err) => this.actionError.set(this.message(err)),
     });
   }
 
