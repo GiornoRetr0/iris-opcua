@@ -33,6 +33,8 @@ Method OnProcessInput(ByRef pInputAsList As %RegisteredObject, Output pOutput As
 	try {
 		set tMasks = ..Adapter.RowSourceMasks
 		set tPaths = ..Adapter.RowSourcePaths
+		set tSC = ..RowWriter.CheckInput(.pInputAsList, tMasks)
+		Quit:$$$ISERR(tSC)
 		set tResultIdx = 1
 		for iRS=1:1:$LL(tMasks) {
 			set tSC = ..RowWriter.BuildRow(.pInputAsList, $LI(tMasks, iRS), $LI(tPaths, iRS), .tResultIdx, .tRowData, .tQualityChanges)

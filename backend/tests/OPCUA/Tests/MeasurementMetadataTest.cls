@@ -53,6 +53,9 @@ ClassMethod Run(pURL As %String = "opc.tcp://plc") As %Boolean
     write !, "=== Schema delete removes its rows (offline) ===", !
     do ..TestSchemaDelete(.tPass, .tFail)
 
+    write !, "=== Short or gapped result list (offline) ===", !
+    do ..TestShortInput(.tPass, .tFail)
+
     write !, "=== Live poll against ", pURL, " ===", !
     do ..TestLiveRow(pURL, .tPass, .tFail)
 
@@ -798,6 +801,86 @@ ClassMethod TestNoServerTSNested(ByRef pPass, ByRef pFail)
     do ..DropSchema(tClass)
 }
 
+// ==================== short input ====================
+
+/// An empty slot in a poll result stores NULL for that one column, and the
+/// device after it is still built. A result list of the wrong length is refused
+/// by CheckInput, because every reading after a gap would shift columns.
+ClassMethod TestShortInput(ByRef pPass, ByRef pFail)
+{
+    set tClass = ..#TestPackage_".ShortInputSchema"
+    Try {
+        set tSC = ..BuildGeneratedSchema(tClass, "TmpShortInputSchema", 1)
+        if $$$ISERR(tSC) {
+            set pFail = pFail + 1
+            write "  FAIL could not generate schema: ", $System.Status.GetOneErrorText(tSC), !
+            quit
+        }
+        set tSC = ..ColumnIndex(tClass, .tIdx, .tColCount)
+        $$$ThrowOnError(tSC)
+
+        // Two devices, every column resolved. Device 1's second reading is an
+        // empty slot; everything else is a real DataValue.
+        set tMask = ""
+        for i=1:1:tColCount { set tMask = tMask _ $LB(1) }
+        set tMasks = $LB(tMask, tMask)
+        set tInput = $LB("")
+        for iDev=1:1:2 {
+            for i=1:1:tColCount {
+                if (iDev = 1) && (i = 2) {
+                    // $LB() is one undefined element: what $List throws on
+                    set tInput = tInput _ $LB()
+                    continue
+                }
+                set tInput = tInput _ $LB($LB("2026-04-04 04:04:0"_iDev, "2026-04-04 04:04:0"_iDev, 0, $Select($LI(tIdx(i), 1) = "Gamma":"g"_iDev, 1:(iDev * 10) + i)))
+            }
+        }
+        do ..Check("slot 3 is empty", $ListData(tInput, 3), 0, .pPass, .pFail)
+
+        set tWriter = ##class(OPCUA.DataSource.RowWriter).%New()
+        $$$ThrowOnError(tWriter.Initialize(tClass))
+
+        set tResultIdx = 1
+        for iDev=1:1:2 {
+            set tSC = tWriter.BuildRow(.tInput, tMask, "ns=1;s=Dev"_iDev, .tResultIdx, .tRow)
+            do ..Check("device "_iDev_" row builds", $$$ISOK(tSC), 1, .pPass, .pFail)
+            if $$$ISERR(tSC) {
+                write "       ", $System.Status.GetOneErrorText(tSC), !
+                quit
+            }
+            $$$ThrowOnError($classmethod(tClass, "SaveSourcedData", .tRow, .tNewId))
+            set tId(iDev) = tNewId
+        }
+        quit:$$$ISERR(tSC)
+
+        set tObj = $classmethod(tClass, "%OpenId", tId(1))
+        do ..Check("device 1 row opens", $IsObject(tObj), 1, .pPass, .pFail)
+        quit:'$IsObject(tObj)
+        set tName2 = $LI(tIdx(2), 1), tName3 = $LI(tIdx(3), 1)
+        do ..Check("device 1 empty slot stores NULL", $Property($Property(tObj, tName2), "Value"), "", .pPass, .pFail)
+        do ..Check("device 1 next column keeps its own value", $Property($Property(tObj, tName3), "Value"), $Select(tName3 = "Gamma":"g1", 1:13), .pPass, .pFail)
+
+        set tObj = $classmethod(tClass, "%OpenId", tId(2))
+        do ..Check("device 2 row opens", $IsObject(tObj), 1, .pPass, .pFail)
+        quit:'$IsObject(tObj)
+        do ..Check("device 2 keeps its own value", $Property($Property(tObj, tName2), "Value"), $Select(tName2 = "Gamma":"g2", 1:22), .pPass, .pFail)
+
+        do ..Check("CheckInput accepts a full list", $$$ISOK(tWriter.CheckInput(.tInput, tMasks)), 1, .pPass, .pFail)
+
+        // A dropped reading makes the list one short: refused, not shifted.
+        set tShort = $List(tInput, 1, $LL(tInput) - 1)
+        set tSC = tWriter.CheckInput(.tShort, tMasks)
+        do ..Check("CheckInput refuses a short list", $$$ISERR(tSC), 1, .pPass, .pFail)
+        do ..Check("refusal gives both counts", $System.Status.GetOneErrorText(tSC) [ "Got 5 readings for 6 resolved columns", 1, .pPass, .pFail)
+        set tEmpty = ""
+        do ..Check("CheckInput refuses an empty result", $$$ISERR(tWriter.CheckInput(.tEmpty, tMasks)), 1, .pPass, .pFail)
+    } Catch (e) {
+        set pFail = pFail + 1
+        write "  FAIL exception: ", e.DisplayString(), !
+    }
+    do ..DropSchema(tClass)
+}
+
 // ==================== schema delete ====================
 
 /// Deleting a schema removes its rows. The data global is named after the
@@ -930,6 +1013,7 @@ ClassMethod TestLiveRow(pURL As %String, ByRef pPass, ByRef pFail, pIncludeServe
         }
 
         // Write both devices from the one flat result, exactly as the services do.
+        do ..Check("CheckInput accepts the live poll result", $$$ISOK(tWriter.CheckInput(.tList, tMasks)), 1, .pPass, .pFail)
         set tResultIdx = 1
         kill tIds
         for iDev=1:1:$LL(tMasks) {
@@ -1036,6 +1120,7 @@ ClassMethod TestLiveSubscription(pURL As %String, ByRef pPass, ByRef pFail)
         // One notification is shaped exactly like one poll result, which is why
         // both services can hand it to the same writer unchanged.
         set tNotification = $LI(tBatch, 1)
+        do ..Check("CheckInput accepts the live notification", $$$ISOK(tWriter.CheckInput(.tNotification, $LB($LI(tMasks, 1)))), 1, .pPass, .pFail)
         set tResultIdx = 1
         set tSC = tWriter.BuildRow(.tNotification, $LI(tMasks, 1), "SubDev", .tResultIdx, .tRow)
         do ..Check("notification builds a row", $$$ISOK(tSC), 1, .pPass, .pFail)

@@ -135,6 +135,27 @@ Method DiscoverStorageLayout(pDSClass As %String) As %Status [ Private ]
 	Quit tSC
 }
 
+/// Check that a poll result or notification holds exactly one reading per
+/// resolved column, across all devices, after the leading batch marker.
+///
+/// Readings are matched to columns by position. No native library build is known
+/// to return a list of the wrong length (a Bad reading keeps its slot), but if one
+/// did, every reading after the gap would be stored under the wrong column or
+/// device, so the cycle is refused instead.
+Method CheckInput(ByRef pInput As %List, pMasks As %List) As %Status
+{
+	set tExpected = 1
+	for iRS=1:1:$LL(pMasks) {
+		set tMask = $LI(pMasks, iRS)
+		for iCol=1:1:$LL(tMask) { set tExpected = tExpected + (+$LI(tMask, iCol)) }
+	}
+	set tGot = $Select($ListValid(pInput):$LL(pInput), 1:0)
+	if tGot '= tExpected {
+		Quit $$$ERROR($$$GeneralError, "Got "_$Select(tGot > 0:tGot - 1, 1:0)_" readings for "_(tExpected - 1)_" resolved columns. They are matched by position, so nothing was stored for this cycle rather than store values under the wrong columns.")
+	}
+	Quit $$$OK
+}
+
 /// Build one device row. The caller owns persistence and service logging.
 /// pResultIndex starts at 1 (the batch marker) and advances only for present nodes.
 ///
@@ -170,7 +191,9 @@ Method BuildRow(ByRef pInput As %List, pMask As %List, pPath As %String, ByRef p
 			}
 
 			set pResultIndex = pResultIndex + 1
-			set tDV = $LI(pInput, pResultIndex)
+			// $ListGet: an empty slot stores NULL for this column. $List would throw
+			// and lose this device and every device after it for the cycle.
+			set tDV = $ListGet(pInput, pResultIndex)
 
 			if $ListValid(tDV) && ($LL(tDV) >= 4) {
 				if 'tGotTimestamp {
