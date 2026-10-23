@@ -445,8 +445,8 @@ This is the base class that both adapters extend. It manages:
 - **Connection settings:** URL, security mode, certificates, credentials, timeouts
 - **Reconnection logic:** If the connection drops:
   - Check if we've exceeded `ConnectionRetryTimeout` (default 600 seconds)
-  - If `AlwaysConnect=1`, keep retrying with warnings
-  - If `AlwaysConnect=0`, give up and stop the adapter
+  - If `AlwaysConnect=1` (the default), keep retrying, with a warning each `ConnectionRetryTimeout`
+  - If `AlwaysConnect=0`, give up and stop the adapter; collection stays stopped until the item is restarted
   - If `ResetClientFlag` is set, destroy the old client object entirely and create a fresh one
 
 ### Configuring a pipeline from the Management Portal

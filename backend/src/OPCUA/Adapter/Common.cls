@@ -29,8 +29,10 @@ Property ConnectionRetryTimeout As %Integer [ InitialExpression = 600 ];
 /// to connect to the target OPC UA server, regardless of any
 /// previous connection failures. If checked, a warning will
 /// be periodically issued after the duration specified 
-/// in ConnectionRetryTimeout
-Property AlwaysConnect As %Boolean [ InitialExpression = 0 ];
+/// in ConnectionRetryTimeout. On by default: unchecked, an outage
+/// longer than ConnectionRetryTimeout stops collection until the
+/// item is restarted, even once the server is back.
+Property AlwaysConnect As %Boolean [ InitialExpression = 1 ];
 
 /// The name of the DataSource class specifying the
 /// data types and nodes from which to obtain data

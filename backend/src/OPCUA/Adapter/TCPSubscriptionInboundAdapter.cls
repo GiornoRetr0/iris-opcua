@@ -328,7 +328,7 @@ Method OnTask() As %Status
 
 		if (##class(%SYSTEM.SQL).DATEDIFF("ms",..ConnectionRetryEndTime,$ZTimestamp) > 0) {
 			if ..AlwaysConnect {
-				$$$LOGWARNING("Client has not been able to establish the conection within the last "_..ConnectionRetryTimeout_" seconds")
+				$$$LOGWARNING("Client has not been able to establish the connection within the last "_..ConnectionRetryTimeout_" seconds")
 				set ..ConnectionRetryEndTime = ##class(%SYSTEM.SQL).DATEADD("s",..ConnectionRetryTimeout,$ZTimestamp)
 			} else {
 				$$$LOGERROR("Error encountered : Maximum time since a successful response exceeded : "_$SYSTEM.Status.GetErrorText(tSC))
