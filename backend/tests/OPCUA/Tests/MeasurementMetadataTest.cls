@@ -56,6 +56,9 @@ ClassMethod Run(pURL As %String = "opc.tcp://plc") As %Boolean
     write !, "=== Short or gapped result list (offline) ===", !
     do ..TestShortInput(.tPass, .tFail)
 
+    write !, "=== Subscription batch with failed notifications (offline) ===", !
+    do ..TestSubscriptionBatch(.tPass, .tFail)
+
     write !, "=== Projection reports its own errors (offline) ===", !
     do ..TestProjectionErrors(.tPass, .tFail)
 
@@ -882,6 +885,36 @@ ClassMethod TestShortInput(ByRef pPass, ByRef pFail)
         write "  FAIL exception: ", e.DisplayString(), !
     }
     do ..DropSchema(tClass)
+}
+
+// ==================== subscription batches ====================
+
+/// A failed notification is counted the same wherever it sits in the batch, and
+/// never becomes the batch's status. OnTask used to keep only the last
+/// notification's status, so a failure in last place sent a mostly successful
+/// batch down the connection-error path, and one anywhere else was only traced.
+ClassMethod TestSubscriptionBatch(ByRef pPass, ByRef pFail)
+{
+    Try {
+        set tAdapter = ##class(OPCUA.Adapter.TCPSubscriptionInboundAdapter).%New()
+        for tCase = "last", "first", "two", "throw", "clean" {
+            set tHost = ##class(OPCUA.Tests.FakeBatchHost).%New()
+            set tAdapter.BusinessHost = tHost
+            set tBatch = $Case(tCase, "last":$LB("n1", "n2", "bad3"), "first":$LB("bad1", "n2", "n3"), "two":$LB("n1", "bad2", "bad3"), "throw":$LB("throw", "n2", "n3"), :$LB("n1", "n2", "n3"))
+            set tWant = $Case(tCase, "last":"failed bad3", "first":"failed bad1", "two":"failed bad2", "throw":"thrown by throw", :"")
+
+            do tAdapter.ProcessBatch(tBatch, 3, .tDone, .tErrors, .tFirst)
+            do ..Check(tCase_": every notification handed in", $ListToString(tHost.Received), $ListToString(tBatch), .pPass, .pFail)
+            do ..Check(tCase_": processed count", tDone, $Case(tCase, "two":1, "clean":3, :2), .pPass, .pFail)
+            do ..Check(tCase_": error count", tErrors, $Case(tCase, "two":2, "clean":0, :1), .pPass, .pFail)
+            do ..Check(tCase_": first error set only on failure", $$$ISERR(tFirst), (tWant '= ""), .pPass, .pFail)
+            do ..Check(tCase_": first error is the first failure", $Select($$$ISOK(tFirst):"", 1:$System.Status.GetOneErrorText(tFirst)) [ tWant, 1, .pPass, .pFail)
+            do ..Check(tCase_": wait flag set", tHost.%WaitForNextCallInterval, 1, .pPass, .pFail)
+        }
+    } Catch (e) {
+        set pFail = pFail + 1
+        write "  FAIL exception: ", e.DisplayString(), !
+    }
 }
 
 // ==================== projection errors ====================

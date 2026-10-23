@@ -222,7 +222,8 @@ Method OnTask() As %Status
 
 	#dim tQtyProcessed as %Integer = 0
 	#dim tProcessingErrors as %Integer = 0
-	
+	#dim tFirstProcessingError as %Status = $$$OK
+
 	#dim tStartTime as %TimeStamp = $ZTimestamp
 
 	try {
@@ -268,33 +269,12 @@ Method OnTask() As %Status
 			$$$LOGWARNING("Batch size capacity warning. Performance may degrade. Current queue items processed = "_tQueueItemsProcessed_". Current internal queue size = "_tCurrentQueueSize_".")
 		}
 
-		for i=1:1:tQty {
-
-			// Ensure that this is set even in the event of error.
-			// (If an error occurs within ProcessInput(), then 
-			// %WaitForNextCallInterval should hopefully still be set.)
-			set ..BusinessHost.%WaitForNextCallInterval = 1 
-
-			set tSC = ..BusinessHost.ProcessInput($LI(tBatch,i))  
-
-			if $$$ISERR(tSC) {
-
-				$$$TRACE("Error encountered processing adapter output, continuing... : "_$SYSTEM.Status.GetErrorText(tSC))
-				set tProcessingErrors = tProcessingErrors + 1
-
-			} else {
-
-				set tQtyProcessed = tQtyProcessed + 1
-			}
-
-		}
+		do ..ProcessBatch(tBatch, tQty, .tQtyProcessed, .tProcessingErrors, .tFirstProcessingError)
 
 		// *********
 
 		// Again, ensure that %WaitForNextCallInterval remains set.
 		set ..BusinessHost.%WaitForNextCallInterval = 1
-			
-		Quit:$$$ISERR(tSC)
 
 	} catch (e) {
 		Set tSC = e.AsStatus()
@@ -369,7 +349,7 @@ Method OnTask() As %Status
 		
 		if tProcessingErrors > 0 {
 
-			$$$LOGWARNING(tProcessingErrors_" processing error(s) encountered concurrent with the successful entry of "_tQtyProcessed_" record(s) : "_..Client.GetClientStateString())
+			$$$LOGWARNING(tProcessingErrors_" processing error(s) encountered concurrent with the successful entry of "_tQtyProcessed_" record(s). First error : "_$SYSTEM.Status.GetErrorText(tFirstProcessingError)_" : "_..Client.GetClientStateString())
 
 			set ..QtySequentialEmptyResults = 0
 
@@ -436,6 +416,40 @@ Method OnTask() As %Status
 	} 
 
 	Quit $$$OK
+}
+
+/// Hands each notification in <var>pBatch</var> to the business host. A failed
+/// notification is counted, never returned: it says nothing about the connection,
+/// so it must not send <method>OnTask</method> down its error path, and the
+/// position of a failure in the batch must not change how the batch is reported.
+Method ProcessBatch(pBatch As %List, pQty As %Integer, Output pQtyProcessed As %Integer, Output pErrors As %Integer, Output pFirstError As %Status)
+{
+	set pQtyProcessed = 0, pErrors = 0, pFirstError = $$$OK
+
+	for i=1:1:pQty {
+
+		// Ensure that this is set even in the event of error.
+		// (If an error occurs within ProcessInput(), then
+		// %WaitForNextCallInterval should hopefully still be set.)
+		set ..BusinessHost.%WaitForNextCallInterval = 1
+
+		try {
+			set tItemSC = ..BusinessHost.ProcessInput($LI(pBatch,i))
+		} catch (e) {
+			set tItemSC = e.AsStatus()
+		}
+
+		if $$$ISERR(tItemSC) {
+
+			$$$TRACE("Error encountered processing adapter output, continuing... : "_$SYSTEM.Status.GetErrorText(tItemSC))
+			set pErrors = pErrors + 1
+			set:pErrors=1 pFirstError = tItemSC
+
+		} else {
+
+			set pQtyProcessed = pQtyProcessed + 1
+		}
+	}
 }
 
 }
