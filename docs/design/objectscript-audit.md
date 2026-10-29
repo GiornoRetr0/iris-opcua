@@ -54,12 +54,24 @@ leftover data).
     **Known limits** (also in `ProductionEdit` and `docs/architecture.md`):
     1. A Portal save that lands in the millisecond window between `Commit`'s stamp check and its `SaveToClass` is still overwritten in the class.
     2. A Portal page loaded before a console edit and saved after it overwrites the console's change. That is the Portal's own code, so it can't be closed from our side.
+    3. `DeployService.EnsureProductionExists` creates the production class on the first deploy ever, and it runs outside the lock. Two simultaneous first deploys can race on creating the class. One of them then fails with an error, but no data is lost. Not fixed.
 
     **Verified** on IRIS 2025.3 (`iris-opcua-iris-1`):
     - `OPCUA`, `Examples` and the tests compile clean.
     - New offline `OPCUA.Tests.Unit.ProductionEditTest` (`TestLockBusy`, `TestStaleCommitRefused`, `TestUpdateItemOneSave` counting `SaveToClass` calls, `TestNamesWithPunctuation` on `Line 3.Press-A`): all four failed on the old code (no `ProductionEdit`) and pass now.
     - New live `OPCUA.Tests.Live.PipelineConcurrencyTest`: `TestParallelRebinds` runs three rounds of two `JOB`bed rebinds and checks that storage and class agree on one of the two lists. It passed on the old code too, because the old window is too short to hit reliably, so it is a regression guard. The deterministic proof is `TestStaleCommitRefused`. `TestRebindWhenProductionNotRunning` failed on the old code (no note, troubled returned OK) and passes now. Troubled can't be forced without faking Ensemble's runtime globals, so it comes from the process-private seam `^||OPCUA.Tests("productionStatus")`.
     - Suites: `Runner.Offline()` 37/0, `Runner.Live()` 35/0. Against `plc`: `MeasurementMetadataTest` 257/0, `PortalPipelineTest` 38/0, `ResolverTest` 78/0.
+
+    **Fix round 1 (2026-10-29):**
+    - `PipelineConcurrencyTest` gained three tests, each driven by the `productionStatus` seam:
+      - Suspended, alongside Troubled, for rebind.
+      - `TestToggleWhenProductionNotRunning` and `TestDeleteWhenProductionNotRunning`, which pin the "… saved, but …" and "Pipeline deleted, but …" texts.
+      - `TestRebindWhileLocked`, which holds the lock from a JOB and makes Rebind fail with "in progress". It is deterministic; the parallel run stays as a smoke check.
+    - All of them failed against the old `PipelineService`, and they pass now (Live 57/0).
+    - After a failed delete or toggle, the dashboard now shows the server's text and reloads the list, so a pipeline that is gone doesn't stay on screen. The new `pipelines-dashboard.component.spec.ts` failed 2/2 first and passes 2/2.
+    - `OPCUA.Tests.Runner` now also counts failures recorded at method, case and suite level: thrown errors, and failed `OnBefore*`/`OnAfter*`. Before, it only counted failed asserts, and returned 1 with a throwing test.
+    - `PipelineLifecycleTest` now clears leftovers in `OnBeforeAllTests`. Its cleanup deletes through the API, and removes the schema even when the earlier steps failed.
+    - Offline 37/0. Against `plc`: `MeasurementMetadataTest` 257/0, `PortalPipelineTest` 38/0, `ResolverTest` 78/0.
 11. **Schema delete can miss a schema that is still in use** (`SchemaService.cls:698`). `MapSchemaUsage` swallows every error and only looks at `OPCUA.Pipeline.Production`. If it fails, or a pipeline lives in a hand-built production, the delete goes ahead.
 12. **A failed schema creation leaves debris** (`SchemaService.cls:377-444`). Half-created serial or main classes stay behind, and every retry then fails with "already exists".
 13. **String columns are capped at 50 characters** ✔ (`Types/StringDataValue.cls` and siblings). `%String` defaults to `MAXLEN=50`. Rows save today only because `SaveSourcedData` writes the global directly. A SQL UPDATE or `%Save` on a longer value fails, and SQL clients see VARCHAR(50).

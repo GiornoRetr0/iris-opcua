@@ -608,8 +608,19 @@ export class PipelinesDashboardComponent implements OnInit, OnDestroy {
     this.actionError.set('');
     this.api.togglePipeline(pipeline.name).subscribe({
       next: () => this.loadPipelines(),
-      error: (err) => this.actionError.set(this.message(err)),
+      error: (err) => this.actionFailed(err),
     });
+  }
+
+  /**
+   * Show why an action failed, and reload the list. The change may already be
+   * saved: "Pipeline deleted, but the running production could not be updated"
+   * means the pipeline is gone, so keeping the old card would contradict the
+   * message above it.
+   */
+  private actionFailed(err: any): void {
+    this.actionError.set(this.message(err));
+    this.loadPipelines(true);
   }
 
   private message(err: any): string {
@@ -653,7 +664,7 @@ export class PipelinesDashboardComponent implements OnInit, OnDestroy {
     this.actionError.set('');
     this.api.deletePipeline(p.name).subscribe({
       next: () => this.loadPipelines(),
-      error: (err) => this.actionError.set(this.message(err)),
+      error: (err) => this.actionFailed(err),
     });
   }
 
