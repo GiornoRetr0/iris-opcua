@@ -320,16 +320,9 @@ ClassMethod GetRequestParams(Output pBody As %DynamicObject) As %Status [ Privat
 	#dim tSC As %Status = $$$OK
 	Try {
 		// Try to parse JSON body first
-		set tContent = ""
 		if %request.Content '= "" {
-			if $IsObject(%request.Content) {
-				set tContent = %request.Content.Read()
-			} else {
-				set tContent = %request.Content
-			}
-		}
-		if tContent '= "" {
-			set pBody = {}.%FromJSON(tContent)
+			// Parse directly from Content (handles both streams and strings)
+			set pBody = {}.%FromJSON(%request.Content)
 			Quit
 		}
 
