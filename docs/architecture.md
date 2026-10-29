@@ -754,12 +754,44 @@ Deleting a schema is `SchemaService.Delete()`, which refuses while any pipeline 
    connection settings (read back by `DescribeItem()`, including the security
    settings — a secured pipeline's coverage check would otherwise fail to connect
    and reject every device)
-3. Writes the `DeviceNodePaths` setting
-4. Calls `UpdateProduction()` — the service re-resolves on its next connect
+3. Writes the `DeviceNodePaths` setting, and the categories when the body names
+   them, in one locked open and save (`ProductionEdit.UpdateItem()`)
+4. Calls `UpdateProduction()` when the pipeline production is running. The service
+   re-resolves on its next connect. `restarted` is 1 only when that update returned
+   OK. A stopped production gives `restarted: 0` and a `restartNote`. A suspended or
+   troubled one, or a failed update, makes the call fail with "Device list saved,
+   but the running pipeline could not be restarted: …". The save is not rolled back.
 
 That is the whole of editing a pipeline. Because devices are resolved by name at connect time, changing the list is a **settings update**: no regeneration, no recompile, no metadata to migrate.
 
 Changing a schema's **columns** is deliberately not possible here, and currently not possible anywhere — the regenerating edit path was removed along with the combined create-and-deploy wizard that drove it. Recreating the schema is the supported route, which does drop the table and its data. An `ALTER`-style schema edit is the obvious thing to build if that becomes painful.
+
+### Concurrent production edits
+
+Every console change to `OPCUA.Pipeline.Production` (deploy, toggle, delete,
+rebind) goes through `OPCUA.REST.ProductionEdit`:
+- `Begin` takes the lock `^OPCUA.ProductionEdit` (10 s timeout). A busy lock fails
+  with "Another change to the pipelines is in progress; try again."
+- `Begin` then rereads the production with `%Reload`, because `%OpenId` hands back
+  an object the process already holds, unchanged. It also records the production
+  class's `%Dictionary.ClassDefinition.TimeChanged`, which every `SaveToClass`
+  moves, the Portal's included.
+- `Commit` refuses if that stamp moved, with "The pipeline production was changed
+  by someone else (for example in the Management Portal); reload and try again."
+  Otherwise it runs `%Save` and `SaveToClass` once.
+
+Without this, a save from a stale copy is silent. The stale copy's `SaveToClass`
+writes old item settings into the class XData, while `Ens.Config` storage keeps the
+newer ones. The next compile of the production class (`LoadFromClass`) then drops
+the newer change.
+
+The Portal does not take our lock, and its own save checks no timestamp. Two gaps
+are therefore known, and documented IRIS APIs can't close them:
+1. A Portal save that lands in the millisecond window between `Commit`'s stamp
+   check and its `SaveToClass` is still overwritten in the class.
+2. A Portal page loaded before a console edit and saved after it overwrites the
+   console's change. That is the Portal's own code, so it can't be closed from
+   our side.
 
 ### The webapp flow
 

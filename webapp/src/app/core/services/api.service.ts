@@ -162,7 +162,7 @@ export class ApiService {
     name: string,
     devices: string,
     categories?: string[]
-  ): Observable<{ updated: number; name: string; deviceCount: number; restarted?: number }> {
+  ): Observable<{ updated: number; name: string; deviceCount: number; restarted: number; restartNote: string }> {
     const body: Record<string, unknown> = { name, devices };
     if (categories !== undefined) body['categories'] = categories;
     return this.post('/pipelines/rebind', body, 30000);

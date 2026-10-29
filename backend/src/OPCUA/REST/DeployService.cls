@@ -110,15 +110,14 @@ ClassMethod BindExistingSchema(pBody As %DynamicObject, Output pResult As %Dynam
 		set tSC = ..EnsureProductionExists()
 		Quit:$$$ISERR(tSC)
 
-		// Config item names must stay unique — see AddServiceItem's callers.
+		// Config item names must stay unique. Checked here to fail fast, and again
+		// under the edit lock in AddServiceItem.
 		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
-		if $IsObject(tProd) {
-			set tDup = tProd.FindItemByConfigName(tItemName, .tDupSC)
-			if $IsObject(tDup) {
-				set tSC = $$$ERROR($$$GeneralError, "A pipeline named '"_tItemName_"' already exists. Choose a different name.")
-				Quit
-			}
+		if $IsObject(tProd) && $IsObject(##class(OPCUA.REST.ProductionEdit).FindItem(tProd, tItemName)) {
+			set tSC = ..DuplicateNameError(tItemName)
+			Quit
 		}
+		kill tProd
 
 		set tSC = ..AddServiceItem(pBody, tSchemaClass, tItemName, tMode, tDevices)
 		Quit:$$$ISERR(tSC)
@@ -179,12 +178,6 @@ ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDS
 {
 	#dim tSC As %Status = $$$OK
 	Try {
-		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
-		if '$IsObject(tProd) {
-			set tSC = $$$ERROR($$$GeneralError, "Cannot open production: "_..#ProductionClass)
-			Quit
-		}
-
 		// All deploys use the v2 row-source runtime services.
 		if pMode = "subscription" {
 			set tServiceClass = "OPCUA.Service.TCPSubscriptionRowSourceService"
@@ -259,12 +252,21 @@ ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDS
 		do ..AddSettingIfNotEmpty(tItem, "Adapter", pBody, "username", "Username")
 		do ..AddSettingIfNotEmpty(tItem, "Adapter", pBody, "password", "Password")
 
-		// Insert into production, save, and persist to class
-		do tProd.Items.Insert(tItem)
-		set tSC = tProd.%Save()
-		$$$ThrowOnError(tSC)
-		set tSC = tProd.SaveToClass()
-		$$$ThrowOnError(tSC)
+		// Insert under the edit lock: reread the production, recheck the name,
+		// then one %Save and SaveToClass.
+		set tSC = ##class(OPCUA.REST.ProductionEdit).Begin(.tProd, .tStamp)
+		Quit:$$$ISERR(tSC)
+		Try {
+			if $IsObject(##class(OPCUA.REST.ProductionEdit).FindItem(tProd, pDSName)) {
+				set tSC = ..DuplicateNameError(pDSName)
+			} else {
+				do tProd.Items.Insert(tItem)
+				set tSC = ##class(OPCUA.REST.ProductionEdit).Commit(tProd, tStamp)
+			}
+		} Catch (eEdit) {
+			set tSC = eEdit.AsStatus()
+		}
+		do ##class(OPCUA.REST.ProductionEdit).End()
 
 	} Catch (e) {
 		set tSC = e.AsStatus()
@@ -272,6 +274,11 @@ ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDS
 	Quit tSC
 }
 
+/// The refusal for a pipeline name that is already taken.
+ClassMethod DuplicateNameError(pName As %String) As %Status [ Private ]
+{
+	Quit $$$ERROR($$$GeneralError, "A pipeline named '"_pName_"' already exists. Choose a different name.")
+}
 
 /// Turn a caller-supplied category list into the comma-delimited string
 /// <tt>Ens.Config.Item.Category</tt> expects.
@@ -388,6 +395,7 @@ ClassMethod AddSettingIfNotEmpty(pItem As Ens.Config.Item, pTarget As %String, p
 ClassMethod StartOrUpdateProduction() As %Status
 {
 	set tSC = ##class(Ens.Director).GetProductionStatus(.tProdName, .tState)
+	Quit:$$$ISERR(tSC) tSC
 
 	// State: $$$eProductionStateRunning = 1, Stopped = 2, Suspended = 3, Troubled = 4
 	if (tProdName = ..#ProductionClass) && (tState = 1) {
@@ -410,7 +418,8 @@ ClassMethod StartOrUpdateProduction() As %Status
 /// is reported, not stopped.
 ClassMethod CheckNoOtherProduction() As %Status
 {
-	do ##class(Ens.Director).GetProductionStatus(.tProdName, .tState)
+	set tSC = ##class(Ens.Director).GetProductionStatus(.tProdName, .tState)
+	Quit:$$$ISERR(tSC) tSC
 	if (tProdName = "") || (tProdName = ..#ProductionClass) Quit $$$OK
 
 	// State: Running = 1, Suspended = 3, Troubled = 4

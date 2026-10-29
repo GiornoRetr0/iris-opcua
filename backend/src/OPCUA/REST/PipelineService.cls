@@ -26,7 +26,8 @@ ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %S
 		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
 		if '$IsObject(tProd) Quit
 
-		do ##class(Ens.Director).GetProductionStatus(.tRunningProd, .tProdState)
+		set tSC = ##class(Ens.Director).GetProductionStatus(.tRunningProd, .tProdState)
+		Quit:$$$ISERR(tSC)
 		set tProdRunning = (tRunningProd = ..#ProductionClass) && (tProdState = 1)
 
 		for i=1:1:tProd.Items.Count() {
@@ -259,45 +260,42 @@ ClassMethod Toggle(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 			Quit
 		}
 
-		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
-		if '$IsObject(tProd) {
-			set tSC = $$$ERROR($$$GeneralError, "Cannot open production")
-			Quit
+		set tSC = ##class(OPCUA.REST.ProductionEdit).Begin(.tProd, .tStamp)
+		Quit:$$$ISERR(tSC)
+		Try {
+			set tItem = ##class(OPCUA.REST.ProductionEdit).FindItem(tProd, tName)
+			if '$IsObject(tItem) {
+				set tSC = $$$ERROR($$$GeneralError, "Pipeline '"_tName_"' not found")
+			} else {
+				set tNewState = 'tItem.Enabled
+				// Check before saving, so a refused enable leaves the pipeline disabled
+				if tNewState set tSC = ##class(OPCUA.REST.DeployService).CheckNoOtherProduction()
+				if $$$ISOK(tSC) {
+					set tItem.Enabled = tNewState
+					set tSC = ##class(OPCUA.REST.ProductionEdit).Commit(tProd, tStamp)
+				}
+			}
+		} Catch (eEdit) {
+			set tSC = eEdit.AsStatus()
 		}
-
-		set tItem = tProd.FindItemByConfigName(tName, .tSC2)
-		if '$IsObject(tItem) {
-			set tSC = $$$ERROR($$$GeneralError, "Pipeline '"_tName_"' not found")
-			Quit
-		}
-
-		set tNewState = 'tItem.Enabled
-
-		// Check before saving, so a refused enable leaves the pipeline disabled
-		if tNewState {
-			set tSC = ##class(OPCUA.REST.DeployService).CheckNoOtherProduction()
-			Quit:$$$ISERR(tSC)
-		}
-		set tItem.Enabled = tNewState
-
-		set tSC = tProd.%Save()
-		$$$ThrowOnError(tSC)
-		set tSC = tProd.SaveToClass()
-		$$$ThrowOnError(tSC)
-
-		// Start production if not running, otherwise just update
-		do ##class(Ens.Director).GetProductionStatus(.tRunning, .tRunState)
-		if (tRunning = ..#ProductionClass) && (tRunState = 1) {
-			set tSC = ##class(Ens.Director).UpdateProduction()
-			$$$ThrowOnError(tSC)
-		} elseif tNewState {
-			// Production not running and we're enabling — start it
-			set tSC = ##class(OPCUA.REST.DeployService).StartOrUpdateProduction()
-			$$$ThrowOnError(tSC)
-		}
+		do ##class(OPCUA.REST.ProductionEdit).End()
+		Quit:$$$ISERR(tSC)
 
 		set pResult.name = tName
 		set pResult.enabled = tNewState
+
+		// Update the running production, or start it when enabling a pipeline
+		// while it is not running.
+		set tSC = ##class(OPCUA.REST.ProductionEdit).ApplyToRunning(.tRestarted, .tNote)
+		if $$$ISOK(tSC) && 'tRestarted && tNewState {
+			set tSC = ##class(OPCUA.REST.DeployService).StartOrUpdateProduction()
+			if $$$ISOK(tSC) set tRestarted = 1, tNote = ""
+		}
+		set pResult.restarted = tRestarted
+		set pResult.restartNote = tNote
+		if $$$ISERR(tSC) {
+			set tSC = $$$ERROR($$$GeneralError, "Pipeline "_$Select(tNewState:"enabled",1:"disabled")_" and saved, but the production could not be updated: "_$System.Status.GetOneStatusText(tSC))
+		}
 
 	} Catch (e) {
 		set tSC = e.AsStatus()
@@ -325,45 +323,25 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 			Quit
 		}
 
-		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
-		if '$IsObject(tProd) {
-			set tSC = $$$ERROR($$$GeneralError, "Cannot open production")
-			Quit
-		}
-
-		// Find the item and get its DataSourceClass and ID before removing
-		set tDSClass = ""
-		set tFoundIdx = 0
-		set tItemId = ""
-		for i=1:1:tProd.Items.Count() {
-			set tCfgItem = tProd.Items.GetAt(i)
-			if tCfgItem.Name = tName {
+		set tDSClass = "", tItemId = ""
+		set tSC = ##class(OPCUA.REST.ProductionEdit).Begin(.tProd, .tStamp)
+		Quit:$$$ISERR(tSC)
+		Try {
+			set tCfgItem = ##class(OPCUA.REST.ProductionEdit).FindItem(tProd, tName, .tFoundIdx)
+			if '$IsObject(tCfgItem) {
+				set tSC = $$$ERROR($$$GeneralError, "Pipeline '"_tName_"' not found in production")
+			} else {
+				// Capture the schema and the row ID before removing
 				set tDSClass = ..GetSettingValue(tCfgItem, "DataSourceClass")
 				set tItemId = tCfgItem.%Id()
-				set tFoundIdx = i
-				Quit
+				do tProd.Items.RemoveAt(tFoundIdx)
+				set tSC = ##class(OPCUA.REST.ProductionEdit).Commit(tProd, tStamp)
 			}
+		} Catch (eEdit) {
+			set tSC = eEdit.AsStatus()
 		}
-		if tFoundIdx = 0 {
-			set tSC = $$$ERROR($$$GeneralError, "Pipeline '"_tName_"' not found in production")
-			Quit
-		}
-
-		// If production is running, disable the item first
-		do ##class(Ens.Director).GetProductionStatus(.tRunning, .tRunState2)
-		set tProdRunning = (tRunning = ..#ProductionClass) && (tRunState2 = 1)
-		if tProdRunning {
-			if ##class(Ens.Director).IsItemEnabled(tName, .tSCCheck) {
-				do ##class(Ens.Director).EnableConfigItem(tName, 0)
-			}
-		}
-
-		// Remove from production and persist
-		do tProd.Items.RemoveAt(tFoundIdx)
-		set tSC = tProd.%Save()
-		$$$ThrowOnError(tSC)
-		set tSC = tProd.SaveToClass()
-		$$$ThrowOnError(tSC)
+		do ##class(OPCUA.REST.ProductionEdit).End()
+		Quit:$$$ISERR(tSC)
 
 		// Delete the config item row to prevent orphans
 		if tItemId '= "" {
@@ -371,8 +349,12 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 			$$$ThrowOnError(tSC)
 		}
 
-		if tProdRunning {
-			do ##class(Ens.Director).UpdateProduction()
+		// A running production stops the removed item's job when it updates.
+		// EnableConfigItem is not used to stop it first: it saves the production
+		// itself, outside our edit, which Commit would then refuse as stale.
+		set tSCApply = ##class(OPCUA.REST.ProductionEdit).ApplyToRunning(.tRestarted, .tNote)
+		if $$$ISERR(tSCApply) {
+			set tSC = $$$ERROR($$$GeneralError, "Pipeline deleted, but the running production could not be updated: "_$System.Status.GetOneStatusText(tSCApply))
 		}
 
 		set pResult.deleted = 1
@@ -446,27 +428,26 @@ ClassMethod Rebind(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		set tSC = ##class(OPCUA.REST.SchemaService).RequireUsableDevices(tConn, tSchemaClass)
 		Quit:$$$ISERR(tSC)
 
-		set tSC = ..UpdateDeviceNodePaths(tName, tDevices)
+		// Devices and categories change in one locked open and save. Categories
+		// ride along with a rebind, since editing a pipeline is where a user would
+		// expect to change them. Absent leaves them alone, an empty array clears
+		// them. Organisational only, so an odd list cannot break collection, which
+		// is why this is a plain overwrite beyond normalising the delimiter.
+		set tFields = ""
+		if pBody.%IsDefined("categories") {
+			set tFields = {"Category": (##class(OPCUA.REST.DeployService).NormalizeCategories(pBody.%Get("categories")))}
+		}
+		set tSC = ##class(OPCUA.REST.ProductionEdit).UpdateItem(tName, {"Adapter": {"DeviceNodePaths": (tDevices)}}, tFields)
 		Quit:$$$ISERR(tSC)
 
-		// Categories ride along with a rebind, since editing a pipeline is where a
-		// user would expect to change them. Absent leaves them alone, an empty array
-		// clears them. Organisational only, so an odd list cannot break
-		// collection — which is why this is a plain overwrite with no validation
-		// beyond normalising the delimiter.
-		if pBody.%IsDefined("categories") {
-			set tSC = ..UpdateCategories(
-				tName,
-				##class(OPCUA.REST.DeployService).NormalizeCategories(pBody.%Get("categories")))
-			Quit:$$$ISERR(tSC)
-		}
-
-		// The adapter re-resolves on every (re)connect, so restarting the item is
-		// all that is needed for the new device list to take effect.
-		do ##class(Ens.Director).GetProductionStatus(.tRunning, .tRunState)
-		if (tRunning = ..#ProductionClass) && (tRunState = 1) {
-			do ##class(Ens.Director).UpdateProduction()
-			set pResult.restarted = 1
+		// The adapter re-resolves on every (re)connect, so updating the running
+		// production is all that is needed for the new device list to take
+		// effect. restarted is 1 only when that update really happened.
+		set tSC = ##class(OPCUA.REST.ProductionEdit).ApplyToRunning(.tRestarted, .tNote)
+		set pResult.restarted = tRestarted
+		set pResult.restartNote = tNote
+		if $$$ISERR(tSC) {
+			set tSC = $$$ERROR($$$GeneralError, "Device list saved, but the running pipeline could not be restarted: "_$System.Status.GetOneStatusText(tSC))
 		}
 
 		set pResult.updated = 1
@@ -496,7 +477,7 @@ ClassMethod DescribeItem(pItemName As %String, Output pSchemaClass As %String, O
 		Quit $$$ERROR($$$GeneralError, "Cannot open production: "_..#ProductionClass)
 	}
 
-	set tItem = tProd.FindItemByConfigName(pItemName, .tSCFind)
+	set tItem = ##class(OPCUA.REST.ProductionEdit).FindItem(tProd, pItemName)
 	if '$IsObject(tItem) {
 		Quit $$$ERROR($$$GeneralError, "Pipeline '"_pItemName_"' not found in production")
 	}
@@ -521,116 +502,6 @@ ClassMethod DescribeItem(pItemName As %String, Output pSchemaClass As %String, O
 		do:tVal'="" pConn.%Set(tMap(tSetting), tVal)
 	}
 	Quit $$$OK
-}
-
-/// Write a config item's DeviceNodePaths setting, adding it if absent.
-///
-/// Rebinding a pipeline's devices is now a settings update rather than a class
-/// regeneration — which is why editing a device list no longer needs a recompile.
-ClassMethod UpdateDeviceNodePaths(pItemName As %String, pValue As %String) As %Status [ Private ]
-{
-	#dim tSC As %Status = $$$OK
-	Try {
-		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
-		if '$IsObject(tProd) {
-			set tSC = $$$ERROR($$$GeneralError, "Cannot open production: "_..#ProductionClass)
-			Quit
-		}
-
-		set tFound = 0
-		for i=1:1:tProd.Items.Count() {
-			set tItem = tProd.Items.GetAt(i)
-			continue:tItem.Name'=pItemName
-
-			set tSet = 0
-			for j=1:1:tItem.Settings.Count() {
-				set tSetting = tItem.Settings.GetAt(j)
-				continue:tSetting.Name'="DeviceNodePaths"
-				set tSetting.Value = pValue
-				set tSet = 1
-			}
-			if 'tSet {
-				set tSetting = ##class(Ens.Config.Setting).%New()
-				set tSetting.Target = "Adapter"
-				set tSetting.Name = "DeviceNodePaths"
-				set tSetting.Value = pValue
-				do tItem.Settings.Insert(tSetting)
-			}
-			// Deliberately does *not* touch categories. This used to backfill them via
-			// EnsureCategories, on the reasoning that a rebind is the one moment an
-			// existing pipeline gets rewritten — harmless while they were derived.
-			// Now that they are the user's to edit it actively fought them: remove
-			// "OPCUA", change a device, and it came straight back, because an
-			// explicitly-empty list and a never-stamped one are both just "".
-			// Categories now move only when a request says so; an unstamped pipeline
-			// shows "None" in the editor with Reset one click away.
-			set tFound = 1
-		}
-
-		if 'tFound {
-			set tSC = $$$ERROR($$$GeneralError, "Pipeline '"_pItemName_"' not found in production")
-			Quit
-		}
-
-		set tSC = tProd.%Save()
-		$$$ThrowOnError(tSC)
-		set tSC = tProd.SaveToClass()
-		$$$ThrowOnError(tSC)
-	} Catch (e) {
-		set tSC = e.AsStatus()
-	}
-	Quit tSC
-}
-
-/// Set a pipeline's Portal categories, as a comma-delimited string.
-///
-/// Categories are organisational only — the Production Configuration page groups
-/// by them and nothing in the runtime reads them back — so this overwrites
-/// whatever was there without validating the names. Pass "" to leave the item
-/// ungrouped. Callers should run the value through
-/// <method>OPCUA.REST.DeployService.NormalizeCategories</method> first.
-ClassMethod UpdateCategories(pItemName As %String, pValue As %String) As %Status [ Private ]
-{
-	Quit ..UpdateItemField(pItemName, "Category", pValue)
-}
-
-/// Set one field on a pipeline's config item and persist the production.
-///
-/// Both saves are required and in this order: <tt>%Save</tt> writes the stored
-/// production definition, <tt>SaveToClass</tt> regenerates the production class
-/// from it. Skipping the second leaves the change invisible to a restart, which is
-/// the failure mode this helper exists to stop being retyped per field.
-ClassMethod UpdateItemField(pItemName As %String, pField As %String, pValue As %String) As %Status [ Private ]
-{
-	#dim tSC As %Status = $$$OK
-	Try {
-		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
-		if '$IsObject(tProd) {
-			set tSC = $$$ERROR($$$GeneralError, "Cannot open production: "_..#ProductionClass)
-			Quit
-		}
-
-		set tFound = 0
-		for i=1:1:tProd.Items.Count() {
-			set tItem = tProd.Items.GetAt(i)
-			continue:tItem.Name'=pItemName
-			set $Property(tItem, pField) = pValue
-			set tFound = 1
-		}
-
-		if 'tFound {
-			set tSC = $$$ERROR($$$GeneralError, "Pipeline '"_pItemName_"' not found in production")
-			Quit
-		}
-
-		set tSC = tProd.%Save()
-		$$$ThrowOnError(tSC)
-		set tSC = tProd.SaveToClass()
-		$$$ThrowOnError(tSC)
-	} Catch (e) {
-		set tSC = e.AsStatus()
-	}
-	Quit tSC
 }
 
 /// Describe a v2 pipeline's devices, from the DeviceNodePaths setting plus the
