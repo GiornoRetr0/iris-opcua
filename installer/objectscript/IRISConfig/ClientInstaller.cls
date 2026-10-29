@@ -785,7 +785,9 @@ ClassMethod LogTail(pPath As %String) As %String [ Internal, Private ]
 			Set line = s.ReadLine()
 			Set:(line[name)||(line["cannot open shared object")||(line["dlopen")||(line["LoadLibrary") hint = $ZStrip(line, "<>W")
 		}
-	} Catch {}
+	} Catch {
+		// Best effort: the hint only decorates a load failure already reported.
+	}
 	Quit $Extract(hint, 1, 500)
 }
 

@@ -44,10 +44,14 @@ ClassMethod SaveSourcedData(ByRef pSourceData As %List, Output pAssignedID As %S
     Quit $$$OK
 }
 
+/// Save <var>pSourceData</var> as a new row and return it opened. Throws if the
+/// save fails or the saved row cannot be opened, rather than returning "".
 ClassMethod CreateObjectFromSourceData(ByRef pSourceData As %List) As OPCUA.DataSource.Definition
 {
-    Do ..SaveSourcedData(pSourceData, .assignedId)
-    Quit ..%OpenId(assignedId)
+    $$$ThrowOnError(..SaveSourcedData(.pSourceData, .assignedId))
+    Set tObj = ..%OpenId(assignedId, , .tSC)
+    $$$ThrowOnError(tSC)
+    Quit tObj
 }
 
 }

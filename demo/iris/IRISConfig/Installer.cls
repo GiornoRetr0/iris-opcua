@@ -55,7 +55,8 @@ ClassMethod Install() As %Status
 		Set tSC = $System.OBJ.CompileAll("ck")
 		$$$ThrowOnError(tSC)
 
-		// Configure connector (non-fatal if .so missing), credentials, and web app
+		// Configure connector, credentials, and web app. The connector's status is
+		// ignored on purpose: a missing .so must not fail the image build.
 		Do ..LoadConnectorAndDemos("OPCUA")
 
 		Set tSC = ..CreateCredentials("OPCUA")

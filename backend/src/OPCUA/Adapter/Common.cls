@@ -133,7 +133,7 @@ Method OnInit() As %Status
 		set tSC = ..Client.Initialize()
 		Quit:$$$ISERR(tSC)
 
-		set tSC = ..Client.SetLogFile(..LogFileTag)
+		do ..ApplyLogFile()
 		set tSC = ..Client.SetupClient("",..SecurityMode,..ClientURI,..PublicCertificate,..PrivateKey,..TrustListDir,..RevocationListDir)
 		Quit:$$$ISERR(tSC)
 
@@ -149,6 +149,38 @@ Method OnInit() As %Status
 	Quit tSC  // Quit $$$OK
 }
 
+/// Point the native library's log at <property>LogFileTag</property>. A failure
+/// is logged as a warning, not returned: the library log is a diagnostic aid, so
+/// it should not stop the service collecting data. Before, the status was
+/// overwritten by the next call and the failure went unseen.
+Method ApplyLogFile() [ Private ]
+{
+	set tSC = ..Client.SetLogFile(..LogFileTag)
+	if $$$ISERR(tSC) {
+		$$$LOGWARNING("Could not set the OPC UA library log file '"_..LogFileTag_"': "_$System.Status.GetErrorText(tSC))
+	}
+}
+
+/// The library's IsConnected flag for <var>pClient</var>, and its client reset
+/// flag in <var>pResetFlag</var>. Both are 0 when the state cannot be read: the
+/// enquiry leaves its outputs unset on failure, and a -1 placeholder left there
+/// counts as connected, so the polling adapter would never reconnect.
+ClassMethod ConnectedState(pClient As OPCUA.Client, Output pResetFlag As %Integer) As %Integer
+{
+	set tConnected = 0, pResetFlag = 0
+	Try {
+		set tSC = pClient.GetClientState("", .tConnected, "", "", .tReset)
+		if $$$ISERR(tSC) {
+			set tConnected = 0
+		} else {
+			set pResetFlag = +$Get(tReset)
+		}
+	} Catch (e) {
+		set tConnected = 0
+	}
+	Quit +tConnected
+}
+
 Method Connect() As %Status [ Private ]
 {
 	#dim tSC as %Status = $$$OK
@@ -157,7 +189,7 @@ Method Connect() As %Status [ Private ]
 
 		if ..ResetClientFlag '= 0 {
 
-			set tSC = ..Client.SetLogFile(..LogFileTag)
+			do ..ApplyLogFile()
 			set tSC = ..Client.SetupClient("",..SecurityMode,..ClientURI,..PublicCertificate,..PrivateKey,..TrustListDir,..RevocationListDir)
 
 			if $$$ISERR(tSC) {

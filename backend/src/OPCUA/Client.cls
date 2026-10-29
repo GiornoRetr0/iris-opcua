@@ -41,7 +41,10 @@ Property Handle As %Integer [ InitialExpression = 0, Private ];
 /// Used internally to interpret error codes returned by the client.
 ClassMethod DecodeError(list As %String) As %Status [ Final ]
 {
-	Set tType=$List(list,2),tCode=$List(list,3),tMsgTxt=$List(list,4)
+	// $ListGet: an error list without a message (or code) must still decode. $List
+	// would throw, and the caller would report <NULL VALUE> instead of the error.
+	Set tType=$ListGet(list,2),tCode=$ListGet(list,3),tMsgTxt=$ListGet(list,4)
+	Set:tMsgTxt="" tMsgTxt="OPC UA library error, type "_tType_", code "_tCode
 	If tType=$$$ErrorTypeNone {
 		Set tTypeTxt=$$$Text("No Error")
 	} elseif tType=$$$ErrorTypeInfo {
@@ -341,6 +344,7 @@ Method GetClientStateString(ByRef pSC As %Status = "") As %String [ Final ]
 		Set ResetFlag = $LI(tRetval,6)
         
 		#dim tConnStatusDesc as %String
+		// Trace text only: an unknown name leaves the description empty.
 		do ##class(OPCUA.Client).GetStatusCodeName(.tConnStatusDesc,ConnectionStatus)
 
 		set tRetStr = "ChannelStatus='"_..GetChannelStateName(SecureChannelStatus)_"', SessionStatus='"_..GetSessionStateName(SessionStatus)_"', ConnectionStatus='"_tConnStatusDesc_"'"

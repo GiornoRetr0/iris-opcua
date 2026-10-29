@@ -85,7 +85,8 @@ ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %S
 			// Rows are a property of the table, not of the run state. Reporting 0
 			// for a stopped pipeline claimed its collected data was gone — and since
 			// a pipeline is now deployed stopped, that is the common case.
-			set tItem.rowCount = ..GetRowCount(tItem.dataSourceClass)
+			set tCount = ..GetRowCount(tItem.dataSourceClass)
+			do tItem.%Set("rowCount", tCount, $Select(tCount = "":"null", 1:"number"))
 
 			// Enabled is not the same as collecting: a service whose adapter fails
 			// to connect or resolve stays enabled and keeps retrying while writing
@@ -196,7 +197,11 @@ ClassMethod GetHealth(pItemName As %String, pProdRunning As %Boolean, pEnabled A
 ///
 /// Cached in <tt>^IRIS.Temp</tt> deliberately — it is derived data that should not
 /// survive a restart or be journalled.
-ClassMethod GetRowCount(pClassName As %String) As %Integer [ Private ]
+///
+/// Returns "" (unknown, null in the JSON) when the count cannot be taken, e.g.
+/// the class has no table or the user may not SELECT from it. 0 would read as
+/// "no rows", and the dashboard warns about a pipeline collecting nothing.
+ClassMethod GetRowCount(pClassName As %String) As %Integer [ Internal ]
 {
 	set tCount = 0
 	Try {
@@ -215,11 +220,11 @@ ClassMethod GetRowCount(pClassName As %String) As %Integer [ Private ]
 		}
 		// Get SQL qualified table name
 		set tTable = ##class(OPCUA.REST.SchemaService).TableName(pClassName)
-		set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT COUNT(*) FROM "_tTable)
-		if $IsObject(tRS) && tRS.%Next() set tCount = tRS.%GetData(1)
+		set tRS = ##class(OPCUA.Utils).ExecQuery("SELECT COUNT(*) FROM "_tTable)
+		if tRS.%Next() set tCount = tRS.%GetData(1)
 		set ^IRIS.Temp.OPCUARowCount(pClassName) = $ListBuild(tNow, tCount)
 	} Catch (e) {
-		// Table might not exist or be empty
+		set tCount = ""
 	}
 	Quit tCount
 }
@@ -227,24 +232,24 @@ ClassMethod GetRowCount(pClassName As %String) As %Integer [ Private ]
 /// Get the OPC UA node names from a DataSource class definition.
 ClassMethod GetNodeNames(pClassName As %String) As %DynamicArray [ Private ]
 {
+	// No Try: an unexpected error goes to List's Catch and is reported, rather
+	// than showing the pipeline with no nodes.
 	set tNodes = []
-	Try {
-		if pClassName = "" Quit
-		// Use compiled class info (CompiledProperty) which has parameter access
-		set tClassDef = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
-		if '$IsObject(tClassDef) Quit
-		for i=1:1:tClassDef.Properties.Count() {
-			set tProp = tClassDef.Properties.GetAt(i)
-			// Get OPCUANODENAME from property parameters
-			set tNodeName = tProp.Parameters.GetAt("OPCUANODENAME")
-			if tNodeName '= "" {
-				set tNodeInfo = {}
-				set tNodeInfo.property = tProp.Name
-				set tNodeInfo.nodeId = tNodeName
-				do tNodes.%Push(tNodeInfo)
-			}
+	Quit:pClassName="" tNodes
+	// Use compiled class info (CompiledProperty) which has parameter access
+	set tClassDef = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
+	Quit:'$IsObject(tClassDef) tNodes
+	for i=1:1:tClassDef.Properties.Count() {
+		set tProp = tClassDef.Properties.GetAt(i)
+		// Get OPCUANODENAME from property parameters
+		set tNodeName = tProp.Parameters.GetAt("OPCUANODENAME")
+		if tNodeName '= "" {
+			set tNodeInfo = {}
+			set tNodeInfo.property = tProp.Name
+			set tNodeInfo.nodeId = tNodeName
+			do tNodes.%Push(tNodeInfo)
 		}
-	} Catch (e) {}
+	}
 	Quit tNodes
 }
 
@@ -562,51 +567,55 @@ ClassMethod CheckCanDeleteCredentials(pItemName As %String) As %Status [ Private
 /// time; use POST /schemas/:name/validate for real per-device coverage.
 ClassMethod GetRowSourceInfo(pClassName As %String, pDeviceNodePaths As %String = "") As %DynamicArray [ Private ]
 {
+	// No Try: an unexpected error goes to List's Catch and is reported, rather
+	// than silently listing only the devices handled before it.
 	set tResult = []
-	Try {
-		Quit:pDeviceNodePaths=""
+	Quit:pDeviceNodePaths="" tResult
 
-		do ##class(OPCUA.DataSource.Resolver).ParseDeviceNodePaths(pDeviceNodePaths, .tDevices, .tErrors)
-		Quit:$LL($Get(tDevices))=0
+	// Unusable lines are reported by deploy and by the adapter; here they are
+	// simply not devices.
+	$$$ThrowOnError(##class(OPCUA.DataSource.Resolver).ParseDeviceNodePaths(pDeviceNodePaths, .tDevices, .tErrors))
+	Quit:$LL($Get(tDevices))=0 tResult
 
-		// Schema columns, in the same storage order the runtime uses.
-		set tSC = ##class(OPCUA.DataSource.Resolver).GetSchemaColumns(pClassName, .tColumns, .tFolders)
-		if $$$ISERR(tSC) set tColumns = 0
+	// Schema columns, in the same storage order the runtime uses. A schema that
+	// cannot be read (deleted outside the console) still lists its devices,
+	// with no columns: the dashboard shows only device paths and counts.
+	set tSC = ##class(OPCUA.DataSource.Resolver).GetSchemaColumns(pClassName, .tColumns, .tFolders)
+	if $$$ISERR(tSC) set tColumns = 0
 
-		for i=1:1:$LL(tDevices) {
-			set tDev = $LI(tDevices, i)
-			set tInfo = {}
-			set tInfo.path = $LI(tDev, 4)
-			set tInfo.nodeNs = $LI(tDev, 1)
-			set tInfo.nodeId = $LI(tDev, 2)
-			set tInfo.nodeIdType = $LI(tDev, 3)
+	for i=1:1:$LL(tDevices) {
+		set tDev = $LI(tDevices, i)
+		set tInfo = {}
+		set tInfo.path = $LI(tDev, 4)
+		set tInfo.nodeNs = $LI(tDev, 1)
+		set tInfo.nodeId = $LI(tDev, 2)
+		set tInfo.nodeIdType = $LI(tDev, 3)
 
-			set tChildren = []
-			for c=1:1:tColumns {
-				set tCol = tColumns(c)
-				set tFolderName = $LI(tCol, 5)
-				set tNodeName = $LI(tCol, 3)
+		set tChildren = []
+		for c=1:1:tColumns {
+			set tCol = tColumns(c)
+			set tFolderName = $LI(tCol, 5)
+			set tNodeName = $LI(tCol, 3)
 
-				set tChild = {}
-				set tChild.displayName = tNodeName
-				set tChild.nodeNs = $LI(tCol, 2)
-				// Nodes are resolved by name at connect time, so there is no
-				// stored absolute node id to report here.
-				set tChild.nodeId = ""
-				set tChild.nodeIdType = ""
+			set tChild = {}
+			set tChild.displayName = tNodeName
+			set tChild.nodeNs = $LI(tCol, 2)
+			// Nodes are resolved by name at connect time, so there is no
+			// stored absolute node id to report here.
+			set tChild.nodeId = ""
+			set tChild.nodeIdType = ""
 
-				set tRelPath = ##class(%DynamicArray).%New()
-				if tFolderName '= "" do tRelPath.%Push(tFolderName)
-				do tRelPath.%Push(tNodeName)
-				set tChild.relativePath = tRelPath
+			set tRelPath = ##class(%DynamicArray).%New()
+			if tFolderName '= "" do tRelPath.%Push(tFolderName)
+			do tRelPath.%Push(tNodeName)
+			set tChild.relativePath = tRelPath
 
-				do tChildren.%Push(tChild)
-			}
-			set tInfo.childNodes = tChildren
-
-			do tResult.%Push(tInfo)
+			do tChildren.%Push(tChild)
 		}
-	} Catch (e) {}
+		set tInfo.childNodes = tChildren
+
+		do tResult.%Push(tInfo)
+	}
 	Quit tResult
 }
 
@@ -635,22 +644,26 @@ ClassMethod DeleteSerialSubclasses(pClassName As %String) As %Status
 			// Skip standard types
 			if $Extract(tType, 1) = "%" continue
 			// Check if it extends %SerialObject
+			set tIsSerial = 0
 			Try {
-				if $classmethod(tType, "%Extends", "%SerialObject") {
-					// Check if the serial class name matches the generated pattern
-					if '..IsGeneratedSerialClass(pClassName, tType) continue
-
-					// Check if any other class uses this serial class
-					if ..SerialClassIsShared(pClassName, tType) continue
-
-					// This is a pipeline-generated serial class that is not shared — delete it
-					if ##class(%Dictionary.ClassDefinition).%ExistsId(tType) {
-						set tSC = $System.OBJ.Delete(tType, "-d")
-						Quit:$$$ISERR(tSC)
-					}
-				}
+				set tIsSerial = $classmethod(tType, "%Extends", "%SerialObject")
 			} Catch (eInner) {
-				// Type class may not exist — skip
+				// Type class may not exist: then it is no serial class of ours to delete.
+			}
+			continue:'tIsSerial
+
+			// Check if the serial class name matches the generated pattern
+			continue:'..IsGeneratedSerialClass(pClassName, tType)
+
+			// Check if any other class uses this serial class. A failed check
+			// throws to the outer Catch, so nothing is deleted on a guess.
+			continue:..SerialClassIsShared(pClassName, tType)
+
+			// This is a pipeline-generated serial class that is not shared — delete it.
+			// Quit leaves the loop: a later successful delete must not overwrite tSC.
+			if ##class(%Dictionary.ClassDefinition).%ExistsId(tType) {
+				set tSC = $System.OBJ.Delete(tType, "-d")
+				Quit:$$$ISERR(tSC)
 			}
 		}
 	} Catch (e) {
@@ -679,8 +692,9 @@ ClassMethod SerialClassIsShared(pMainClass As %String, pSerialClass As %String) 
 {
 	#dim rs As %SQL.StatementResult
 	set tSQL = "SELECT Parent FROM %Dictionary.CompiledProperty WHERE Type = ? AND Parent <> ?"
-	set rs = ##class(%SQL.Statement).%ExecDirect(, tSQL, pSerialClass, pMainClass)
-	if '$IsObject(rs) Return 0
+	// ExecQuery throws on a failed query: reading it as "not shared" would delete
+	// a class another schema still uses.
+	set rs = ##class(OPCUA.Utils).ExecQuery(tSQL, pSerialClass, pMainClass)
 	if rs.%Next() {
 		// At least one other class uses this serial class
 		Return 1

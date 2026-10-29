@@ -152,13 +152,7 @@ Method OnTask() As %Status
 
 	if $$$ISERR(tSC) {
 	
-		try {
-			#dim tTmp as %Integer = -1
-			do ..Client.GetClientState("",.tTmp)
-			set ..IsConnected = tTmp
-		} catch (e) {
-			set ..IsConnected = 0
-		}
+		set ..IsConnected = ..ConnectedState(..Client)
 
 		if ..LastReportedError '= tSC {
 
@@ -214,7 +208,9 @@ Method OnTearDown() As %Status
 {
 	try {
 		do ..Client.ReadBulkClear(..QueryHandle)	// Perhaps unnecessary
-	} catch (e) {}
+	} catch (e) {
+		// Best-effort teardown: the session is closing anyway, and ##super() must still run.
+	}
 
 	return ##super()
 }

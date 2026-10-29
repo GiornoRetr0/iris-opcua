@@ -285,20 +285,8 @@ Method OnTask() As %Status
 
 	if $$$ISERR(tSC) {
 
-		try {
-
-			#dim tTmpConn as %Integer = -1
-			#dim tTmpReset as %Integer = 0
-			
-			do ..Client.GetClientState("",.tTmpConn,"","",.tTmpReset)
-			
-			set ..IsConnected = tTmpConn
-			set ..ResetClientFlag = tTmpReset
-		
-		} catch (e) {
-			set ..IsConnected = 0
-			set ..ResetClientFlag = 0
-		}
+		set ..IsConnected = ..ConnectedState(..Client, .tTmpReset)
+		set ..ResetClientFlag = tTmpReset
 
 		if ..LastReportedError '= tSC {
 
@@ -363,13 +351,7 @@ Method OnTask() As %Status
 		} else {
 		
 			// No results were returned. Is the client connected?
-			try {
-				#dim tTmp as %Integer = -1
-				do ..Client.GetClientState("",.tTmp)
-				set ..IsConnected = tTmp
-			} catch (e) {
-				set ..IsConnected = 0
-			}
+			set ..IsConnected = ..ConnectedState(..Client)
 
 			if ..IsConnected = 0 {
 

@@ -89,7 +89,8 @@ export interface Pipeline {
   health?: PipelineHealth;
   lastActivity?: string;
   error?: string;
-  rowCount?: number;
+  /** null when the count could not be taken (shown as a dash, not 0). */
+  rowCount?: number | null;
   interval?: number;
   callInterval?: number;
   serverUrl?: string;
@@ -183,6 +184,8 @@ export interface Schema {
   dataSourceName?: string;
   defaultNamespace?: number;
   columnCount: number;
+  /** Why the columns could not be read; columnCount is then 0. */
+  columnsError?: string;
   /** Populated by GET /schemas/:name only */
   columns?: SchemaColumn[];
   /** Pipelines currently bound to this schema, across all productions */

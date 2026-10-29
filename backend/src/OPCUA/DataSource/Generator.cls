@@ -329,6 +329,7 @@ ClassMethod ReadAttributesOnce(pClient As OPCUA.Client, pNodeNS As %Integer, pNo
 		set tOK = 0
 	}
 	if tHandle '= "" {
+		// Best-effort cleanup of a one-shot probe: its result is already decided.
 		Try { do pClient.ReadBulkClear(tHandle) } Catch (eClear) {}
 	}
 	Quit tOK

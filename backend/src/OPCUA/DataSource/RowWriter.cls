@@ -290,6 +290,7 @@ Method LogQualityChanges(pPath As %String, pQualityChanges As %List)
 		// Name the status unless it is plain Good, which says nothing new.
 		if tStatus '= 0 {
 			set tName = ""
+			// Name lookup is decoration: on failure tName stays "" and the code is shown.
 			Try { do ##class(OPCUA.Client).GetStatusCodeName(.tName, tStatus) } Catch (e) {}
 			set tPart = tPart _ " ("_$Select(tName '= "":tName, 1:"status "_tStatus)_")"
 		}

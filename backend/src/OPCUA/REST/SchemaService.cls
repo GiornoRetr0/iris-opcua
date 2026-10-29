@@ -111,6 +111,8 @@ ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %S
 			// Skip abstract classes — they cannot back a pipeline.
 			continue:$$$comClassKeyGet(tClass,$$$cCLASSabstract)
 
+			// One unreadable schema must not hide the rest: it is listed with
+			// its columnsError.
 			set tItem = ..DescribeSchema(tClass, 0)
 			set tItem.usedBy = ..UsageArray(.tUsage, tClass)
 			do pResult.%Push(tItem)
@@ -134,7 +136,11 @@ ClassMethod Get(pBody As %DynamicObject, Output pResult As %DynamicObject) As %S
 		set tSC = ..MapSchemaUsage(.tUsage)
 		Quit:$$$ISERR(tSC)
 
-		set pResult = ..DescribeSchema(tClassName, 1)
+		set pResult = ..DescribeSchema(tClassName, 1, .tSC)
+		if $$$ISERR(tSC) {
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Cannot read the columns of schema '"_tClassName_"'", tSC)
+			Quit
+		}
 		set pResult.usedBy = ..UsageArray(.tUsage, tClassName)
 	} Catch (e) {
 		set tSC = e.AsStatus()
@@ -734,8 +740,13 @@ ClassMethod IsSchema(pClassName As %String) As %Boolean
 /// Describe one schema: identity, table, and (optionally) its columns.
 /// Columns are reported in storage order, which is the order the runtime
 /// services and the resolver's coverage masks use.
-ClassMethod DescribeSchema(pClassName As %String, pWithColumns As %Boolean = 0) As %DynamicObject
+///
+/// <var>pSC</var> is the error when the columns cannot be read (e.g. the class's
+/// compiled spec in <tt>^OPCUA.DataSource</tt> is missing); the item then has
+/// <tt>columnCount</tt> 0 and a <tt>columnsError</tt> saying why.
+ClassMethod DescribeSchema(pClassName As %String, pWithColumns As %Boolean = 0, Output pSC As %Status) As %DynamicObject
 {
+	set pSC = $$$OK
 	set tItem = {}
 	set tItem.schemaClass = pClassName
 	set tItem.name = $Piece(pClassName, ".", *)
@@ -770,9 +781,15 @@ ClassMethod DescribeSchema(pClassName As %String, pWithColumns As %Boolean = 0) 
 				set tItem.columns = tArr
 			}
 		} else {
-			set tItem.columnCount = 0
+			set pSC = tSC
 		}
-	} Catch (e) {}
+	} Catch (e) {
+		set pSC = e.AsStatus()
+	}
+	if $$$ISERR(pSC) {
+		set tItem.columnCount = 0
+		set tItem.columnsError = ##class(OPCUA.REST.Error).Text(pSC)
+	}
 
 	Quit tItem
 }
@@ -797,11 +814,14 @@ ClassMethod MapSchemaUsage(Output pUsage) As %Status
 		}
 
 		// Iterate every production in the namespace via SQL
-		set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT ID FROM Ens_Config.Production")
-		if '$IsObject($Get(tRS)) {
-			set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to query Ens_Config.Production")
-			Quit
+		// A failed query (e.g. no SELECT privilege for this user) must stop the
+		// caller: read as "no productions", schema delete would skip its in-use check.
+		Try {
+			set tRS = ##class(OPCUA.Utils).ExecQuery("SELECT ID FROM Ens_Config.Production")
+		} Catch (eQuery) {
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to query Ens_Config.Production", eQuery.AsStatus())
 		}
+		Quit:$$$ISERR(tSC)
 
 		while tRS.%Next() {
 			set tProdClass = tRS.ID

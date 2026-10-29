@@ -159,7 +159,9 @@ ClassMethod GetUStr(pStr As %String) As %String
 
         } else {
 
-            do ##class(OPCUA.Utils).Initialize() // just in case
+            // Ignored: a library that is not loaded fails the $ZF below, and this
+            // decoder returns fragments rather than errors by design.
+            do ##class(OPCUA.Utils).Initialize()
             set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfGetUStr,"",$LB(pStr,1))
 
             #; Errors are not returned, fragments instead.
@@ -221,6 +223,17 @@ ClassMethod GetVersion(Output pOut As %List) As %Status
 	}
 
 	Quit tSC
+}
+
+/// Run dynamic SQL and return its result set, throwing if the statement failed.
+/// <tt>%ExecDirect</tt> reports a failure (a missing table, a missing SELECT
+/// privilege) in the result's <tt>%SQLCODE</tt> rather than by throwing, so a
+/// caller that only checks <tt>$IsObject</tt> reads a failed query as an empty one.
+ClassMethod ExecQuery(pSQL As %String, pArgs...) As %SQL.StatementResult
+{
+	set tRS = ##class(%SQL.Statement).%ExecDirect(, pSQL, pArgs...)
+	if tRS.%SQLCODE < 0 $$$ThrowStatus($$$ERROR($$$SQLError, tRS.%SQLCODE, tRS.%Message))
+	Quit tRS
 }
 
 }

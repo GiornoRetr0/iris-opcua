@@ -76,7 +76,7 @@ ClassMethod SafeReadAndParse(pClient As OPCUA.Client, pNodeNS As %Integer, pNode
 	// Step 3: Parse results
 	if 'tReadOK {
 		set pResult.value = ""
-		set pResult.readError = "Failed to read node (node may not exist or has an unsupported type)"
+		set pResult.readError = "Failed to read node: "_$Select($$$ISERR(tSC):##class(OPCUA.REST.Error).Text(tSC), 1:"no value returned")
 		set pResult.inferredType = tInferredType
 		Quit $$$OK
 	}
@@ -102,7 +102,8 @@ ClassMethod SafeReadAndParse(pClient As OPCUA.Client, pNodeNS As %Integer, pNode
 	Quit $$$OK
 }
 
-/// Safely call ReadValueAttribute, catching any C++ layer exceptions.
+/// Safely call ReadValueAttribute, catching any C++ layer exceptions. Returns
+/// the read's error, caught or not, so the caller can say why it failed.
 ClassMethod SafeReadValue(pClient As OPCUA.Client, pNodeId, pNodeNS As %Integer, pNodeIdType As %Integer, Output pResults, Output pOK As %Boolean) As %Status
 {
 	set pOK = 0
@@ -111,7 +112,7 @@ ClassMethod SafeReadValue(pClient As OPCUA.Client, pNodeId, pNodeNS As %Integer,
 		set tSC = pClient.ReadValueAttribute(.pResults, pNodeId, pNodeNS, pNodeIdType)
 		if $$$ISOK(tSC) set pOK = 1
 	} Catch (e) {
-		set tSC = $$$OK
+		set tSC = e.AsStatus()
 	}
 	Quit tSC
 }
