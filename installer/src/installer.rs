@@ -329,12 +329,12 @@ impl<'a> Installer<'a> {
                 "missing" if c.foreign_database => block("Database file exists", format!("Namespace {ns} does not exist, but a database file already exists in its default directory. It was not touched. Choose another namespace name.")),
                 _ if !c.database_access => {
                     let res = &c.database_resource;
-                    let first = if c.namespace.state == "missing" { format!("create the resource {res} and ") } else { String::new() };
+                    let first = if c.namespace.state == "missing" || c.namespace.state == "resumable" { format!("create the resource {res} and ") } else { String::new() };
                     block("No access to the namespace database", format!(
                         "The account {} would not be able to use the database of {ns}, which is protected by resource {res}. Either run this tool as an account with the %All role, or have an IRIS administrator {first}grant {res}:RW to your account through a role. Then retry.",
                         info.user))
                 }
-                "missing" => create_namespace = true,
+                "missing" | "resumable" => create_namespace = true,
                 _ => {}
             },
             Err(e) => block("Namespace check failed", e),

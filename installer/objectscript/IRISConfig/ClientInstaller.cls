@@ -195,7 +195,7 @@ ClassMethod CreateNamespace(pNS As %String) As %String(MAXLEN="") [ SqlProc ]
 		If '..ValidNamespace(pNS) || ..IsSystemNamespace(pNS) { Set r.message = "Namespace '"_pNS_"' cannot be used." Quit }
 		Set d = ..DescribeNamespace(pNS)
 		If d.state = "conflict" { Set r.message = "Namespace "_pNS_" is in use by something else: "_d.reason Quit }
-		If (d.state '= "missing") && d.interoperability { Set r.action = "reuse" Do r.%Set("ok", 1, "boolean") Quit }
+		If (d.state '= "missing") && (d.state '= "resumable") && d.interoperability { Set r.action = "reuse" Do r.%Set("ok", 1, "boolean") Quit }
 		Set dir = ..DatabaseDir(pNS), res = "%DB_"_pNS
 		If ##class(%File).Exists(dir_"IRIS.DAT") && '..DatabaseOwned(pNS) { Set r.message = "A database file already exists at "_dir_". It was not touched; choose another namespace name." Quit }
 		If '##class(Security.Resources).Exists(res) {
@@ -278,7 +278,7 @@ ClassMethod CreateApp(pPath As %String, pNS As %String) As %String(MAXLEN="") [ 
 		Set p("AutheEnabled") = 32
 		Set p("Resource") = res
 		$$$ThrowOnError(##class(Security.Applications).Create(pPath, .p))
-		Set ^IRISConfig.ClientInstaller("app", pPath) = pNS
+		Set ^IRISConfig.ClientInstaller("app", $ZConvert(pPath, "U")) = pNS
 		Set r.action = "created", r.resource = res
 		Do r.%Set("ok", 1, "boolean")
 	} Catch e { Do ..Fail(r, e) }
@@ -314,7 +314,7 @@ ClassMethod PrepareUi(pPath As %String, pNS As %String) As %String(MAXLEN="") [ 
 			Set r.message = "Directory "_dir_" already holds files this installer did not put there. It was not touched; choose another console path."
 			Quit
 		}
-		Set ^IRISConfig.ClientInstaller("ui", pPath) = dir
+		Set ^IRISConfig.ClientInstaller("ui", $ZConvert(pPath, "U")) = dir
 		If '##class(%File).DirectoryExists(dir) && '##class(%File).CreateDirectoryChain(dir) { Set r.message = "Could not create "_dir_". IRIS needs write access to its csp directory." Quit }
 		Do r.%Set("ok", 1, "boolean")
 	} Catch e { Do ..Fail(r, e) }
@@ -420,7 +420,7 @@ ClassMethod CreateUiApp(pPath As %String, pNS As %String) As %String(MAXLEN="") 
 		Set p("ServeFilesTimeout") = 0
 		Set p("IsNameSpaceDefault") = 0
 		$$$ThrowOnError(##class(Security.Applications).Create(pPath, .p))
-		Set ^IRISConfig.ClientInstaller("app", pPath) = pNS
+		Set ^IRISConfig.ClientInstaller("app", $ZConvert(pPath, "U")) = pNS
 		Set r.action = "created"
 		Do r.%Set("ok", 1, "boolean")
 	} Catch e { Do ..Fail(r, e) }
@@ -585,6 +585,7 @@ ClassMethod ClassifyNamespace(pNS As %String, d As %DynamicObject) [ Internal, P
 	Do d.%Set("interoperability", ##class(%EnsembleMgr).IsEnsembleNamespace(pNS), "boolean")
 	Do d.%Set("backend", $Data(^|pNS|oddCOM("OPCUA.Utils")) > 0, "boolean")
 	Do d.%Set("owned", $Data(^IRISConfig.ClientInstaller("ns", pNS)) > 0, "boolean")
+	Do d.%Set("databaseOwned", ..DatabaseOwned(pNS), "boolean")
 	// Classes stored in the namespace's own routine database, not mapped from a library.
 	Set foreign = [], dir = ..RoutineDir(pNS)
 	If dir '= "" {
@@ -601,11 +602,19 @@ ClassMethod ClassifyNamespace(pNS As %String, d As %DynamicObject) [ Internal, P
 	Set prod = ""
 	Set:d.interoperability prod = $Get(^|pNS|Ens.Configuration("csp","LastProduction"))
 	Set d.production = prod
+	// Check for conflicts other than missing interoperability.
 	Set reasons = ""
-	Set:'d.interoperability reasons = reasons_$ListBuild("interoperability is not enabled")
 	Set:(prod'="")&&(prod'="OPCUA.Pipeline.Production") reasons = reasons_$ListBuild("it hosts production "_prod)
 	Set:foreign.%Size()&&'d.backend&&'d.owned reasons = reasons_$ListBuild("it contains other classes (e.g. "_foreign.%Get(0)_")")
-	If reasons '= "" { Set d.state = "conflict", d.reason = $ListToString(reasons, "; ") }
+	// If there are blocking conflicts, it's a conflict regardless of interoperability.
+	If reasons '= "" {
+		Set:'d.interoperability reasons = reasons_$ListBuild("interoperability is not enabled")
+		Set d.state = "conflict", d.reason = $ListToString(reasons, "; ")
+	}
+	// Resumable: this installer created the namespace or database, but interoperability isn't enabled yet.
+	ElseIf 'd.interoperability && (d.owned || d.databaseOwned) { Set d.state = "resumable" }
+	// Interoperability is off but we didn't create it: conflict.
+	ElseIf 'd.interoperability { Set d.state = "conflict", d.reason = "interoperability is not enabled" }
 	ElseIf d.owned { Set d.state = "owned" }
 	ElseIf d.backend { Set d.state = "backend" }
 	Else { Set d.state = "empty" }
@@ -636,7 +645,7 @@ ClassMethod DescribeApp(pPath As %String, pNS As %String) As %DynamicObject [ In
 	Do d.%Set("enabled", +$Get(p("Enabled")), "boolean")
 	Do d.%Set("passwordAuth", $ZBoolean(+$Get(p("AutheEnabled")), 32, 1) = 32, "boolean")
 	Do d.%Set("unauthenticated", $ZBoolean(+$Get(p("AutheEnabled")), 64, 1) = 64, "boolean")
-	Do d.%Set("owned", $Data(^IRISConfig.ClientInstaller("app", pPath)) > 0, "boolean")
+	Do d.%Set("owned", $Data(^IRISConfig.ClientInstaller("app", $ZConvert(pPath, "U"))) > 0, "boolean")
 	If ($ZConvert(d.namespace, "U") '= pNS) || (d.dispatchClass '= ..#DispatchClass) {
 		Set d.state = "conflict"
 		Set d.reason = "Web application "_pPath_" already exists for "_d.namespace_$Select(d.dispatchClass'="":" ("_d.dispatchClass_")", 1:"")_". It was not changed; choose another path."
@@ -652,7 +661,7 @@ ClassMethod DescribeUi(pPath As %String, pNS As %String) As %DynamicObject [ Int
 {
 	Set dir = ..UiDir(pPath)
 	Set d = {"path":(pPath), "directory":(dir), "state":"missing", "reason":""}
-	Do d.%Set("owned", $Get(^IRISConfig.ClientInstaller("ui", pPath)) = dir, "boolean")
+	Do d.%Set("owned", $Get(^IRISConfig.ClientInstaller("ui", $ZConvert(pPath, "U"))) = dir, "boolean")
 	If '##class(Security.Applications).Exists(pPath) {
 		If 'd.owned && ##class(%File).DirectoryExists(dir) && '..DirEmpty(dir) {
 			Set d.state = "conflict", d.reason = "Directory "_dir_" already holds other files. It was not touched; choose another console path."
@@ -675,7 +684,7 @@ ClassMethod DescribeUi(pPath As %String, pNS As %String) As %DynamicObject [ Int
 ClassMethod UiReady(pPath As %String, r As %DynamicObject) As %Boolean [ Internal, Private ]
 {
 	If '..ValidAppPath(pPath) { Set r.message = "Invalid web application path '"_pPath_"'." Quit 0 }
-	If $Get(^IRISConfig.ClientInstaller("ui", pPath)) '= ..UiDir(pPath) { Set r.message = "The console directory for "_pPath_" was not prepared by this installer." Quit 0 }
+	If $Get(^IRISConfig.ClientInstaller("ui", $ZConvert(pPath, "U"))) '= ..UiDir(pPath) { Set r.message = "The console directory for "_pPath_" was not prepared by this installer." Quit 0 }
 	Quit 1
 }
 
