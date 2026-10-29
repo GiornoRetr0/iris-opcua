@@ -3,8 +3,9 @@ Include (%callout, OPCUA.Constants, Ensemble)
 /// This class implements an interface to portions of the open source open62541 library,
 /// allowing for the creation of two different types of data feeds that can be used
 /// to import data into IRIS from OPC UA servers located locally, across a LAN, and/or
-/// over the Internet. Security features such as encrypted 
-/// transmission and password authentication are not implemented at this time.
+/// over the Internet. Supports SecurityMode 1 (None: unencrypted, anonymous) and
+/// SecurityMode 3 (Sign & Encrypt: mutual TLS authentication with client certificate,
+/// private key, trust list and revocation list).
 /// Details about open62541 can be found at https://open62541.org.
 /// This client provides the ability to connect to an OPC UA server locally,
 /// across a LAN, or over the Internet. 

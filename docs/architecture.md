@@ -651,9 +651,8 @@ depending on whether the server was reachable, and the two have different fixes.
 
 This is a **deploy-time gate only**, and deliberately not enforced on connect. A
 device that drops offline mid-session must keep storing NULL and warning, not take
-the pipeline down — enforcing it at runtime would recreate `StrictSchemaMatch`,
-which was removed for exactly that reason. The cost is that a device cannot be bound
-before it exists; adding it afterwards is a rebind, which is one settings edit.
+the pipeline down. The cost is that a device cannot be bound before it exists;
+adding it afterwards is a rebind, which is one settings edit.
 
 ### v2 Service startup (OnInit / Connect)
 
