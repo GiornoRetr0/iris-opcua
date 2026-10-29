@@ -183,10 +183,9 @@ write-up.
   sending `username` + `password`, and there's no endpoint that lists the
   namespace's credentials entries, since those may belong to the client. Choosing
   an existing entry is a Portal job, or a direct `credentials` field on the API.
-- **The console stops writing the OPC UA password to localStorage (user).** It's
-  kept only for the browser session (memory or sessionStorage), and the user
-  retypes it after closing the browser. The rest of the saved connection settings
-  stay in localStorage as now. Running pipelines never need the browser's copy.
+- **The console's browser storage is unchanged (user).** The OPC UA password stays
+  in localStorage next to the IRIS sign-in password, which is already kept there.
+  #15 is about what IRIS stores, not what the browser stores.
 
 ### #16 Wrong passwords return 404 (my call)
 

@@ -251,19 +251,9 @@ One commit per bullet group, each with its own test.
 - [ ] **Step 4:** Update the Examples to use `Credentials`. Check that `PollingExample` and `SubscriptionExample` still store real values from `plc`.
 - [ ] **Step 5:** Green, plus the regression gate. Update audit #15. Commit `fix(adapters): keep OPC UA passwords in IRIS credentials`.
 
-### Task 10: #15 Console keeps the OPC UA password for the session only
+### Task 10: (dropped)
 
-**Files:**
-- Modify: `webapp/src/app/core/services/config.service.ts`, `webapp/src/app/core/models/opcua.models.ts` (if `ServerProfile` changes), the device-binding deploy call in `api.service.ts`, the Settings page copy
-
-**Interfaces:**
-- `ConfigService` persists everything except `password` (top-level and every `servers[i].password`) to localStorage. Passwords live in `sessionStorage` under the same key with suffix `::secrets`. On load, any password found in localStorage is moved to sessionStorage and removed from localStorage (one-time cleanup of old data).
-- Deploy still sends `username` + `password`. The API password (`apiPassword`) is unchanged: the spec scopes this to the OPC UA password.
-
-- [ ] **Step 1:** Add the spec file `config.service.spec.ts` if the project has a test runner configured (check `angular.json`). Otherwise do Step 3 as a manual check and say so. Test: after `save()` with a server password, `localStorage` JSON has no `password` value, and `sessionStorage` has it. A legacy localStorage blob with a password is migrated and stripped.
-- [ ] **Step 2:** Implement. Update the `ConfigService` header comment (it currently states cleartext passwords in localStorage) and the Settings page's browser-local note: OPC UA passwords last until the browser closes.
-- [ ] **Step 3:** Manual check with `ng serve`: set a server password, reload (still there), close and reopen the browser (gone, everything else kept). `tsc --noEmit` and `ng build` clean.
-- [ ] **Step 4:** Commit `fix(webapp): keep OPC UA passwords for the session only`.
+The user decided the console keeps the OPC UA password in localStorage, as it does the IRIS sign-in password. Nothing to do; task numbers are kept so references stay valid.
 
 ### Task 11: #17 Installer resumes an interrupted namespace; case-insensitive ownership
 
