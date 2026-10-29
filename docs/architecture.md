@@ -395,6 +395,7 @@ That is why adding a second pipeline over an existing schema costs one config it
 4. **Add a service item** (`AddServiceItem()`):
    - Create an `Ens.Config.Item`, set its class to `OPCUA.Service.TCPPollingRowSourceService` or `OPCUA.Service.TCPSubscriptionRowSourceService` (chosen by `mode`)
    - Configure settings: `DataSourceClass`, **`DeviceNodePaths`**, `URL`, poll/subscription intervals, security parameters
+   - Credentials: never a password setting. `credentials` in the body names an existing `Ens.Config.Credentials` entry (400 if missing). A `username` (+ `password`) is saved as a new entry, `DeployService.CredentialsId(name)` (`OPCUA-<name>`, sanitised), which deploy refuses with 409 if it already exists and records in `^OPCUA.OwnedCredentials`. The item's `Credentials` setting names the entry. Deleting the pipeline deletes the entry only if deploy created it for that pipeline
    - Add it with **`Enabled = 0`**, save the production, call `SaveToClass()`
 
 5. **Stop.** The production is deliberately **not** started, and the item is created switched off.

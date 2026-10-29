@@ -68,8 +68,10 @@ ClassMethod Install() As %Status
 	Quit tSC
 }
 
-/// This method will create an Interoperability credential meant to be used on Interoperability Productions.
-/// It will use the standard SuperUser/sys password for demos.
+/// Create the demo's Interoperability credentials: IrisOpcUaDemo (the standard
+/// SuperUser/sys demo login) and CertifiedServerDemo, the certified-server's
+/// user1/password, which the SecureExample service names in its Credentials
+/// setting rather than holding the password in the production class.
 ClassMethod CreateCredentials(pNamespace As %String) As %Status
 {
 	Set tSC = $$$OK
@@ -79,6 +81,8 @@ ClassMethod CreateCredentials(pNamespace As %String) As %Status
 		ZN pNamespace
 
 		Set tSC = ##class(Ens.Config.Credentials).SetCredential("IrisOpcUaDemo", "SuperUser", "sys", 1)
+		Quit:$System.Status.IsError(tSC)
+		Set tSC = ##class(Ens.Config.Credentials).SetCredential("CertifiedServerDemo", "user1", "password", 1)
 		Quit:$System.Status.IsError(tSC)
 	}
 	Catch (oException)

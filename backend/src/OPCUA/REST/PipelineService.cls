@@ -323,7 +323,7 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 			Quit
 		}
 
-		set tDSClass = "", tItemId = ""
+		set tDSClass = "", tItemId = "", tCredId = ""
 		set tSC = ##class(OPCUA.REST.ProductionEdit).Begin(.tProd, .tStamp)
 		Quit:$$$ISERR(tSC)
 		Try {
@@ -333,6 +333,7 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 			} else {
 				// Capture the schema and the row ID before removing
 				set tDSClass = ..GetSettingValue(tCfgItem, "DataSourceClass")
+				set tCredId = ..GetSettingValue(tCfgItem, "Credentials")
 				set tItemId = tCfgItem.%Id()
 				do tProd.Items.RemoveAt(tFoundIdx)
 				set tSC = ##class(OPCUA.REST.ProductionEdit).Commit(tProd, tStamp)
@@ -347,6 +348,13 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		if tItemId '= "" {
 			set tSC = ##class(Ens.Config.Item).%DeleteId(tItemId)
 			$$$ThrowOnError(tSC)
+		}
+
+		// The credentials entry goes too, but only if deploy created it for this
+		// pipeline. An entry the pipeline merely pointed at belongs to someone else.
+		set tSCCred = ##class(OPCUA.REST.DeployService).DeleteOwnedCredentials(tCredId, tName)
+		if $$$ISERR(tSCCred) {
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Pipeline deleted, but its credentials '"_tCredId_"' could not be: "_##class(OPCUA.REST.Error).Text(tSCCred), tSCCred)
 		}
 
 		// A running production stops the removed item's job when it updates.
@@ -498,13 +506,25 @@ ClassMethod DescribeItem(pItemName As %String, Output pSchemaClass As %String, O
 	set tMap("SecurityMode") = "securityMode", tMap("ClientURI") = "clientURI"
 	set tMap("PublicCertificate") = "certPath", tMap("PrivateKey") = "keyPath"
 	set tMap("TrustListDir") = "trustDir", tMap("RevocationListDir") = "crlDir"
-	set tMap("Username") = "username", tMap("Password") = "password"
 	set tSetting = ""
 	for {
 		set tSetting = $Order(tMap(tSetting))
 		quit:tSetting=""
 		set tVal = ..GetSettingValue(tItem, tSetting)
 		do:tVal'="" pConn.%Set(tMap(tSetting), tVal)
+	}
+
+	// The username and password live in the item's credentials entry. The
+	// check connects as the pipeline does, so a missing entry is an error, not
+	// an anonymous connect.
+	set tCredId = ..GetSettingValue(tItem, "Credentials")
+	if tCredId '= "" {
+		set tCred = ##class(Ens.Config.Credentials).%OpenId(tCredId)
+		if '$IsObject(tCred) {
+			Quit ##class(OPCUA.REST.Error).BadRequest("Pipeline '"_pItemName_"' uses credentials '"_tCredId_"', which do not exist in namespace "_$Namespace_".")
+		}
+		do pConn.%Set("username", tCred.Username)
+		do pConn.%Set("password", tCred.Password)
 	}
 	Quit $$$OK
 }

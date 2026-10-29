@@ -53,8 +53,12 @@ ClassMethod Deploy(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 ///   callInterval      polling mode, seconds (default 5)
 ///   publishingInterval / samplingInterval / queueSize   subscription mode, ms
 ///   securityMode + clientURI, certPath, keyPath, trustDir, crlDir   for mode 3
-///   username, password   optional credentials
+///   credentials       optional: the ID of an existing Ens.Config.Credentials entry
+///   username, password   optional, instead of credentials: saved as a new entry
+///                        <method>CredentialsId</method>(name), never in a setting
 /// }
+/// <p>Neither credentials nor username means an anonymous session, and no entry.
+/// A password without a username is ignored, as an anonymous connect ignores it.</p>
 ClassMethod BindExistingSchema(pBody As %DynamicObject, Output pResult As %DynamicObject) As %Status
 {
 	#dim tSC As %Status = $$$OK
@@ -85,6 +89,11 @@ ClassMethod BindExistingSchema(pBody As %DynamicObject, Output pResult As %Dynam
 			Quit
 		}
 
+		// Which credentials the pipeline uses. Checked before the coverage check,
+		// which has to connect the same way the pipeline will.
+		set tSC = ..ResolveCredentials(pBody, .tCheckBody)
+		Quit:$$$ISERR(tSC)
+
 		// Fail early on an unusable device list rather than at connect time.
 		// Report the per-line reasons, which are far more actionable than the summary.
 		set tSC = ##class(OPCUA.DataSource.Resolver).ParseDeviceNodePaths(tDevices, .tParsed, .tParseErrors)
@@ -98,7 +107,7 @@ ClassMethod BindExistingSchema(pBody As %DynamicObject, Output pResult As %Dynam
 		// Every device must actually contribute a column. A device that browses to
 		// zero matches writes nothing but NULLs for the life of the pipeline, so
 		// catch it here rather than letting it quietly pad the table.
-		set tSCUsable = ##class(OPCUA.REST.SchemaService).RequireUsableDevices(pBody, tSchemaClass)
+		set tSCUsable = ##class(OPCUA.REST.SchemaService).RequireUsableDevices(tCheckBody, tSchemaClass)
 		if $$$ISERR(tSCUsable) {
 			set tSC = tSCUsable
 			Quit
@@ -177,7 +186,7 @@ ClassMethod EnsureProductionExists() As %Status [ Private ]
 ///
 /// pDeviceNodePaths is used verbatim as the DeviceNodePaths setting; the caller
 /// has already parsed and validated it.
-ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDSName As %String, pMode As %String, pDeviceNodePaths As %String) As %Status [ Private ]
+ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDSName As %String, pMode As %String, pDeviceNodePaths As %String) As %Status [ Internal ]
 {
 	#dim tSC As %Status = $$$OK
 	Try {
@@ -251,30 +260,130 @@ ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDS
 			do ..AddSettingIfNotEmpty(tItem, "Adapter", pBody, "crlDir", "RevocationListDir")
 		}
 
-		// Credentials
-		do ..AddSettingIfNotEmpty(tItem, "Adapter", pBody, "username", "Username")
-		do ..AddSettingIfNotEmpty(tItem, "Adapter", pBody, "password", "Password")
+		// Credentials: an existing entry by ID, or a username (and password)
+		// saved as a new entry below. Never a Username/Password setting, which
+		// would put the password in the production class in plain text.
+		set tCredId = pBody.%Get("credentials")
+		set tUsername = pBody.%Get("username")
+		set tNewCredId = ""
+		if (tCredId = "") && (tUsername '= "") set (tCredId, tNewCredId) = ..CredentialsId(pDSName)
+		do:tCredId'="" ..AddSetting(tItem, "Adapter", "Credentials", tCredId)
 
 		// Insert under the edit lock: reread the production, recheck the name,
-		// then one %Save and SaveToClass.
+		// create the entry, then one %Save and SaveToClass.
 		set tSC = ##class(OPCUA.REST.ProductionEdit).Begin(.tProd, .tStamp)
 		Quit:$$$ISERR(tSC)
+		set tCreated = 0
 		Try {
 			if $IsObject(##class(OPCUA.REST.ProductionEdit).FindItem(tProd, pDSName)) {
 				set tSC = ..DuplicateNameError(pDSName)
 			} else {
-				do tProd.Items.Insert(tItem)
-				set tSC = ##class(OPCUA.REST.ProductionEdit).Commit(tProd, tStamp)
+				if tNewCredId '= "" {
+					set tSC = ..CreateOwnedCredentials(tNewCredId, pDSName, tUsername, pBody.%Get("password"))
+					set tCreated = $$$ISOK(tSC)
+				}
+				if $$$ISOK(tSC) {
+					do tProd.Items.Insert(tItem)
+					set tSC = ##class(OPCUA.REST.ProductionEdit).Commit(tProd, tStamp)
+				}
 			}
 		} Catch (eEdit) {
 			set tSC = eEdit.AsStatus()
 		}
+		// No pipeline, so no entry: take back the one just made for it.
+		if $$$ISERR(tSC) && tCreated do ..DeleteOwnedCredentials(tNewCredId, pDSName)
 		do ##class(OPCUA.REST.ProductionEdit).End()
 
 	} Catch (e) {
 		set tSC = e.AsStatus()
 	}
 	Quit tSC
+}
+
+/// The <tt>Ens.Config.Credentials</tt> ID deploy uses for the entry it creates
+/// for pipeline <var>pItemName</var>: <tt>OPCUA-</tt> plus the name.
+///
+/// Every character other than a letter, digit, dot, hyphen or underscore becomes
+/// <tt>_</tt>, so the ID reads cleanly in the Portal's credentials list and can
+/// never hold the <tt>||</tt> ID separator. The ID is at most 50 characters
+/// (<tt>SystemName</tt>'s MAXLEN), and pipeline names run to 128, so a longer one
+/// keeps its first 41 characters plus <tt>-</tt> and an 8-digit hex CRC of the
+/// full name, which keeps names that differ only at the end apart.
+///
+/// Two pipeline names can still map to one ID ("A B" and "A_B"). Deploy then
+/// refuses the second with 409, as it does for any taken ID.
+ClassMethod CredentialsId(pItemName As %String) As %String
+{
+	set tKeep = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-_"
+	set tId = "OPCUA-"
+	for i=1:1:$Length(pItemName) {
+		set tChar = $Extract(pItemName, i)
+		set tId = tId_$Select(tKeep[tChar:tChar, 1:"_")
+	}
+	if $Length(tId) > ..#CredentialsIdMax {
+		set tCrc = $ZConvert($ZHex($ZCRC($ZConvert(pItemName, "O", "UTF8"), 7)), "U")
+		set tCrc = $Translate($Justify(tCrc, 8), " ", "0")
+		set tId = $Extract(tId, 1, ..#CredentialsIdMax - 9)_"-"_tCrc
+	}
+	Quit tId
+}
+
+/// <tt>Ens.Config.Credentials.SystemName</tt>'s MAXLEN.
+Parameter CredentialsIdMax = 50;
+
+/// Check the body's credentials choice, and return in <var>pCheckBody</var> the
+/// body the coverage check connects with: the caller's own, or, for an existing
+/// entry, a copy carrying that entry's username and password.
+///
+/// 400 if <tt>credentials</tt> names no entry, or comes with a <tt>username</tt>
+/// too. Nothing is created here; <method>AddServiceItem</method> does that.
+ClassMethod ResolveCredentials(pBody As %DynamicObject, Output pCheckBody As %DynamicObject) As %Status
+{
+	set pCheckBody = pBody
+	set tCredId = pBody.%Get("credentials")
+	Quit:tCredId="" $$$OK
+	if pBody.%Get("username") '= "" {
+		Quit ##class(OPCUA.REST.Error).BadRequest("Send either 'credentials' (an existing credentials ID) or 'username' and 'password', not both.")
+	}
+	set tCred = ##class(Ens.Config.Credentials).%OpenId(tCredId)
+	if '$IsObject(tCred) {
+		Quit ##class(OPCUA.REST.Error).BadRequest("Credentials '"_tCredId_"' do not exist in namespace "_$Namespace_". Create them in the Management Portal (Interoperability > Configure > Credentials) first.")
+	}
+	set pCheckBody = {}.%FromJSON(pBody.%ToJSON())
+	do pCheckBody.%Set("username", tCred.Username)
+	do pCheckBody.%Set("password", tCred.Password)
+	Quit $$$OK
+}
+
+/// Create credentials entry <var>pId</var> for pipeline <var>pItemName</var> and
+/// record that deploy made it, in <tt>^OPCUA.OwnedCredentials(pId)</tt>, so that
+/// deleting the pipeline deletes it and nothing else.
+///
+/// An existing entry is never overwritten, whoever made it: 409.
+ClassMethod CreateOwnedCredentials(pId As %String, pItemName As %String, pUsername As %String, pPassword As %String) As %Status [ Private ]
+{
+	if ##class(Ens.Config.Credentials).%ExistsId(pId) {
+		Quit ##class(OPCUA.REST.Error).Conflict("Credentials '"_pId_"' already exist, and are never overwritten. Choose a different pipeline name, or send 'credentials': '"_pId_"' to use them.")
+	}
+	set tSC = ##class(Ens.Config.Credentials).SetCredential(pId, pUsername, pPassword, 0)
+	Quit:$$$ISERR(tSC) ##class(OPCUA.REST.Error).Make(500, "Could not create credentials '"_pId_"'", tSC)
+	set ^OPCUA.OwnedCredentials(pId) = pItemName
+	Quit $$$OK
+}
+
+/// Delete credentials entry <var>pId</var> if, and only if, deploy created it for
+/// pipeline <var>pItemName</var>. Any other entry is left alone. Returns OK when
+/// there is nothing of ours to delete.
+ClassMethod DeleteOwnedCredentials(pId As %String, pItemName As %String) As %Status
+{
+	Quit:pId="" $$$OK
+	Quit:$Get(^OPCUA.OwnedCredentials(pId))'=pItemName $$$OK
+	if ##class(Ens.Config.Credentials).%ExistsId(pId) {
+		set tSC = ##class(Ens.Config.Credentials).%DeleteId(pId)
+		Quit:$$$ISERR(tSC) tSC
+	}
+	kill ^OPCUA.OwnedCredentials(pId)
+	Quit $$$OK
 }
 
 /// The refusal for a pipeline name that is already taken.

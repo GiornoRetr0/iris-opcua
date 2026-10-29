@@ -10,7 +10,7 @@ Class OPCUA.Adapter.Common Extends Ens.InboundAdapter
 /// Ens.ContextSearch.SubclassOf takes the superclass in a parameter named
 /// "class" (not "super"), and already excludes abstract classes, so the abstract
 /// DeviceSchema base never appears in the list.
-Parameter SETTINGS = "URL:Connection,ConnectionRetryTimeout:Connection,AlwaysConnect:Connection,DataSourceClass:Data:selector?context={Ens.ContextSearch/SubclassOf?class=OPCUA.DataSource.DeviceSchema},DeviceNodePaths:Data,Username:User,Password:User,SecurityMode:Security,ClientURI:Security,PublicCertificate:Security,PrivateKey:Security,TrustListDir:Security,RevocationListDir:Security,LogFileTag:Logging";
+Parameter SETTINGS = "URL:Connection,ConnectionRetryTimeout:Connection,AlwaysConnect:Connection,DataSourceClass:Data:selector?context={Ens.ContextSearch/SubclassOf?class=OPCUA.DataSource.DeviceSchema},DeviceNodePaths:Data,Credentials:Connection:credentialsSelector,SecurityMode:Security,ClientURI:Security,PublicCertificate:Security,PrivateKey:Security,TrustListDir:Security,RevocationListDir:Security,LogFileTag:Logging";
 
 // *** PROPERTIES INFLUENCED BY SETTINGS ***
 
@@ -55,12 +55,6 @@ Property DataSourceClass As %String;
 /// no regeneration and no recompile. Only used by the row-source services; the
 /// declarative Examples/Tests path ignores it.
 Property DeviceNodePaths As %String(MAXLEN = 32000);
-
-/// The username with which to log on to the OPC UA server.
-Property Username As %String;
-
-/// The password with which to log on to the OPC UA server.
-Property Password As %String;
 
 Property SecurityMode As %String(DISPLAYLIST = ",None,Sign & Encrypt", VALUELIST = ",1,3") [ InitialExpression = "1", Required ];
 
@@ -177,7 +171,21 @@ Method Connect() As %Status [ Private ]
 			}
 		}
 
-		set tSC = ..Client.Connect(..URL,..Username,..Password)
+		// Username and password come from the Credentials setting, an
+		// Ens.Config.Credentials ID, never from plain-text settings. Unset means
+		// an anonymous session. A set ID that names no entry is an error rather
+		// than a silent anonymous connect. Setting Credentials again reloads the
+		// entry, so a password changed in the Portal applies at the next connect.
+		set tUser = "", tPassword = ""
+		if ..Credentials '= "" {
+			set ..Credentials = ..Credentials
+			if '$IsObject(..%CredentialsObj) || '##class(Ens.Config.Credentials).%ExistsId(..Credentials) {
+				set tSC = $$$ERROR($$$GeneralError, "Credentials entry '"_..Credentials_"' does not exist")
+				Quit
+			}
+			set tUser = ..%CredentialsObj.Username, tPassword = ..%CredentialsObj.Password
+		}
+		set tSC = ..Client.Connect(..URL, tUser, tPassword)
 		//Quit:$$$ISERR(tSC)
 
 	} catch (e) {
