@@ -82,7 +82,10 @@ ClassMethod ParseNodePath(pPath As %String, Output pNS As %Integer, Output pId, 
 	set pId = ""
 	set pIdType = $$$OpcuaNodeIdTypeString
 
-	set tRest = pPath
+	// Surrounding whitespace is not part of the nodepath. The webapp's
+	// parseNodeId() trims first too, and the two must agree.
+	set tPath = $ZStrip(pPath, "<>W")
+	set tRest = tPath
 
 	// Leading "ns=<n>;"
 	if $ZConvert($Extract(tRest, 1, 3), "L") = "ns=" {
@@ -132,7 +135,7 @@ ClassMethod ParseNodePath(pPath As %String, Output pNS As %Integer, Output pId, 
 
 	// Browse-path form (e.g. /Plant/AC1) is not supported yet — see PRD Q1,
 	// which ships the NodeId form first.
-	if $Extract(pPath) = "/" {
+	if $Extract(tPath) = "/" {
 		Quit $$$ERROR($$$GeneralError, "browse-path form is not supported yet — use ns=<n>;s=<name> or ns=<n>;i=<number>")
 	}
 
