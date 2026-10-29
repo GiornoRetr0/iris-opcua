@@ -336,13 +336,15 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 			Quit
 		}
 
-		// Find the item and get its DataSourceClass before removing
+		// Find the item and get its DataSourceClass and ID before removing
 		set tDSClass = ""
 		set tFoundIdx = 0
+		set tItemId = ""
 		for i=1:1:tProd.Items.Count() {
 			set tCfgItem = tProd.Items.GetAt(i)
 			if tCfgItem.Name = tName {
 				set tDSClass = ..GetSettingValue(tCfgItem, "DataSourceClass")
+				set tItemId = tCfgItem.%Id()
 				set tFoundIdx = i
 				Quit
 			}
@@ -367,6 +369,12 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		$$$ThrowOnError(tSC)
 		set tSC = tProd.SaveToClass()
 		$$$ThrowOnError(tSC)
+
+		// Delete the config item row to prevent orphans
+		if tItemId '= "" {
+			set tSC = ##class(Ens.Config.Item).%DeleteId(tItemId)
+			$$$ThrowOnError(tSC)
+		}
 
 		if tProdRunning {
 			do ##class(Ens.Director).UpdateProduction()

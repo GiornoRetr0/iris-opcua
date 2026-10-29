@@ -651,16 +651,27 @@ ClassMethod Cleanup() [ Private ]
             set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
             if $IsObject(tProd) {
                 // Descending, so removing one index does not shift the next.
+                // Collect IDs before removing, so we can delete the config item rows.
+                kill tItemIds
                 set tRemoved = 0
                 for i=tProd.Items.Count():-1:1 {
-                    set tNm = tProd.Items.GetAt(i).Name
+                    set tItem = tProd.Items.GetAt(i)
+                    set tNm = tItem.Name
                     continue:(tNm'=..#ItemName)&&(tNm'=..#DeployItemName)
+                    set tItemIds(i) = tItem.%Id()
                     do tProd.Items.RemoveAt(i)
                     set tRemoved = 1
                 }
                 if tRemoved {
                     do tProd.%Save()
                     do tProd.SaveToClass()
+                    // Delete the config item rows
+                    set i = ""
+                    for {
+                        set i = $Order(tItemIds(i))
+                        Quit:i=""
+                        Try { do ##class(Ens.Config.Item).%DeleteId(tItemIds(i)) } Catch (eDel) {}
+                    }
                     do ##class(Ens.Director).GetProductionStatus(.tRunning, .tState)
                     if (tRunning = ..#ProductionClass) && (tState = 1) {
                         do ##class(Ens.Director).UpdateProduction()
