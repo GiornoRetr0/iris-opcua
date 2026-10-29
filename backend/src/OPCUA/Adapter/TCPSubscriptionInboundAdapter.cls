@@ -207,6 +207,7 @@ Method Connect() As %Status
 	
 		$$$LOGERROR("OPCUA subscription query setup failed : "_$SYSTEM.Status.GetErrorText(tSC))
 
+		// Status ignored: the setup error in tSC is the one to report.
 		do ..Disconnect()
 
 		Quit tSC

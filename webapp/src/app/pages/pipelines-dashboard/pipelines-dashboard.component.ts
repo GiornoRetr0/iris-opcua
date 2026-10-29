@@ -142,13 +142,18 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
       </div>
       }
 
-      @if (actionError()) {
+      @if (actionError() || loadError()) {
         <div class="mb-6 flex items-start gap-3 bg-error-container/40 border border-error/20 rounded-xl px-4 py-3">
           <span class="material-symbols-outlined text-error text-xl">error</span>
           <div class="flex-1">
-            <p class="text-sm font-semibold text-on-error-container">{{ actionError() }}</p>
+            @if (actionError()) {
+              <p class="text-sm font-semibold text-on-error-container">{{ actionError() }}</p>
+            }
+            @if (loadError()) {
+              <p class="text-sm font-semibold text-on-error-container">Could not load business services: {{ loadError() }}</p>
+            }
           </div>
-          <button (click)="actionError.set('')" class="text-on-error-container/60 hover:text-on-error-container">
+          <button (click)="actionError.set(''); loadError.set('')" class="text-on-error-container/60 hover:text-on-error-container">
             <span class="material-symbols-outlined text-lg">close</span>
           </button>
         </div>
@@ -254,6 +259,17 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
                 }
               </div>
             </div>
+
+            <!-- The server could not describe this pipeline; the rest of the list is fine. -->
+            @if (pipeline.error) {
+              <div class="flex items-start gap-3 mb-6 bg-error-container/25 border border-error/20 rounded-lg px-4 py-3">
+                <span class="material-symbols-outlined text-error text-xl shrink-0">error</span>
+                <div class="min-w-0">
+                  <p class="text-sm font-bold text-on-error-container">Could not read this business service</p>
+                  <p class="text-xs text-on-error-container/80 mt-0.5">{{ pipeline.error }}</p>
+                </div>
+              </div>
+            }
 
             <!-- Enabled but not collecting: say so, and say what to do about it.
                  Without this the card looked identical to a healthy one. -->
@@ -576,6 +592,7 @@ export class PipelinesDashboardComponent implements OnInit, OnDestroy {
     if (!background) this.loading.set(true);
     this.api.listPipelines().subscribe({
       next: (pipelines) => {
+        this.loadError.set('');
         this.pipelines.set(pipelines);
         // "Running" now means collecting, not merely enabled — a failing pipeline
         // must not be counted in both tiles.
@@ -584,11 +601,15 @@ export class PipelinesDashboardComponent implements OnInit, OnDestroy {
         this.stoppedCount.set(pipelines.filter((p) => this.isStopped(p)).length);
         this.loading.set(false);
       },
-      error: () => {
+      error: (err) => {
         this.loading.set(false);
         // Keep the last known list on a background failure: a blip in the API
-        // shouldn't wipe the dashboard.
-        if (!background) this.pipelines.set([]);
+        // shouldn't wipe the dashboard. A failed foreground load says why, so an
+        // empty page is not mistaken for "no pipelines".
+        if (!background) {
+          this.pipelines.set([]);
+          this.loadError.set(apiErrorMessage(err));
+        }
       },
     });
   }
@@ -603,6 +624,8 @@ export class PipelinesDashboardComponent implements OnInit, OnDestroy {
    * the namespace. Without it a refused action looked like a click that did nothing.
    */
   actionError = signal('');
+  /** Why the last foreground load of the list failed; cleared by a good load. */
+  loadError = signal('');
 
   togglePipeline(pipeline: Pipeline): void {
     this.actionError.set('');

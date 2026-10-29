@@ -32,79 +32,15 @@ ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %S
 
 		for i=1:1:tProd.Items.Count() {
 			set tCfgItem = tProd.Items.GetAt(i)
-
-			set tItem = {}
-			set tItem.name = tCfgItem.Name
-			set tItem.className = tCfgItem.ClassName
-			set tItem.enabled = tCfgItem.Enabled
-			// Portal categories, as an array rather than the stored comma string:
-			// the console edits them as discrete chips, and splitting on the client
-			// would duplicate the trimming rules that already live server-side.
-			set tItem.categories = []
-			for c=1:1:$Length(tCfgItem.Category, ",") {
-				set tCat = $ZStrip($Piece(tCfgItem.Category, ",", c), "<>WC")
-				continue:tCat=""
-				do tItem.categories.%Push(tCat)
+			// One pipeline that cannot be described must not hide the others: it is
+			// listed with its error, as SchemaService.List lists an unreadable schema.
+			Try {
+				set tItem = ..ListEntry(tCfgItem, tProdRunning)
+			} Catch (eItem) {
+				set tItem = {"name": (tCfgItem.Name), "className": (tCfgItem.ClassName), "categories": []}
+				set tItem.enabled = tCfgItem.Enabled
+				set tItem.error = ##class(OPCUA.REST.Error).Text(eItem.AsStatus())
 			}
-
-			// Determine mode and pipeline version from service class
-			if tItem.className = "OPCUA.Service.TCPSubscriptionRowSourceService" {
-				set tItem.mode = "subscription"
-				set tItem.pipelineVersion = 2
-			} elseif tItem.className = "OPCUA.Service.TCPSubscriptionService" {
-				set tItem.mode = "subscription"
-				set tItem.pipelineVersion = 1
-			} elseif tItem.className = "OPCUA.Service.TCPPollingRowSourceService" {
-				set tItem.mode = "polling"
-				set tItem.pipelineVersion = 2
-			} else {
-				set tItem.mode = "polling"
-				set tItem.pipelineVersion = 1
-			}
-
-			// Read settings from config item
-			set tItem.dataSourceClass = ..GetSettingValue(tCfgItem, "DataSourceClass")
-			set tItem.serverUrl = ..GetSettingValue(tCfgItem, "URL")
-			set tItem.callInterval = ..GetSettingValue(tCfgItem, "CallInterval")
-			set tItem.publishingInterval = ..GetSettingValue(tCfgItem, "RequestedPublishingInterval")
-			// The device list is now a plain setting, so surface it directly —
-			// editing a pipeline's devices is editing this string.
-			set tDeviceNodePaths = ..GetSettingValue(tCfgItem, "DeviceNodePaths")
-			set tItem.deviceNodePaths = tDeviceNodePaths
-
-			// Derive table name from DataSource class
-			if tItem.dataSourceClass '= "" {
-				set tItem.tableName = ##class(OPCUA.REST.SchemaService).TableName(tItem.dataSourceClass)
-			}
-
-			if tProdRunning {
-				set tItem.running = ##class(Ens.Director).IsItemEnabled(tItem.name, .tSCStatus)
-			} else {
-				set tItem.running = 0
-			}
-			// Rows are a property of the table, not of the run state. Reporting 0
-			// for a stopped pipeline claimed its collected data was gone — and since
-			// a pipeline is now deployed stopped, that is the common case.
-			set tCount = ..GetRowCount(tItem.dataSourceClass)
-			do tItem.%Set("rowCount", tCount, $Select(tCount = "":"null", 1:"number"))
-
-			// Enabled is not the same as collecting: a service whose adapter fails
-			// to connect or resolve stays enabled and keeps retrying while writing
-			// nothing. Surface the adapter's own verdict so the UI can tell the two
-			// apart — this is what "started but silently collecting nothing" looked
-			// like before.
-			do ..GetHealth(tItem.name, tProdRunning, tCfgItem.Enabled, .tHealth, .tLastActivity, .tCycles)
-			set tItem.health = tHealth
-			set tItem.lastActivity = tLastActivity
-			set tItem.cycles = tCycles
-
-			set tItem.productionRunning = tProdRunning
-			set tItem.nodes = ..GetNodeNames(tItem.dataSourceClass)
-
-			if tItem.pipelineVersion = 2 {
-				set tItem.rowSources = ..GetRowSourceInfo(tItem.dataSourceClass, tDeviceNodePaths)
-			}
-
 			do pResult.%Push(tItem)
 		}
 
@@ -112,6 +48,91 @@ ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %S
 		set tSC = e.AsStatus()
 	}
 	Quit tSC
+}
+
+/// One pipeline's entry for <method>List</method>. Throws on an unexpected
+/// error, which List reports as that item's <tt>error</tt>.
+ClassMethod ListEntry(pCfgItem As Ens.Config.Item, pProdRunning As %Boolean) As %DynamicObject [ Private ]
+{
+	// Test seam (process-private, so not reachable over REST): force this item to fail.
+	if $Get(^||OPCUA.Tests("failPipelineItem")) = pCfgItem.Name {
+		$$$ThrowStatus($$$ERROR($$$GeneralError, "Forced failure describing pipeline '"_pCfgItem.Name_"'"))
+	}
+	set tCfgItem = pCfgItem, tProdRunning = pProdRunning
+
+	set tItem = {}
+	set tItem.name = tCfgItem.Name
+	set tItem.className = tCfgItem.ClassName
+	set tItem.enabled = tCfgItem.Enabled
+	// Portal categories, as an array rather than the stored comma string:
+	// the console edits them as discrete chips, and splitting on the client
+	// would duplicate the trimming rules that already live server-side.
+	set tItem.categories = []
+	for c=1:1:$Length(tCfgItem.Category, ",") {
+		set tCat = $ZStrip($Piece(tCfgItem.Category, ",", c), "<>WC")
+		continue:tCat=""
+		do tItem.categories.%Push(tCat)
+	}
+
+	// Determine mode and pipeline version from service class
+	if tItem.className = "OPCUA.Service.TCPSubscriptionRowSourceService" {
+		set tItem.mode = "subscription"
+		set tItem.pipelineVersion = 2
+	} elseif tItem.className = "OPCUA.Service.TCPSubscriptionService" {
+		set tItem.mode = "subscription"
+		set tItem.pipelineVersion = 1
+	} elseif tItem.className = "OPCUA.Service.TCPPollingRowSourceService" {
+		set tItem.mode = "polling"
+		set tItem.pipelineVersion = 2
+	} else {
+		set tItem.mode = "polling"
+		set tItem.pipelineVersion = 1
+	}
+
+	// Read settings from config item
+	set tItem.dataSourceClass = ..GetSettingValue(tCfgItem, "DataSourceClass")
+	set tItem.serverUrl = ..GetSettingValue(tCfgItem, "URL")
+	set tItem.callInterval = ..GetSettingValue(tCfgItem, "CallInterval")
+	set tItem.publishingInterval = ..GetSettingValue(tCfgItem, "RequestedPublishingInterval")
+	// The device list is now a plain setting, so surface it directly —
+	// editing a pipeline's devices is editing this string.
+	set tDeviceNodePaths = ..GetSettingValue(tCfgItem, "DeviceNodePaths")
+	set tItem.deviceNodePaths = tDeviceNodePaths
+
+	// Derive table name from DataSource class
+	if tItem.dataSourceClass '= "" {
+		set tItem.tableName = ##class(OPCUA.REST.SchemaService).TableName(tItem.dataSourceClass)
+	}
+
+	if tProdRunning {
+		set tItem.running = ##class(Ens.Director).IsItemEnabled(tItem.name, .tSCStatus)
+	} else {
+		set tItem.running = 0
+	}
+	// Rows are a property of the table, not of the run state. Reporting 0
+	// for a stopped pipeline claimed its collected data was gone — and since
+	// a pipeline is now deployed stopped, that is the common case.
+	set tCount = ..GetRowCount(tItem.dataSourceClass)
+	do tItem.%Set("rowCount", tCount, $Select(tCount = "":"null", 1:"number"))
+
+	// Enabled is not the same as collecting: a service whose adapter fails
+	// to connect or resolve stays enabled and keeps retrying while writing
+	// nothing. Surface the adapter's own verdict so the UI can tell the two
+	// apart — this is what "started but silently collecting nothing" looked
+	// like before.
+	do ..GetHealth(tItem.name, tProdRunning, tCfgItem.Enabled, .tHealth, .tLastActivity, .tCycles)
+	set tItem.health = tHealth
+	set tItem.lastActivity = tLastActivity
+	set tItem.cycles = tCycles
+
+	set tItem.productionRunning = tProdRunning
+	set tItem.nodes = ..GetNodeNames(tItem.dataSourceClass)
+
+	if tItem.pipelineVersion = 2 {
+		set tItem.rowSources = ..GetRowSourceInfo(tItem.dataSourceClass, tDeviceNodePaths)
+	}
+
+	Quit tItem
 }
 
 /// Get a setting value from a config item by name.
@@ -206,7 +227,8 @@ ClassMethod GetRowCount(pClassName As %String) As %Integer [ Internal ]
 	set tCount = 0
 	Try {
 		if pClassName = "" Quit
-		if '##class(%Dictionary.ClassDefinition).%ExistsId(pClassName) Quit
+		// A schema class that is gone has an unknown count, not 0 rows.
+		if '##class(%Dictionary.ClassDefinition).%ExistsId(pClassName) set tCount = "" Quit
 
 		// $ZH is a monotonic second counter, so this needs no date arithmetic.
 		set tNow = $ZH
@@ -572,9 +594,11 @@ ClassMethod GetRowSourceInfo(pClassName As %String, pDeviceNodePaths As %String 
 	set tResult = []
 	Quit:pDeviceNodePaths="" tResult
 
-	// Unusable lines are reported by deploy and by the adapter; here they are
-	// simply not devices.
-	$$$ThrowOnError(##class(OPCUA.DataSource.Resolver).ParseDeviceNodePaths(pDeviceNodePaths, .tDevices, .tErrors))
+	// Status ignored: a list with no usable device (all comments, which is how a
+	// pipeline is paused from the Portal, or all invalid) is an error there, but
+	// here it is just a pipeline with no devices. Deploy and the adapter report
+	// unusable lines.
+	do ##class(OPCUA.DataSource.Resolver).ParseDeviceNodePaths(pDeviceNodePaths, .tDevices, .tErrors)
 	Quit:$LL($Get(tDevices))=0 tResult
 
 	// Schema columns, in the same storage order the runtime uses. A schema that

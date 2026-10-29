@@ -138,6 +138,7 @@ ClassMethod CreateWebApp(pNamespace As %String) As %Status
 	Catch (oException)
 	{
 		// Restore namespace on error
+		// Best effort: the original error must win over a failed namespace restore.
 		Try { ZN tNS } Catch (e2) {}
 		Set tSC = oException.AsStatus()
 	}
@@ -169,6 +170,7 @@ ClassMethod DisablePasswordExpiration() As %Status
 	}
 	Catch (oException)
 	{
+		// Best effort: the original error must win over a failed namespace restore.
 		Try { ZN tNS } Catch (e2) {}
 		Set tSC = oException.AsStatus()
 	}

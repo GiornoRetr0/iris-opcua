@@ -110,6 +110,7 @@ Method Connect() As %Status
 	// retry Connect, and so retry resolution — which is also what lets a device
 	// that only becomes browsable later start reporting on its own.
 	if $$$ISERR(tSC) && (..QueryHandle '> 0) {
+		// Status ignored: the setup error in tSC is the one to report.
 		do ..Disconnect()
 		set ..IsConnected = 0
 	}

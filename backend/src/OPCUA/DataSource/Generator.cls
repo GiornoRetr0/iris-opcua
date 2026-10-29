@@ -90,7 +90,8 @@ ClassMethod Generate(URL As %String, StartNodeNS As %Integer, StartNodeId, Class
 			write "No variable nodes found. No file generated.", !
 		}
 
-		// Disconnect
+		// Disconnect. Status ignored: the file is already written, and a failed
+		// disconnect of a terminal tool's session changes nothing for the user.
 		write "Disconnecting...", !
 		do tClient.Disconnect()
 		write "Done.", !
@@ -100,7 +101,9 @@ ClassMethod Generate(URL As %String, StartNodeNS As %Integer, StartNodeId, Class
 		// Try to disconnect on error
 		Try {
 			if $IsObject($Get(tClient)) do tClient.Disconnect()
-		} Catch (e2) {}
+		} Catch (e2) {
+			// Best-effort cleanup: the original error in tSC must win.
+		}
 	}
 
 	Quit tSC

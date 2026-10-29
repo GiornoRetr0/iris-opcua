@@ -97,6 +97,10 @@ Method TestGetRowCount()
 	set tCount = ##class(OPCUA.REST.PipelineService).GetRowCount("OPCUA.Utils")
 	do $$$AssertEquals(tCount, "", "GetRowCount is empty for a failed count, got '"_tCount_"'")
 	do $$$AssertEquals($Data(^IRIS.Temp.OPCUARowCount("OPCUA.Utils")), 0, "a failed count is not cached")
+
+	// A pipeline whose schema class is gone: unknown too, not 0 rows.
+	set tCount = ##class(OPCUA.REST.PipelineService).GetRowCount("OPCUA.Tests.Tmp.NoSuchSchema")
+	do $$$AssertEquals(tCount, "", "GetRowCount is empty for a missing class, got '"_tCount_"'")
 }
 
 /// A failed dynamic query throws instead of reading as an empty result.

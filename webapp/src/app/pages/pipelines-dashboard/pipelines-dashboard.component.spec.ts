@@ -49,4 +49,34 @@ describe('PipelinesDashboardComponent action errors', () => {
     expect(component.actionError()).toBe(text);
     expect(api.listPipelines).toHaveBeenCalledTimes(1);
   });
+
+  it('shows the API error in the banner when the list fails to load', () => {
+    api.listPipelines.and.returnValue(throwError(() => new Error('Internal error. Reference 20261030-123')));
+
+    component.loadPipelines();
+
+    expect(component.loadError()).toBe('Internal error. Reference 20261030-123');
+    expect(component.pipelines()).toEqual([]);
+  });
+
+  it('keeps the list and shows no load error on a failed background refresh', () => {
+    api.listPipelines.and.returnValue(of([{ name: 'A' } as any]));
+    component.loadPipelines();
+    api.listPipelines.and.returnValue(throwError(() => new Error('blip')));
+
+    component.loadPipelines(true);
+
+    expect(component.loadError()).toBe('');
+    expect(component.pipelines().length).toBe(1);
+  });
+
+  it('clears the load error after a good load', () => {
+    api.listPipelines.and.returnValue(throwError(() => new Error('down')));
+    component.loadPipelines();
+    api.listPipelines.and.returnValue(of([]));
+
+    component.loadPipelines();
+
+    expect(component.loadError()).toBe('');
+  });
 });
