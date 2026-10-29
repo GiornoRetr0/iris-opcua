@@ -17,7 +17,10 @@ ClassMethod Initialize() As %Status
 
         set tOpcuaStatusCode = 0 // Status = "Good"
 
-        If '$Data(%ZUtilsIrisOpcuaLibraryId) throw ##class(%Exception.StatusException).CreateFromStatus(0)
+        If '$Data(%ZUtilsIrisOpcuaLibraryId) {
+            Set tSC = $$$ERROR($$$GeneralError, "IrisOPCUA library is not loaded")
+            Quit
+        }
 
 		//set tRetval=$ZF(-6,$$$IrisOPCUALibrary,$$$zfGetStatusCodeNameB,"",$LB(tOpcuaStatusCode))
 		set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfGetStatusCodeNameB,"",$LB(tOpcuaStatusCode))
@@ -36,7 +39,7 @@ ClassMethod Initialize() As %Status
         //set tPathname = ^OPCUA.Library.Pathname
         set tSC = ##class(OPCUA.Utils).GetLibPathname(.tPathname)
 		$$$ThrowOnError(tSC)
-        
+
         $$$TRACE("Attempting to load IrisOPCUA with pathname '"_tPathname_"'")
 
         //do $ZF(-4,5,$$$IrisOPCUALibrary,tPathname)
@@ -47,11 +50,15 @@ ClassMethod Initialize() As %Status
         $$$LOGERROR("Error thrown during IrisOPCUA handle assignment : "_$SYSTEM.Status.GetErrorText(tSC))
     }
 
-    set tSC = $$$OK
+    // Keep the first error - don't reset tSC to $$$OK after a failure
+    If $$$ISERR(tSC) Quit tSC
 
     try {
 
-        If '$Data(%ZUtilsIrisOpcuaLibraryId) throw ##class(%Exception.StatusException).CreateFromStatus(0)
+        If '$Data(%ZUtilsIrisOpcuaLibraryId) {
+            Set tSC = $$$ERROR($$$GeneralError, "IrisOPCUA library is not loaded: "_tPathname)
+            Quit
+        }
 
 		//set tRetval=$ZF(-6,$$$IrisOPCUALibrary,$$$zfGetStatusCodeNameB,"",$LB(0))
 		set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfGetStatusCodeNameB,"",$LB(0))
@@ -98,8 +105,11 @@ ClassMethod Install(pPathname As %String) As %Status
 ClassMethod GetLibPathname(Output pPathname As %String) As %Status
 {
     #dim tSC as %Status = $$$OK
-    
+
     try {
+
+        // Test seam: allow tests to override the library path
+        if ($GET(^||OPCUA.LibPathOverride) '= "") set pPathname = ^||OPCUA.LibPathOverride Quit
 
         if ($GET(^OPCUA.Library.Pathname) '= "") set pPathname = ^OPCUA.Library.Pathname Quit
 
