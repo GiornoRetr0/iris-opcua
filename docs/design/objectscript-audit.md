@@ -48,14 +48,14 @@ leftover data).
 ## Smaller issues
 
 - **Ignored statuses:** `SetLogFile`, `UpdateProduction`, `EnableConfigItem`, `GetProductionStatus` and `CreateObjectFromSourceData`. Rebind reports `restarted=1` even when the restart failed.
-- **Library-not-found hides its reason** ✔ (`Utils.cls:50-54`). The real status is overwritten, then `CreateFromStatus(0)` throws, so the user sees "Invalid status code structure".
-- **Typo bug:** `tRetVal` vs `tRetval` in `DateTimeUtils.cls:94` and `:113`. It is hidden today only because the native function isn't available.
-- **Large request bodies are cut** ✔ (`Handler.cls:326`). `Content.Read()` reads one chunk, about 160 KB. Use `%FromJSON(%request.Content)`.
+- ✅ ~~**Library-not-found hides its reason**~~ **Fixed 2026-10-29** ✔ (`Utils.cls:50-54`). The real status was overwritten with `$$$OK`, then `CreateFromStatus(0)` threw, so the user saw "Invalid status code structure". **Fix:** `Initialize` keeps the first error instead of resetting to `$$$OK` after a failure, and replaces both `CreateFromStatus(0)` throws with real `$$$ERROR($$$GeneralError,"IrisOPCUA library is not loaded: "_reason)`. `GetLibPathname` adds `^||OPCUA.LibPathOverride` test seam (process-private global). **Verified:** `UtilsTest.TestMissingLibraryReason` asserts the error contains the missing path and does not contain "Invalid status code structure".
+- ✅ ~~**Typo bug**~~ **Fixed 2026-10-29**: `tRetVal` vs `tRetval` in `DateTimeUtils.cls:94` and `:113`. **Fix:** renamed both to `tRetval` (lowercase V). **Verified:** `UtilsTest.TestDateConvVariables` searches compiled method implementation for `tRetVal` (case-sensitive) and asserts count is 0 for both methods.
+- ✅ ~~**Large request bodies are cut**~~ **Fixed 2026-10-29** ✔ (`Handler.cls:326`). `Content.Read()` read one chunk, about 160 KB. **Fix:** `GetRequestParams` now parses directly from `%request.Content` (handles both streams and strings) with `{}.%FromJSON(%request.Content)`. **Verified:** `RestBodyTest.TestLargeBody` POSTs a 1.5 MB JSON body to `/test` and asserts the response is parsed, not "Invalid request".
 - **Every error returns HTTP 400** and exposes raw `<UNDEFINED>` routine offsets.
-- **SQL table names are rebuilt by hand in three places**, ignoring `SqlTableName`.
+- ✅ ~~**SQL table names are rebuilt by hand in three places**~~ **Fixed 2026-10-29**, ignoring `SqlTableName`. **Fix:** `SchemaService.TableName(pClassName)` reads `SqlTableName` and `SqlSchemaName` from `%Dictionary.CompiledClass`, with fallback to package-based derivation when the class doesn't exist. `PipelineService.List` and `GetRowCount` both call `TableName()`. **Verified:** `SchemaNamingTest.TestTableNameHonoursSqlTableName` creates a class with `SqlTableName = "Custom_T"` and asserts `TableName()` returns a qualified name containing "Custom_T".
 - **Schema delete can remove a shared class:** `DeleteSerialSubclasses` would delete a serial class shared with a hand-written schema.
 - **Ownership markers are case-sensitive** in the installer, but IRIS application names are not ✔.
-- **Stale documentation:** CLAUDE.md still mentions `StrictSchemaMatch`, and the `Client.cls` header says security isn't implemented.
+- ✅ ~~**Stale documentation**~~ **Fixed 2026-10-29**: CLAUDE.md mentioned `StrictSchemaMatch`, and the `Client.cls` header said security isn't implemented. **Fix:** removed `StrictSchemaMatch` references from `../CLAUDE.md` and `docs/architecture.md`. Updated `Client.cls` header to describe SecurityMode 1 (None: unencrypted, anonymous) and 3 (Sign & Encrypt: mutual TLS) as implemented.
 
 ## AI-style patterns to watch
 
