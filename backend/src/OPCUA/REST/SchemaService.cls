@@ -98,7 +98,8 @@ ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %S
 	#dim tSC As %Status = $$$OK
 	set pResult = []
 	Try {
-		do ..MapSchemaUsage(.tUsage)
+		set tSC = ..MapSchemaUsage(.tUsage)
+		Quit:$$$ISERR(tSC)
 
 		set tRS = ##class(%ResultSet).%New("%Dictionary.ClassDefinition:SubclassOf")
 		set tSC = tRS.Execute("OPCUA.DataSource.DeviceSchema")
@@ -111,7 +112,7 @@ ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %S
 			continue:$$$comClassKeyGet(tClass,$$$cCLASSabstract)
 
 			set tItem = ..DescribeSchema(tClass, 0)
-			set tItem.usedBy = ..UsageArray($Get(tUsage(tClass), ""))
+			set tItem.usedBy = ..UsageArray(.tUsage, tClass)
 			do pResult.%Push(tItem)
 		}
 	} Catch (e) {
@@ -130,9 +131,11 @@ ClassMethod Get(pBody As %DynamicObject, Output pResult As %DynamicObject) As %S
 		set tSC = ..RequireSchema(pBody, .tClassName)
 		Quit:$$$ISERR(tSC)
 
-		do ..MapSchemaUsage(.tUsage)
+		set tSC = ..MapSchemaUsage(.tUsage)
+		Quit:$$$ISERR(tSC)
+
 		set pResult = ..DescribeSchema(tClassName, 1)
-		set pResult.usedBy = ..UsageArray($Get(tUsage(tClassName), ""))
+		set pResult.usedBy = ..UsageArray(.tUsage, tClassName)
 	} Catch (e) {
 		set tSC = e.AsStatus()
 	}
@@ -150,10 +153,28 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		set tSC = ..RequireSchema(pBody, .tClassName)
 		Quit:$$$ISERR(tSC)
 
-		do ..MapSchemaUsage(.tUsage)
-		set tUsedBy = $Get(tUsage(tClassName), "")
-		if tUsedBy '= "" {
-			set tSC = $$$ERROR($$$GeneralError, "Schema '"_tClassName_"' is still used by pipeline(s): "_$Replace(tUsedBy, $Char(1), ", ")_". Delete those pipelines first.")
+		set tSC = ..MapSchemaUsage(.tUsage)
+		Quit:$$$ISERR(tSC)
+
+		// Check if schema is in use in any production
+		set tUsageList = ""
+		set tProdClass = ""
+		for {
+			set tProdClass = $Order(tUsage(tClassName, tProdClass))
+			quit:tProdClass=""
+
+			set tItemName = ""
+			for {
+				set tItemName = $Order(tUsage(tClassName, tProdClass, tItemName))
+				quit:tItemName=""
+
+				set tEntry = tItemName_" ("_tProdClass_")"
+				set tUsageList = tUsageList_$Select(tUsageList="":"", 1:", ")_tEntry
+			}
+		}
+
+		if tUsageList '= "" {
+			set tSC = $$$ERROR($$$GeneralError, "Schema '"_tClassName_"' is still used by: "_tUsageList)
 			Quit
 		}
 
@@ -699,38 +720,81 @@ ClassMethod DescribeSchema(pClassName As %String, pWithColumns As %Boolean = 0) 
 	Quit tItem
 }
 
-/// Map schemaClass → $Char(1)-delimited list of config items referencing it.
+/// Map usage across ALL productions in the namespace.
+///
+/// Output: pUsage(schemaClass, production, itemName) = "". Any failure (e.g. cannot
+/// open a production) is returned as a %Status error, so callers can refuse actions
+/// that depend on complete usage information.
 ///
 /// Not private: PipelineService reports remaining usage after deleting a
 /// pipeline, and this is the single definition of "which pipelines use what".
-ClassMethod MapSchemaUsage(Output pUsage)
+ClassMethod MapSchemaUsage(Output pUsage) As %Status
 {
+	#dim tSC As %Status = $$$OK
 	kill pUsage
 	Try {
-		set tProdClass = ##class(OPCUA.REST.DeployService).#ProductionClass
-		if '##class(%Dictionary.ClassDefinition).%ExistsId(tProdClass) Quit
-		set tProd = ##class(Ens.Config.Production).%OpenId(tProdClass)
-		if '$IsObject(tProd) Quit
+		// Test seam: force a failure to test error handling
+		if $Get(^||OPCUA.Tests("failUsage")) {
+			set tSC = $$$ERROR($$$GeneralError, "Forced usage check failure")
+			Quit
+		}
 
-		for i=1:1:tProd.Items.Count() {
-			set tItem = tProd.Items.GetAt(i)
-			for j=1:1:tItem.Settings.Count() {
-				set tS = tItem.Settings.GetAt(j)
-				continue:tS.Name'="DataSourceClass"
-				continue:tS.Value=""
-				set pUsage(tS.Value) = $Get(pUsage(tS.Value), "")_$Select($Get(pUsage(tS.Value))="":"", 1:$Char(1))_tItem.Name
+		// Iterate every production in the namespace via SQL
+		set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT ID FROM Ens_Config.Production")
+		if '$IsObject($Get(tRS)) {
+			set tSC = $$$ERROR($$$GeneralError, "Failed to query Ens_Config.Production")
+			Quit
+		}
+
+		while tRS.%Next() {
+			set tProdClass = tRS.ID
+			set tProd = ##class(Ens.Config.Production).%OpenId(tProdClass)
+			if '$IsObject(tProd) {
+				set tSC = $$$ERROR($$$GeneralError, "Failed to open production '"_tProdClass_"'")
+				Quit
+			}
+
+			for i=1:1:tProd.Items.Count() {
+				set tItem = tProd.Items.GetAt(i)
+				for j=1:1:tItem.Settings.Count() {
+					set tS = tItem.Settings.GetAt(j)
+					continue:tS.Name'="DataSourceClass"
+					continue:tS.Value=""
+					set pUsage(tS.Value, tProdClass, tItem.Name) = ""
+				}
 			}
 		}
-	} Catch (e) {}
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit tSC
 }
 
-/// Turn a $Char(1)-delimited usage list into a JSON array.
-ClassMethod UsageArray(pList As %String) As %DynamicArray
+/// Turn the three-subscript usage map into a JSON array of objects.
+///
+/// Input: pUsage(schemaClass, production, itemName) = ""
+/// Output: [{name: itemName, production: prodClass, managed: true|false}, ...]
+/// where managed = true if production is OPCUA.Pipeline.Production.
+ClassMethod UsageArray(ByRef pUsage, pSchemaClass As %String) As %DynamicArray
 {
 	set tArr = []
-	Quit:pList="" tArr
-	for i=1:1:$Length(pList, $Char(1)) {
-		do tArr.%Push($Piece(pList, $Char(1), i))
+	set tProdClass = ""
+	for {
+		set tProdClass = $Order(pUsage(pSchemaClass, tProdClass))
+		quit:tProdClass=""
+
+		set tItemName = ""
+		for {
+			set tItemName = $Order(pUsage(pSchemaClass, tProdClass, tItemName))
+			quit:tItemName=""
+
+			set tObj = {}
+			set tObj.name = tItemName
+			set tObj.production = tProdClass
+			set tManaged = (tProdClass = ##class(OPCUA.REST.DeployService).#ProductionClass)
+			do tObj.%Set("managed", tManaged, "boolean")
+			do tArr.%Push(tObj)
+		}
 	}
 	Quit tArr
 }

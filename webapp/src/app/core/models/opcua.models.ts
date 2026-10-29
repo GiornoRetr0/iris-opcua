@@ -185,8 +185,17 @@ export interface Schema {
   columnCount: number;
   /** Populated by GET /schemas/:name only */
   columns?: SchemaColumn[];
-  /** Names of the pipelines currently bound to this schema */
-  usedBy: string[];
+  /** Pipelines currently bound to this schema, across all productions */
+  usedBy: SchemaUsage[];
+}
+
+export interface SchemaUsage {
+  /** Service item name */
+  name: string;
+  /** Production class name */
+  production: string;
+  /** True if production is OPCUA.Pipeline.Production (managed by console) */
+  managed: boolean;
 }
 
 export interface SchemaColumn {

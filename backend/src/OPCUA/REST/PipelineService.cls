@@ -365,8 +365,13 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		set pResult.schemaClass = tDSClass
 		set pResult.schemaRetained = 1
 		if tDSClass '= "" {
-			do ##class(OPCUA.REST.SchemaService).MapSchemaUsage(.tUsage)
-			set pResult.schemaStillUsedBy = ##class(OPCUA.REST.SchemaService).UsageArray($Get(tUsage(tDSClass), ""))
+			set tSC2 = ##class(OPCUA.REST.SchemaService).MapSchemaUsage(.tUsage)
+			if $$$ISOK(tSC2) {
+				set pResult.schemaStillUsedBy = ##class(OPCUA.REST.SchemaService).UsageArray(.tUsage, tDSClass)
+			} else {
+				// Usage check failed, report empty — the schema is retained anyway
+				set pResult.schemaStillUsedBy = []
+			}
 		} else {
 			set pResult.schemaStillUsedBy = []
 		}
