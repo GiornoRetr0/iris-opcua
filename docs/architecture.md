@@ -370,7 +370,7 @@ Two details carry the correctness:
 
 It's best-effort and opt-out (`probeChildren: 0`). When the probe is skipped or fails, `CategoryHasChildren()`'s guess stands — deliberately optimistic, since an arrow that opens to nothing is a smaller failure than a subtree the user cannot open at all.
 
-`nodeClass` is optional, not required. The C++ layer exports it at browse reference position `[6]` (`UACExport::UA2CL_ReferenceDescription`), but prebuilt binaries older than that export send an empty value — so an empty `nodeClass` falls back to the pure TypeDefinition inference, which is what shipped before. `OPCUA.Tests.ResolverTest` asserts both that a live server populates it and that the derived categories are the ones the webapp expects, so a stale `.so` shows up as a test failure rather than as a subtly wrong tree.
+`nodeClass` is optional, not required. The C++ layer exports it at browse reference position `[6]` (`UACExport::UA2CL_ReferenceDescription`), but prebuilt binaries older than that export send an empty value — so an empty `nodeClass` falls back to the pure TypeDefinition inference, which is what shipped before. `OPCUA.Tests.Live.ResolverTest` asserts both that a live server populates it and that the derived categories are the ones the webapp expects, so a stale `.so` shows up as a test failure rather than as a subtly wrong tree.
 
 The webapp uses this to render the expandable trees: the node explorer, the schema builder's column picker, and the device picker on the binding screen.
 
@@ -844,6 +844,15 @@ These are passed through `Client.SetupClient()` before connecting. The C++ libra
 
 For Docker, `demo/certgen/generate.sh` generates all necessary certificates using OpenSSL.
 
+### Who can use the console
+
+The OPC UA Console is meant for SuperUser-level developer accounts. An account with
+only the installer's `OPCUA_API_<NS>` role can call the API but cannot edit pipelines:
+deploy, toggle, rebind and delete fail with SQL -99 on the `%Dictionary` stamp query in
+`ProductionEdit`. It cannot write credentials either (`%Ens_Credentials`), and gets a
+403. For such accounts an admin creates the `Ens.Config.Credentials` entries in the
+Portal, and pipelines name them.
+
 ---
 
 ## 18. Global Variables: The Shared State
@@ -1020,3 +1029,4 @@ InboundAdapter InboundAdapter   Svc   Svc   Svc    Svc
 | How pipelines are managed | `OPCUA/REST/PipelineService.cls` |
 | How the Docker image is set up | `demo/iris/IRISConfig/Installer.cls` |
 | How certificates work | `demo/certgen/certgen.bash`, security settings in `OPCUA/Adapter/Common.cls` |
+| How the tests are run | `backend/tests/OPCUA/Tests/Runner.cls`: `Offline()` runs `OPCUA.Tests.Unit` (no server, no native library), `Live()` runs `OPCUA.Tests.Live` (docker `plc`, `certified-server`); load first with `demo/iris/dev-load.sh` |

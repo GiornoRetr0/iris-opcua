@@ -28,14 +28,15 @@ The webapp calls `http://localhost:52783/csp/opcua/api` by default. Docker must 
 # Generic: pipe commands to iris session
 printf 'zn "OPCUA"\n<your commands>\nhalt\n' | docker exec -i iris-opcua-iris-1 iris session iris
 
-# Run the type-marshalling tests. NOTE: DataTest targets the OPC Foundation
-# certified server and the APPINT namespace, neither of which exists in this
-# compose setup — it cannot pass here. Use the local `plc` server as the
-# regression baseline instead (see Key Design Constraints below).
-printf 'zn "OPCUA"\nw ##class(OPCUA.Tests.ResolverTest).Run()\nhalt\n' | docker exec -i iris-opcua-iris-1 iris session iris
-printf 'zn "OPCUA"\nw ##class(OPCUA.Tests.PortalPipelineTest).Run()\nhalt\n' | docker exec -i iris-opcua-iris-1 iris session iris
-printf 'zn "OPCUA"\nw ##class(OPCUA.Tests.MeasurementMetadataTest).Run()\nhalt\n' | docker exec -i iris-opcua-iris-1 iris session iris
-printf 'zn "OPCUA"\nw ##class(OPCUA.Tests.TypeInferenceTest).Run()\nhalt\n' | docker exec -i iris-opcua-iris-1 iris session iris
+# Load sources and tests without rebuilding the image (non-zero exit on any compile error)
+./demo/iris/dev-load.sh
+
+# Run the tests: all %UnitTest. Offline = OPCUA.Tests.Unit (no server, no native
+# library, no running production; CI-safe). Live = OPCUA.Tests.Live (docker plc,
+# plus certified-server for the secured and type-inference tests). Each returns 1
+# only if nothing failed; skipped tests (server unreachable) are listed, not passed.
+printf 'zn "OPCUA"\nw ##class(OPCUA.Tests.Runner).Offline()\nhalt\n' | docker exec -i iris-opcua-iris-1 iris session iris
+printf 'zn "OPCUA"\nw ##class(OPCUA.Tests.Runner).Live()\nhalt\n'    | docker exec -i iris-opcua-iris-1 iris session iris
 
 # Check production status
 printf 'zn "OPCUA"\ndo ##class(Ens.Director).GetProductionStatus(.p,.s) write p," ",s,!\nhalt\n' | docker exec -i iris-opcua-iris-1 iris session iris
@@ -44,14 +45,14 @@ printf 'zn "OPCUA"\ndo ##class(Ens.Director).GetProductionStatus(.p,.s) write p,
 printf 'zn "OPCUA"\nset rs=##class(%%SQL.Statement).%%ExecDirect(,"SELECT TOP 10 Type,ConfigName,$extract(Text,1,200) FROM Ens_Util.Log ORDER BY ID DESC") while rs.%%Next() { write rs.Type," | ",rs.ConfigName," | ",rs.%%GetData(3),! }\nhalt\n' | docker exec -i iris-opcua-iris-1 iris session iris
 ```
 
-> **Source changes in `backend/` require rebuilding the Docker image** (`docker compose build`) to take effect — edits on disk are not hot-reloaded.
+> **Source changes in `backend/` are not hot-reloaded.** Run `./demo/iris/dev-load.sh` to load them into the running container, or rebuild the image (`docker compose build`).
 
 ## Repository Layout (what lives where)
 
 | Path | Contents |
 |------|----------|
 | `backend/src/OPCUA/` | All production ObjectScript: Client, Adapters, Services, REST, DataSource, Types. This is exactly what a client install ships |
-| `backend/tests/OPCUA/Tests/` | Test classes (`OPCUA.Tests.*`) |
+| `backend/tests/OPCUA/Tests/` | `%UnitTest` classes: `Unit/` (offline, `OPCUA.Tests.Unit`) and `Live/` (docker servers, `OPCUA.Tests.Live`), run by `OPCUA.Tests.Runner`; shared fixtures, `*DS` data sources and `Production.cls` at the top level |
 | `backend/examples/Examples/` | Demo Business Services (PollingExample, SubscriptionExample, SecureExample, ArrayExample, etc.) |
 | `backend/native/linux-{amd64,arm64}/` | Prebuilt Unix shared objects (`.so`), picked by `TARGETARCH` |
 | `backend/native/windows-x64/` | Prebuilt Windows DLLs; `IrisOPCUA.dll` is cross-built with llvm-mingw (UCRT) by `opc-ua-master/docker/build-win64.sh` |
@@ -83,7 +84,8 @@ SQL Explorer: http://localhost:52783/csp/sys/exp/%25CSP.UI.Portal.SQL.Home.zen?$
 
 ## Key Design Constraints
 
-- **Everything runs in the `OPCUA` namespace.** There is no `APPINT` namespace in this compose setup, so `OPCUA.Tests.DataTest` (which also needs the certified server) cannot pass here. For a regression gate, poll the local `plc` server and assert rows land with real values; `OPCUA.Tests.ResolverTest`, `PortalPipelineTest` and `MeasurementMetadataTest` run against `plc` and do pass; `TypeInferenceTest` also uses the `certified-server` (its demo nodes cover every built-in type).
+- **Everything runs in the `OPCUA` namespace.** There is no `APPINT` namespace in this compose setup, and the public server `OPCUA.Tests.Live.DataTest` needs (`opc.tcp://opcuaserver.com:48010`) fails the OPC UA handshake from here, so DataTest reports *skipped*. The test suite is `%UnitTest` in two packages: `OPCUA.Tests.Unit` (offline; `Runner.Offline()`) and `OPCUA.Tests.Live` (docker `plc`, plus `certified-server` for `SecuredPipelineTest` and `TypeInferenceTest`; `Runner.Live()`). A test whose server is unreachable calls `$$$AssertSkipped`, never passes. The declarative regression gate is still: poll the local `plc` server through `PollingExample` / `SubscriptionExample` and assert rows land with real values.
+- **The OPC UA Console is for SuperUser-level developer accounts.** An account with only the installer's `OPCUA_API_<NS>` role cannot edit pipelines (SQL -99 on the `%Dictionary` stamp query in `ProductionEdit`) or write credentials (`%Ens_Credentials`). Otherwise an admin creates the credentials entries in the Portal.
 - **Schema creation and device binding are separate, deliberately.** `POST /schemas` generates a schema class with **no** production side effects; `POST /deploy` binds devices to an existing schema and **generates nothing**. Do not reintroduce a combined create-and-deploy path — the split is a requirement, not an accident.
 - **A schema is reusable and outlives its pipelines.** Several pipelines may share one. Deleting a pipeline must never delete its schema; `SchemaService.Delete` is the only deletion path and it refuses while any pipeline references the schema.
 - **Devices are resolved by name at connect time**, never frozen at deploy time. `DeviceNodePaths` is an ordinary production setting, so adding a device is a one-line edit with no regeneration and no recompile. Nothing about devices is stored — masks and node IDs are derived by browsing on every (re)connect.

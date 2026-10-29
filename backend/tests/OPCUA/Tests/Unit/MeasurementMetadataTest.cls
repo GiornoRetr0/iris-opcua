@@ -397,7 +397,11 @@ Method TestQualityChanges()
         set tText = $Select($IsObject(tLog):tLog.Text, 1:"")
         do $$$AssertEquals($Select($IsObject(tLog):tLog.Type, 1:""), 3, "entry is a warning")
         do $$$AssertEquals(tText [ "Device 'DevA'", 1, "entry names the device")
-        do $$$AssertEquals(tText [ "BadNotConnected", 1, "entry names the status")
+        // The status name comes from the native library. Without it (as in CI) the
+        // entry names the code instead, and that is what is checked.
+        set tWantName = "BadNotConnected"
+        if $$$ISERR(##class(OPCUA.Client).GetStatusCodeName(.tLibName, 2156527616)) set tWantName = "status 2156527616"
+        do $$$AssertEquals(tText [ tWantName, 1, "entry names the status ("_tWantName_")")
         do $$$AssertEquals((tText [ "Alpha") && (tText [ "Gamma"), 1, "entry names both columns")
         do $$$LogMessage(tText)
     } Catch (e) {

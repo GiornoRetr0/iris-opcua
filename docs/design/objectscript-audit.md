@@ -146,16 +146,18 @@ leftover data).
 
 ## Test suite
 
-- **Not standard and not CI-ready:** the tests are hand-written `Run()` harnesses, not `%UnitTest.TestCase` classes. They all need the docker `plc` server, and `PortalPipelineTest` relies on about 44 seconds of fixed `hang` waits.
-- **Tests that pass when they shouldn't:**
-  - `DataTest` returns success even when checks fail.
-  - `TypeInferenceTest` counts "certified-server unreachable" as a pass.
-- **Resolver and Portal tests only cover the old shape:** they use plain-column schemas. The shipping DataValue schema is never tested end to end through the Portal path.
-- **Untested:**
-  - the whole REST layer: rebind, toggle, delete, health, and delete-refusal
-  - `ParseNodePath` edge cases
-  - RowWriter with short input
-  - subscription batches with more than one notification (offline coverage of `ProcessBatch` added with #8; the whole `OnTask` is still untested)
+Fixed 2026-10-30 (Task 14). Verified on IRIS 2025.3: `dev-load.sh` 0 errors, `Runner.Offline()` **653 passed** (returns 1), `Runner.Live()` **363 passed, 3 skipped** (returns 1; the skips are DataTest, below).
+
+- ✅ ~~**Not standard and not CI-ready**~~ **Fixed 2026-10-30.** Every test is now a `%UnitTest.TestCase`, in `OPCUA.Tests.Unit` (offline: no OPC UA server, no native library, no running production) or `OPCUA.Tests.Live` (docker `plc`, and `certified-server` where named), run by `OPCUA.Tests.Runner.Offline()` / `Live()`. **Fix:** the five `Run()` harnesses were ported one check to one assert, keeping each test's name: `MeasurementMetadataTest` 257 → Unit 208 + Live 49 (shared fixtures in the abstract `OPCUA.Tests.MeasurementMetadataBase`); `ResolverTest` 78 → `Unit.ResolverParsingTest` 24 + `Live.ResolverTest` 54; `PortalPipelineTest` 38 → `Live.PortalPipelineTest` 42 (the 38, plus one assert per wait, below); `TypeInferenceTest` 66 → Unit 28 (the DataType map) + Live 38; `DataTest` → `Live.DataTest`. The old classes are deleted. `PortalPipelineTest`'s ~44 s of fixed `hang`s are gone: `WaitFor(condition, timeout=30)` polls every 0.5 s and asserts the condition, naming it on timeout. Its "deploy collects nothing" window is now three poll cycles of the running pipeline rather than 8 s. Two sweep checks that drive the native client (`SafeReadValue`, `ConnectedState`) moved from `Unit.SweepTest` to `Live.SweepLiveTest`, and the quality-change log check accepts the status code where the native status name is unavailable. **Verified:** `Runner.Offline()` passes 653/0 with the native library made unloadable (`^||OPCUA.LibPathOverride` pointing at a missing file). The CI job is Task 15.
+- ✅ ~~**Tests that pass when they shouldn't**~~ **Fixed 2026-10-30.**
+  - ✅ `DataTest` asserts every scalar (14), array (length and elements, 14) and matrix (10) on its own, so any mismatch fails. When its public server cannot be connected to (from the compose stack it fails the handshake, `BadConnectionClosed`) its three tests report *skipped*. **Verified:** a hand-made DataTestDS row with wrong values fails 51 asserts and `Live()` returns 0; the old `Run()` returned OK after a mismatch.
+  - ✅ `TypeInferenceTest`'s certified-server tests call `$$$AssertSkipped` when the secure connection fails. The Runner now counts and names skips apart from passes and failures (a suite with skips and no failures is recorded as status 2). **Verified:** with `^||OPCUA.Tests("secureUrl")` pointed at a closed port, `Live()` reports `302 passed, 2 skipped` and lists both as `SKIPPED`.
+- ✅ ~~**Resolver and Portal tests only cover the old shape**~~ **Fixed 2026-10-30.** `Live.PortalDataValuePipelineTest` generates the schema with `GenerateSchemaClass` (DataValue columns), adds the item through `Ens.Config` as the Portal does, polls `plc`, and asserts `SA1_Value`, `SA1_Status`, `SA1_SourceTS` and `SA1_ServerTS` are all non-NULL in SQL. It passed on first run: no defect on this path.
+- ✅ ~~**Untested**~~ **Fixed 2026-10-30.**
+  - ✅ The REST layer: `Unit.RestServiceTest` (74 asserts) drives `PipelineService.List` (fields, categories, and health `stopped` / `disabled` / `starting` / `ok` / `error`), `Toggle` (disable, honest `restarted: 0`, 404, missing name), `Delete` (item and config row gone, schema kept, `schemaStillUsedBy`), `Rebind` refusals, and the `SchemaService.Delete` refusal (409, names the pipeline) and its success once unused, against a never-started tmp production. It found that `List` read `OPCUA.Pipeline.Production` directly while Toggle, Delete and Rebind edit `ProductionEdit.ProductionClass()`; `List` now reads the same production and status (red before: 2 asserts and an `<INVALID OREF>`). Enabling and a rebind that passes validation need the pipeline production or a server, and stay covered live (`PipelineConcurrencyTest`, `RestStatusTest`).
+  - ✅ `ParseNodePath` edge cases: `Unit.ParseNodePathTest` (36). It found that `ParseNodePath` rejected a nodepath with surrounding whitespace that the webapp's `parseNodeId()` accepts (only its one caller trimmed). It now trims (red before: 3 asserts).
+  - ✅ RowWriter with short input: `Unit.MeasurementMetadataTest.TestShortInput` (ported).
+  - ✅ Subscription batches with more than one notification: `Unit.MeasurementMetadataTest.TestSubscriptionBatch` (ported, offline `ProcessBatch`). The adapter's `OnTask` loop itself still has no direct test; it runs only inside a started subscription pipeline or Example.
 
 ## Suggested order
 

@@ -5,6 +5,9 @@ Include (OPCUA.Constants, %occInclude, Ensemble)
 /// Deploys two throwaway pipelines against plc. One gets a DeviceNodePaths of
 /// only a comment (how a pipeline is paused from the Portal); the other is
 /// healthy. Then one item's description is forced to fail.
+///
+/// Also the two sweep checks that drive the native client without a server
+/// (TestSafeReadValue, TestConnectedState), kept out of the offline package.
 Class OPCUA.Tests.Live.SweepLiveTest Extends %UnitTest.TestCase
 {
 
@@ -148,6 +151,36 @@ ClassMethod BuildSchema() As %Status
 	set tSC = tDef.%Save()
 	Quit:$$$ISERR(tSC) tSC
 	Quit $System.OBJ.Compile(..#SchemaClass, "ck-d")
+}
+
+/// A failed read keeps its reason, in the status and in readError.
+Method TestSafeReadValue()
+{
+	// Not an object: the call itself throws.
+	set tSC = ##class(OPCUA.REST.ReadService).SafeReadValue("", "x", 1, $$$OpcuaNodeIdTypeString, .tResults, .tOK)
+	do $$$AssertNotTrue($$$ISOK(tSC), "SafeReadValue returns the caught error, not $$$OK")
+	do $$$AssertEquals(tOK, 0, "and reports the read as failed")
+
+	// An initialized but unconnected client: the native read fails.
+	set tClient = ##class(OPCUA.Client).%New()
+	do $$$AssertStatusOK(tClient.Initialize(), "client initialize")
+	set tExpected = ##class(OPCUA.REST.Error).Text(tClient.ReadValueAttribute(.tR, "x", 1, $$$OpcuaNodeIdTypeString))
+	do $$$AssertTrue(tExpected '= "", "an unconnected read fails: "_tExpected)
+	set tSC = ##class(OPCUA.REST.ReadService).SafeReadAndParse(tClient, 1, "x", $$$OpcuaNodeIdTypeString, "x", .tResult)
+	do $$$AssertStatusOK(tSC, "SafeReadAndParse still answers")
+	do $$$AssertTrue(tResult.readError [ tExpected, "readError names the reason: "_tResult.readError)
+}
+
+/// An unreadable client state counts as disconnected, so the adapter reconnects.
+Method TestConnectedState()
+{
+	set tClient = ##class(OPCUA.Client).%New()
+	do $$$AssertStatusOK(tClient.Initialize(), "client initialize")
+	// Initialized but never set up: the library refuses the state enquiry.
+	do $$$AssertNotTrue($$$ISOK(tClient.GetClientState("", .tC)), "state enquiry fails on an unset client")
+	set tState = ##class(OPCUA.Adapter.Common).ConnectedState(tClient, .tReset)
+	do $$$AssertEquals(tState, 0, "ConnectedState is 0 (disconnected), not the -1 placeholder")
+	do $$$AssertEquals(tReset, 0, "and no reset is reported")
 }
 
 }

@@ -2,8 +2,9 @@ Include (%occInclude, OPCUA.Constants)
 
 /// Offline tests for the AI-pattern sweep (audit "AI-style patterns to watch"
 /// and the remaining "Ignored statuses"): one method per fixed method, each
-/// showing the wrong behaviour the old code had. Needs the native library
-/// loaded (it is in the image), but no OPC UA server.
+/// showing the wrong behaviour the old code had. Needs no OPC UA server and no
+/// native library; the two checks that drive the native client are in
+/// <class>OPCUA.Tests.Live.SweepLiveTest</class>.
 Class OPCUA.Tests.Unit.SweepTest Extends %UnitTest.TestCase
 {
 
@@ -45,24 +46,6 @@ Method TestCreateObjectFromSourceData()
 	set @tGlobal = tBefore
 }
 
-/// A failed read keeps its reason, in the status and in readError.
-Method TestSafeReadValue()
-{
-	// Not an object: the call itself throws.
-	set tSC = ##class(OPCUA.REST.ReadService).SafeReadValue("", "x", 1, $$$OpcuaNodeIdTypeString, .tResults, .tOK)
-	do $$$AssertNotTrue($$$ISOK(tSC), "SafeReadValue returns the caught error, not $$$OK")
-	do $$$AssertEquals(tOK, 0, "and reports the read as failed")
-
-	// An initialized but unconnected client: the native read fails.
-	set tClient = ##class(OPCUA.Client).%New()
-	do $$$AssertStatusOK(tClient.Initialize(), "client initialize")
-	set tExpected = ##class(OPCUA.REST.Error).Text(tClient.ReadValueAttribute(.tR, "x", 1, $$$OpcuaNodeIdTypeString))
-	do $$$AssertTrue(tExpected '= "", "an unconnected read fails: "_tExpected)
-	set tSC = ##class(OPCUA.REST.ReadService).SafeReadAndParse(tClient, 1, "x", $$$OpcuaNodeIdTypeString, "x", .tResult)
-	do $$$AssertStatusOK(tSC, "SafeReadAndParse still answers")
-	do $$$AssertTrue(tResult.readError [ tExpected, "readError names the reason: "_tResult.readError)
-}
-
 /// A native error list without a message still decodes to a real status.
 Method TestDecodeError()
 {
@@ -75,18 +58,6 @@ Method TestDecodeError()
 	do $$$AssertEquals(tErr, "", "DecodeError does not throw on a missing message")
 	do $$$AssertNotTrue($$$ISOK(tSC), "it returns an error status")
 	do $$$AssertTrue($System.Status.GetErrorText(tSC) [ "2158886912", "naming the code: "_$System.Status.GetErrorText(tSC))
-}
-
-/// An unreadable client state counts as disconnected, so the adapter reconnects.
-Method TestConnectedState()
-{
-	set tClient = ##class(OPCUA.Client).%New()
-	do $$$AssertStatusOK(tClient.Initialize(), "client initialize")
-	// Initialized but never set up: the library refuses the state enquiry.
-	do $$$AssertNotTrue($$$ISOK(tClient.GetClientState("", .tC)), "state enquiry fails on an unset client")
-	set tState = ##class(OPCUA.Adapter.Common).ConnectedState(tClient, .tReset)
-	do $$$AssertEquals(tState, 0, "ConnectedState is 0 (disconnected), not the -1 placeholder")
-	do $$$AssertEquals(tReset, 0, "and no reset is reported")
 }
 
 /// A count that cannot be taken is unknown (""), not 0 rows.
