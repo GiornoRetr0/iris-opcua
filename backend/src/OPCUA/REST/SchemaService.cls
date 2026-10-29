@@ -491,7 +491,15 @@ ClassMethod GenerateSchemaClass(pClassName As %String, pDataSourceName As %Strin
 			quit:i=""
 			set tClassName = tCreatedClasses(i)
 			if ##class(%Dictionary.ClassDefinition).%ExistsId(tClassName) {
-				do $System.OBJ.Delete(tClassName, "-d")
+				// Test seam: force a delete failure for a specific class
+				if $Get(^||OPCUA.Tests("deleteFailClass")) = tClassName {
+					set tDelSC = $$$ERROR($$$GeneralError, "Test-forced delete failure")
+				} else {
+					set tDelSC = $System.OBJ.Delete(tClassName, "-d")
+				}
+				if $$$ISERR(tDelSC) {
+					set tSC = $$$ADDSC(tSC, $$$ERROR($$$GeneralError, "Failed to delete class '"_tClassName_"' during rollback"))
+				}
 			}
 		}
 	}

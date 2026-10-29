@@ -19,12 +19,14 @@ Method OnAfterAllTests() As %Status
 	do ..DropClass(..#TmpSerial)
 	do ..DropClass(..#TmpHandWritten)
 	kill ^||OPCUA.Tests("badProp")
+	kill ^||OPCUA.Tests("deleteFailClass")
 	Quit $$$OK
 }
 
 Method OnBeforeOneTest(testname As %String) As %Status
 {
 	kill ^||OPCUA.Tests("badProp")
+	kill ^||OPCUA.Tests("deleteFailClass")
 	Quit $$$OK
 }
 
@@ -125,6 +127,51 @@ Method TestFailedCompileCleansUp()
 
 	do $$$AssertTrue(##class(%Dictionary.ClassDefinition).%ExistsId(..#TmpSchema), "main class exists after successful create")
 	do $$$AssertTrue(##class(%Dictionary.ClassDefinition).%ExistsId(..#TmpSerial), "serial class exists after successful create")
+}
+
+/// Make the main class fail to compile and the cleanup delete also fail. Assert the
+/// returned error contains both the original compile error and the cleanup failure.
+Method TestFailedRollbackReported()
+{
+	do ..DropSchema(..#TmpSchema)
+	do ..DropClass(..#TmpSerial)
+
+	// Set the test hook that makes GenerateSchemaClass inject a bad property type
+	set ^||OPCUA.Tests("badProp") = 1
+	// Set the test hook that makes the serial class delete fail during rollback
+	set ^||OPCUA.Tests("deleteFailClass") = ..#TmpSerial
+
+	// Attempt to create a schema with nested columns
+	set tBody = {}
+	set tBody.className = ..#TmpSchema
+	set tBody.dataSourceName = "SchemaCreate"
+	set tBody.defaultNamespace = 1
+
+	set tColumns = []
+	// Nested column: Motor folder with Temperature leaf
+	set tCol1 = {}
+	set tCol1.displayName = "Temperature"
+	set tCol1.inferredType = "Double"
+	set tRelPath1 = ["Motor", "Temperature"]
+	set tCol1.relativePath = tRelPath1
+	do tColumns.%Push(tCol1)
+
+	// Flat column
+	set tCol2 = {}
+	set tCol2.displayName = "Humidity"
+	set tCol2.inferredType = "Double"
+	set tRelPath2 = ["Humidity"]
+	set tCol2.relativePath = tRelPath2
+	do tColumns.%Push(tCol2)
+	set tBody.columns = tColumns
+
+	set tSC = ##class(OPCUA.REST.SchemaService).Create(tBody, .tResult)
+	do $$$AssertNotTrue($$$ISOK(tSC), "Create fails when compile fails")
+
+	set tMsg = $System.Status.GetErrorText(tSC)
+	do $$$AssertTrue(tMsg [ "ThisClassDoesNotExist", "error contains original compile error: "_tMsg)
+	do $$$AssertTrue(tMsg [ "rollback", "error mentions rollback failure: "_tMsg)
+	do $$$AssertTrue(tMsg [ ..#TmpSerial, "error names the class that failed to delete: "_tMsg)
 }
 
 /// A hand-written class OPCUA.Tests.Tmp.HandWritten with a property typed as schema
