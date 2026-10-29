@@ -21,6 +21,10 @@ Parameter ClientEntry = "OPCUA.Tests.ClientCred";
 
 Parameter Password = "s3cretCredTest";
 
+/// A throwaway IRIS user, and role of the same name plus "Role", that may use
+/// the OPCUA database but not %Ens_Credentials.
+Parameter NoAccessUser = "OPCUATestNoCredUser";
+
 Method OnBeforeAllTests() As %Status
 {
 	do ..Cleanup()
@@ -181,6 +185,108 @@ Method TestUnknownCredentialsIs400()
 	do $$$AssertTrue(tText [ "credentials", "error explains: "_tText)
 }
 
+/// A failed commit takes back the entry deploy made for it. The item name has a
+/// "|", which <tt>Ens.Config.Item</tt> refuses on save, so the entry (ID
+/// sanitised to <tt>OPCUA-TmpCred_Rollback</tt>) is created and then the commit
+/// fails for real.
+Method TestFailedCommitRemovesEntry()
+{
+	set tName = "TmpCred|Rollback"
+	set tId = ##class(OPCUA.REST.DeployService).CredentialsId(tName)
+	set tSC = ..Add(tName, {"username": "opcuser", "password": (..#Password)})
+	do $$$AssertNotTrue($$$ISOK(tSC), "commit fails: "_##class(OPCUA.REST.Error).Text(tSC))
+	do $$$AssertNotTrue(##class(Ens.Config.Credentials).%ExistsId(tId), "entry "_tId_" removed again")
+	do $$$AssertEquals($Data(^OPCUA.OwnedCredentials(tId)), 0, "ownership marker removed again")
+	do $$$AssertNotTrue(..ItemExists(tName), "no item added")
+}
+
+/// Credentials IDs are case-insensitive in Ens. A taken ID in another case is
+/// still taken (409, entry unchanged), and <tt>credentials</tt> in another case,
+/// or <tt>none</tt>, resolves as Ens resolves it.
+Method TestCredentialsIdCaseInsensitive()
+{
+	set tLower = $ZConvert(##class(OPCUA.REST.DeployService).CredentialsId("TmpCredCase"), "L")
+	do $$$AssertStatusOK(##class(Ens.Config.Credentials).SetCredential(tLower, "clientuser", "clientpw", 1), "client entry "_tLower)
+	set tSC = ..Add("TmpCredCase", {"username": "opcuser", "password": (..#Password)})
+	do $$$AssertEquals(##class(OPCUA.REST.Error).HttpCode(tSC), 409, "taken ID in another case is 409: "_##class(OPCUA.REST.Error).Text(tSC))
+	set tCred = ##class(Ens.Config.Credentials).%OpenId(tLower)
+	do $$$AssertTrue($IsObject(tCred) && (tCred.Password = "clientpw"), "client entry unchanged")
+	do $$$AssertNotTrue(..ItemExists("TmpCredCase"), "no item added")
+
+	set tSC = ##class(OPCUA.REST.DeployService).ResolveCredentials({"credentials": ($ZConvert(tLower, "U"))}, .tCheck)
+	do $$$AssertStatusOK(tSC, "credentials in another case resolve")
+	do $$$AssertEquals(tCheck.username, "clientuser", "and carry the entry's username")
+	for tNone = "none", "NONE" {
+		set tSC = ##class(OPCUA.REST.DeployService).ResolveCredentials({"credentials": (tNone)}, .tCheck)
+		do $$$AssertStatusOK(tSC, "'"_tNone_"' means no credentials, as in Ens")
+		do $$$AssertEquals(tCheck.username, "", "'"_tNone_"' connects anonymously")
+	}
+}
+
+/// An IRIS account without %Ens_Credentials gets a clear 403 for each of read,
+/// write and delete, never a misleading connect error or a half-done delete. A
+/// throwaway IRIS user and role (the role grants only the OPCUA database) run
+/// each step in a JOB, logged in as that user.
+Method TestNoCredentialsAccessIsClear()
+{
+	set tSC = ..CreateNoAccessUser(.tPassword)
+	do $$$AssertStatusOK(tSC, "throwaway user without %Ens_Credentials")
+	Quit:$$$ISERR(tSC)
+	Try {
+		// Arrange as this (privileged) process: an entry to read, and an owned
+		// pipeline to delete.
+		do $$$AssertStatusOK(##class(Ens.Config.Credentials).SetCredential(..#ClientEntry, "clientuser", "clientpw", 1), "client entry")
+		do $$$AssertStatusOK(..Add("TmpCredNoAccess", {"username": "opcuser", "password": (..#Password)}), "owned pipeline")
+		set tOwnedId = ##class(OPCUA.REST.DeployService).CredentialsId("TmpCredNoAccess")
+
+		kill ^IRIS.Temp.OPCUATests("cred")
+		job ##class(OPCUA.Tests.Unit.CredentialsTest).NoAccessJob(..#NoAccessUser, tPassword, ..#Production, ..#Schema, ..#ClientEntry)::10
+		do $$$AssertTrue($Test, "no-access job started")
+		for i=1:1:100 { quit:$Data(^IRIS.Temp.OPCUATests("cred", "done"))  hang 0.1 }
+		do $$$AssertEquals($Get(^IRIS.Temp.OPCUATests("cred", "login")), 1, "job logged in as the throwaway user")
+		do $$$AssertEquals($Get(^IRIS.Temp.OPCUATests("cred", "error")), "", "job raised no error")
+
+		for tStep = "read", "rebind", "write", "delete" {
+			set tGot = $Get(^IRIS.Temp.OPCUATests("cred", tStep))
+			do $$$AssertEquals($ListGet(tGot, 1), 403, tStep_" refused with 403: "_$ListGet(tGot, 2))
+			do $$$AssertTrue($ListGet(tGot, 2) [ "%Ens_Credentials", tStep_" names %Ens_Credentials")
+		}
+		do $$$AssertNotTrue(##class(Ens.Config.Credentials).%ExistsId(##class(OPCUA.REST.DeployService).CredentialsId("TmpCredNoWrite")), "write created no entry")
+		do $$$AssertNotTrue(..ItemExists("TmpCredNoWrite"), "write added no item")
+		do $$$AssertTrue(..ItemExists("TmpCredNoAccess"), "refused delete kept the pipeline")
+		do $$$AssertTrue(##class(Ens.Config.Credentials).%ExistsId(tOwnedId), "refused delete kept the entry")
+		do $$$AssertEquals($Get(^OPCUA.OwnedCredentials(tOwnedId)), "TmpCredNoAccess", "and its marker")
+	} Catch (e) {
+		do $$$AssertTrue(0, "Exception: "_e.DisplayString())
+	}
+	do ..DropNoAccessUser()
+	kill ^IRIS.Temp.OPCUATests("cred")
+}
+
+/// JOB entry: log in as <var>pUser</var> and record $LB(httpCode, text) for a
+/// credentials read (deploy with <tt>credentials</tt>, and a rebind of the owned
+/// pipeline, whose coverage check reads its entry), a write (deploy with
+/// <tt>username</tt>) and an owned pipeline's delete.
+ClassMethod NoAccessJob(pUser As %String, pPassword As %String, pProduction As %String, pSchema As %String, pEntry As %String)
+{
+	set tKey = $Name(^IRIS.Temp.OPCUATests("cred"))
+	try {
+		set @tKey@("login") = $System.Security.Login(pUser, pPassword)
+		set ^||OPCUA.Tests("production") = pProduction
+		set tSC = ##class(OPCUA.REST.DeployService).Deploy({"schemaClass": (pSchema), "dataSourceName": "TmpCredNoRead", "url": "opc.tcp://nowhere.invalid:4840", "devices": "i=85", "credentials": (pEntry)}, .tResult)
+		set @tKey@("read") = $ListBuild(##class(OPCUA.REST.Error).HttpCode(tSC), ##class(OPCUA.REST.Error).Text(tSC))
+		set tSC = ##class(OPCUA.REST.DeployService).AddServiceItem({"url": "opc.tcp://plc", "username": "opcuser", "password": "x"}, pSchema, "TmpCredNoWrite", "polling", "i=85")
+		set @tKey@("write") = $ListBuild(##class(OPCUA.REST.Error).HttpCode(tSC), ##class(OPCUA.REST.Error).Text(tSC))
+		set tSC = ##class(OPCUA.REST.PipelineService).Delete({"name": "TmpCredNoAccess"}, .tResult)
+		set @tKey@("delete") = $ListBuild(##class(OPCUA.REST.Error).HttpCode(tSC), ##class(OPCUA.REST.Error).Text(tSC))
+		set tSC = ##class(OPCUA.REST.PipelineService).Rebind({"name": "TmpCredNoAccess", "devices": "i=85"}, .tResult)
+		set @tKey@("rebind") = $ListBuild(##class(OPCUA.REST.Error).HttpCode(tSC), ##class(OPCUA.REST.Error).Text(tSC))
+	} catch e {
+		set @tKey@("error") = e.DisplayString()
+	}
+	set @tKey@("done") = 1
+}
+
 // ==================== helpers ====================
 
 ClassMethod Add(pName As %String, pBody As %DynamicObject) As %Status
@@ -239,6 +345,44 @@ ClassMethod CreateSchema() As %Status
 	Quit $System.OBJ.Compile(..#Schema, "ck-d")
 }
 
+/// Create the throwaway user and role. The password is random and lives only in
+/// this process.
+ClassMethod CreateNoAccessUser(Output pPassword As %String) As %Status
+{
+	New $Namespace
+	set tDbResource = ..DatabaseResource()
+	set pPassword = "Tmp-"_$Translate($System.Encryption.Base64Encode($System.Encryption.GenCryptRand(18)), "+/=", "xyz")
+	set $Namespace = "%SYS"
+	do ..DropNoAccessUserInSys()
+	set tSC = ##class(Security.Roles).Create(..#NoAccessUser_"Role", "Throwaway role for OPCUA.Tests.Unit.CredentialsTest", tDbResource_":RW")
+	Quit:$$$ISERR(tSC) tSC
+	Quit ##class(Security.Users).Create(..#NoAccessUser, ..#NoAccessUser_"Role", pPassword, "Throwaway user for OPCUA.Tests.Unit.CredentialsTest")
+}
+
+/// The resource of the database holding this namespace's code and data.
+ClassMethod DatabaseResource() As %String
+{
+	set tDir = ##class(%SYS.Namespace).GetGlobalDest($Namespace, "OPCUA.DataSource")
+	set tDir = $Piece(tDir, "^", 2), tFallback = "%DB_"_$ZConvert($Namespace, "U")
+	New $Namespace
+	set $Namespace = "%SYS"
+	set tDb = ##class(SYS.Database).%OpenId(tDir)
+	Quit $Select($IsObject(tDb):tDb.ResourceName, 1:tFallback)
+}
+
+ClassMethod DropNoAccessUser()
+{
+	New $Namespace
+	set $Namespace = "%SYS"
+	do ..DropNoAccessUserInSys()
+}
+
+ClassMethod DropNoAccessUserInSys() [ Private ]
+{
+	do:##class(Security.Users).Exists(..#NoAccessUser) ##class(Security.Users).Delete(..#NoAccessUser)
+	do:##class(Security.Roles).Exists(..#NoAccessUser_"Role") ##class(Security.Roles).Delete(..#NoAccessUser_"Role")
+}
+
 /// Remove the throwaway production, schema, and every credentials entry and
 /// ownership marker these tests use. Every name here is test-only.
 ClassMethod Cleanup()
@@ -252,8 +396,10 @@ ClassMethod Cleanup()
 		do $System.OBJ.Delete(..#Schema, "-d")
 	}
 	kill ^OPCUA.DataSource(..#Schema)
-	set tIds = $LB(..#ClientEntry)
-	for tName = "TmpCred", "TmpCredA", "TmpCredOwned", "TmpCredShared", "TmpCredClient", "TmpCredAnon", "TmpCredUser", "TmpCredUnknown" {
+	set tIds = $LB(..#ClientEntry, "opcua-tmpcredcase")
+	do ..DropNoAccessUser()
+	kill ^IRIS.Temp.OPCUATests("cred")
+	for tName = "TmpCred|Rollback", "TmpCredCase", "TmpCredNoAccess", "TmpCredNoWrite", "TmpCredNoRead", "TmpCred", "TmpCredA", "TmpCredOwned", "TmpCredShared", "TmpCredClient", "TmpCredAnon", "TmpCredUser", "TmpCredUnknown" {
 		set tId = "OPCUA-"_tName
 		Try { set tId = ##class(OPCUA.REST.DeployService).CredentialsId(tName) } Catch {}
 		set tIds = tIds_$LB(tId)

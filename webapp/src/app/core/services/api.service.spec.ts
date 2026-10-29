@@ -111,3 +111,63 @@ describe('ApiService on 401', () => {
     expect(events.length).toBe(0);
   });
 });
+
+/**
+ * Audit #15: a pipeline's OPC UA password lives in its IRIS credentials entry,
+ * set at deploy. Managing an existing pipeline (list, toggle, delete, rebind)
+ * reads that entry server-side, so these calls send no connection fields and
+ * never carry the browser's stored OPC UA password.
+ */
+describe('ApiService pipeline management sends no OPC UA credentials', () => {
+  let http: HttpTestingController;
+  let api: ApiService;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        {
+          provide: ConfigService,
+          useValue: {
+            hosted: false,
+            get: () => ({
+              apiBaseUrl: '/api', apiUsername: 'u', apiPassword: 'p',
+              serverUrl: 'opc.tcp://plc', securityMode: 1, username: 'user1', password: 'opcua-secret',
+            }),
+          },
+        },
+      ],
+    });
+    http = TestBed.inject(HttpTestingController);
+    api = TestBed.inject(ApiService);
+  });
+
+  afterEach(() => http.verify());
+
+  it('rebind, toggle, delete and list carry only their own fields', () => {
+    api.rebindPipeline('P1', 'i=85', ['OPCUA']).subscribe();
+    api.togglePipeline('P1').subscribe();
+    api.deletePipeline('P1').subscribe();
+    api.listPipelines().subscribe();
+    const bodies = [
+      http.expectOne('/api/pipelines/rebind'),
+      http.expectOne('/api/pipelines/toggle'),
+      http.expectOne('/api/pipelines/delete'),
+      http.expectOne('/api/pipelines'),
+    ].map((req) => req.request.body);
+
+    expect(bodies[0]).toEqual({ name: 'P1', devices: 'i=85', categories: ['OPCUA'] });
+    expect(bodies[1]).toEqual({ name: 'P1' });
+    expect(bodies[2]).toEqual({ name: 'P1' });
+    expect(bodies[3]).toEqual({});
+    for (const body of bodies) expect(JSON.stringify(body)).not.toContain('opcua-secret');
+  });
+
+  it('deploy still sends the username and password', () => {
+    api.deploy({ schemaClass: 'S', devices: 'i=85' }).subscribe();
+    const body = http.expectOne('/api/deploy').request.body;
+    expect(body.username).toBe('user1');
+    expect(body.password).toBe('opcua-secret');
+  });
+});

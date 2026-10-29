@@ -17,6 +17,9 @@ Parameter PipelineName = "TmpSecured";
 /// A test-only entry standing in for one the client made in the Portal.
 Parameter WrongEntry = "OPCUA.Tests.LiveWrongCred";
 
+/// A test-only entry with the right password, named in another case on deploy.
+Parameter RightEntry = "OPCUA.Tests.LiveRightCred";
+
 Method OnBeforeAllTests() As %Status
 {
 	do ..DoCleanup()
@@ -75,25 +78,30 @@ Method TestRunningPipelineUsesCredentials()
 	set tGood = ..#PipelineName_"Good", tBad = ..#PipelineName_"Bad"
 	do $$$AssertStatusOK(..Deploy(tGood, {"username": "user1", "password": "password", "devices": "i=85|Good"}), "deploy good")
 	do $$$AssertStatusOK(..Deploy(tBad, {"username": "user1", "password": "password", "devices": "i=85|Bad"}), "deploy bad")
+	// Ens matches credentials IDs in any case; so do deploy and the adapter.
+	set tCase = ..#PipelineName_"Case"
+	do $$$AssertStatusOK(##class(Ens.Config.Credentials).SetCredential(..#RightEntry, "user1", "password", 1), "client entry with the right password")
+	do $$$AssertStatusOK(..Deploy(tCase, {"credentials": ($ZConvert(..#RightEntry, "L")), "devices": "i=85|Case"}), "deploy with credentials in another case")
 	set tBadId = ##class(OPCUA.REST.DeployService).CredentialsId(tBad)
 	do $$$AssertStatusOK(##class(Ens.Config.Credentials).SetCredential(tBadId, "user1", "wrong", 1), "make bad's entry wrong")
 
 	set tStart = $ZDateTime($ZTimeStamp, 3)
-	for tName = tGood, tBad {
+	for tName = tGood, tBad, tCase {
 		set tSC = ##class(OPCUA.REST.PipelineService).Toggle({"name": (tName)}, .tResult)
 		do $$$AssertStatusOK(tSC, "enable "_tName)
 	}
 
 	// Wait for the good pipeline's rows, then a few more cycles for the bad one.
-	for i=1:1:300 { quit:..Rows("Good")>0  hang 0.1 }
+	for i=1:1:300 { quit:(..Rows("Good")>0)&&(..Rows("Case")>0)  hang 0.1 }
 	do $$$AssertTrue(..Rows("Good") > 0, "pipeline with the right password stores rows")
+	do $$$AssertTrue(..Rows("Case") > 0, "pipeline naming its entry in another case stores rows")
 	hang 3
 	do $$$AssertEquals(..Rows("Bad"), 0, "pipeline with a wrong password stores none")
 	set tBadName = tBad
 	&sql(SELECT COUNT(*) INTO :tDenied FROM Ens_Util.Log WHERE ConfigName = :tBadName AND TimeLogged >= :tStart AND Text [ 'BadUserAccessDenied')
 	do $$$AssertTrue((SQLCODE = 0) && (tDenied > 0), "bad pipeline logs BadUserAccessDenied")
 
-	for tName = tGood, tBad {
+	for tName = tGood, tBad, tCase {
 		do ##class(OPCUA.REST.PipelineService).Delete({"name": (tName)}, .tResult)
 	}
 }
@@ -122,7 +130,7 @@ ClassMethod URL() As %String
 
 ClassMethod DoCleanup()
 {
-	for tSuffix = "", "Wrong", "Good", "Bad" {
+	for tSuffix = "", "Wrong", "Good", "Bad", "Case" {
 		set tName = ..#PipelineName_tSuffix
 		try {
 			do ##class(OPCUA.REST.PipelineService).Delete({"name": (tName)}, .tResult)
@@ -134,7 +142,9 @@ ClassMethod DoCleanup()
 		do:##class(Ens.Config.Credentials).%ExistsId(tId) ##class(Ens.Config.Credentials).%DeleteId(tId)
 		kill ^OPCUA.OwnedCredentials(tId)
 	}
-	do:##class(Ens.Config.Credentials).%ExistsId(..#WrongEntry) ##class(Ens.Config.Credentials).%DeleteId(..#WrongEntry)
+	for tEntry = ..#WrongEntry, ..#RightEntry {
+		do:##class(Ens.Config.Credentials).%ExistsId(tEntry) ##class(Ens.Config.Credentials).%DeleteId(tEntry)
+	}
 	try {
 		do:##class(%Dictionary.CompiledClass).%ExistsId(..#SchemaClass) $classmethod(..#SchemaClass, "%KillExtent")
 	} catch e {}

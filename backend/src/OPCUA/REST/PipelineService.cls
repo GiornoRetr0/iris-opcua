@@ -323,6 +323,13 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 			Quit
 		}
 
+		// A pipeline whose credentials entry deploy created takes the entry with
+		// it, which needs %Ens_Credentials:W. Without it, refuse before anything
+		// is removed, rather than delete the pipeline and orphan the entry (every
+		// redeploy under the name would then get 409).
+		set tSC = ..CheckCanDeleteCredentials(tName)
+		Quit:$$$ISERR(tSC)
+
 		set tDSClass = "", tItemId = "", tCredId = ""
 		set tSC = ##class(OPCUA.REST.ProductionEdit).Begin(.tProd, .tStamp)
 		Quit:$$$ISERR(tSC)
@@ -353,16 +360,18 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		// The credentials entry goes too, but only if deploy created it for this
 		// pipeline. An entry the pipeline merely pointed at belongs to someone else.
 		set tSCCred = ##class(OPCUA.REST.DeployService).DeleteOwnedCredentials(tCredId, tName)
-		if $$$ISERR(tSCCred) {
-			set tSC = ##class(OPCUA.REST.Error).Make(500, "Pipeline deleted, but its credentials '"_tCredId_"' could not be: "_##class(OPCUA.REST.Error).Text(tSCCred), tSCCred)
-		}
 
 		// A running production stops the removed item's job when it updates.
 		// EnableConfigItem is not used to stop it first: it saves the production
 		// itself, outside our edit, which Commit would then refuse as stale.
 		set tSCApply = ##class(OPCUA.REST.ProductionEdit).ApplyToRunning(.tRestarted, .tNote)
-		if $$$ISERR(tSCApply) {
-			set tSC = ##class(OPCUA.REST.Error).Make(500, "Pipeline deleted, but the running production could not be updated: "_##class(OPCUA.REST.Error).Text(tSCApply), tSCApply)
+
+		// Report every follow-up that failed, not just the last.
+		set tFailed = ""
+		if $$$ISERR(tSCCred) set tFailed = "its credentials '"_tCredId_"' could not be deleted: "_##class(OPCUA.REST.Error).Text(tSCCred)
+		if $$$ISERR(tSCApply) set tFailed = tFailed_$Select(tFailed="":"", 1:"; and ")_"the running production could not be updated: "_##class(OPCUA.REST.Error).Text(tSCApply)
+		if tFailed '= "" {
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Pipeline deleted, but "_tFailed, $Select($$$ISERR(tSCCred):tSCCred, 1:tSCApply))
 		}
 
 		set pResult.deleted = 1
@@ -485,9 +494,10 @@ ClassMethod DescribeItem(pItemName As %String, Output pSchemaClass As %String, O
 	set pURL = ""
 	set pConn = {}
 
-	set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
+	set tProdClass = ##class(OPCUA.REST.ProductionEdit).ProductionClass()
+	set tProd = ##class(Ens.Config.Production).%OpenId(tProdClass)
 	if '$IsObject(tProd) {
-		Quit ##class(OPCUA.REST.Error).Make(500, "Cannot open production: "_..#ProductionClass)
+		Quit ##class(OPCUA.REST.Error).Make(500, "Cannot open production: "_tProdClass)
 	}
 
 	set tItem = ##class(OPCUA.REST.ProductionEdit).FindItem(tProd, pItemName)
@@ -519,14 +529,29 @@ ClassMethod DescribeItem(pItemName As %String, Output pSchemaClass As %String, O
 	// an anonymous connect.
 	set tCredId = ..GetSettingValue(tItem, "Credentials")
 	if tCredId '= "" {
-		set tCred = ##class(Ens.Config.Credentials).%OpenId(tCredId)
-		if '$IsObject(tCred) {
-			Quit ##class(OPCUA.REST.Error).BadRequest("Pipeline '"_pItemName_"' uses credentials '"_tCredId_"', which do not exist in namespace "_$Namespace_".")
+		set tSC = ##class(OPCUA.REST.DeployService).ReadCredentials(tCredId, .tUser, .tPassword)
+		if $$$ISERR(tSC) {
+			Quit ##class(OPCUA.REST.Error).Make(##class(OPCUA.REST.Error).HttpCode(tSC), "Pipeline '"_pItemName_"': "_##class(OPCUA.REST.Error).Text(tSC), tSC)
 		}
-		do pConn.%Set("username", tCred.Username)
-		do pConn.%Set("password", tCred.Password)
+		do:tUser'="" pConn.%Set("username", tUser)
+		do:tPassword'="" pConn.%Set("password", tPassword)
 	}
 	Quit $$$OK
+}
+
+/// 403 if pipeline <var>pItemName</var> owns a credentials entry (one deploy
+/// created for it) that this IRIS account may not delete. Read without the edit
+/// lock, so it runs before <method>Delete</method> touches anything.
+ClassMethod CheckCanDeleteCredentials(pItemName As %String) As %Status [ Private ]
+{
+	set tProd = ##class(Ens.Config.Production).%OpenId(##class(OPCUA.REST.ProductionEdit).ProductionClass(), 0)
+	Quit:'$IsObject(tProd) $$$OK
+	set tItem = ##class(OPCUA.REST.ProductionEdit).FindItem(tProd, pItemName)
+	Quit:'$IsObject(tItem) $$$OK
+	set tCredId = ..GetSettingValue(tItem, "Credentials")
+	Quit:'##class(OPCUA.REST.DeployService).OwnsCredentials(tCredId, pItemName) $$$OK
+	Quit:##class(OPCUA.REST.DeployService).CanWriteCredentials() $$$OK
+	Quit ##class(OPCUA.REST.Error).Forbidden("Pipeline '"_pItemName_"' was not deleted. "_##class(OPCUA.REST.Error).Text(##class(OPCUA.REST.DeployService).NoCredentialsAccess("delete its credentials '"_tCredId_"'", "W")))
 }
 
 /// Describe a v2 pipeline's devices, from the DeviceNodePaths setting plus the

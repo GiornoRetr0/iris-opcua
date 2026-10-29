@@ -268,6 +268,12 @@ ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDS
 		set tNewCredId = ""
 		if (tCredId = "") && (tUsername '= "") set (tCredId, tNewCredId) = ..CredentialsId(pDSName)
 		do:tCredId'="" ..AddSetting(tItem, "Adapter", "Credentials", tCredId)
+		// Refuse before taking the lock, so a missing privilege is the error the
+		// caller sees.
+		if (tNewCredId '= "") && '..CanWriteCredentials() {
+			set tSC = ..NoCredentialsAccess("create credentials '"_tNewCredId_"'", "W")
+			Quit
+		}
 
 		// Insert under the edit lock: reread the production, recheck the name,
 		// create the entry, then one %Save and SaveToClass.
@@ -290,8 +296,14 @@ ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDS
 		} Catch (eEdit) {
 			set tSC = eEdit.AsStatus()
 		}
-		// No pipeline, so no entry: take back the one just made for it.
-		if $$$ISERR(tSC) && tCreated do ..DeleteOwnedCredentials(tNewCredId, pDSName)
+		// No pipeline, so no entry: take back the one just made for it, and say
+		// so if that fails too.
+		if $$$ISERR(tSC) && tCreated {
+			set tSCUndo = ..DeleteOwnedCredentials(tNewCredId, pDSName)
+			if $$$ISERR(tSCUndo) {
+				set tSC = ##class(OPCUA.REST.Error).Make(500, "Pipeline not saved: "_##class(OPCUA.REST.Error).Text(tSC)_". The credentials '"_tNewCredId_"' made for it could not be removed: "_##class(OPCUA.REST.Error).Text(tSCUndo), tSC)
+			}
+		}
 		do ##class(OPCUA.REST.ProductionEdit).End()
 
 	} Catch (e) {
@@ -336,23 +348,101 @@ Parameter CredentialsIdMax = 50;
 /// entry, a copy carrying that entry's username and password.
 ///
 /// 400 if <tt>credentials</tt> names no entry, or comes with a <tt>username</tt>
-/// too. Nothing is created here; <method>AddServiceItem</method> does that.
+/// too. 403 if this IRIS account may not read the entry, or (with a
+/// <tt>username</tt>) may not create one. Nothing is created here;
+/// <method>AddServiceItem</method> does that.
 ClassMethod ResolveCredentials(pBody As %DynamicObject, Output pCheckBody As %DynamicObject) As %Status
 {
 	set pCheckBody = pBody
 	set tCredId = pBody.%Get("credentials")
-	Quit:tCredId="" $$$OK
+	if tCredId = "" {
+		if (pBody.%Get("username") '= "") && '..CanWriteCredentials() {
+			Quit ..NoCredentialsAccess("create credentials for this pipeline", "W")
+		}
+		Quit $$$OK
+	}
 	if pBody.%Get("username") '= "" {
 		Quit ##class(OPCUA.REST.Error).BadRequest("Send either 'credentials' (an existing credentials ID) or 'username' and 'password', not both.")
 	}
-	set tCred = ##class(Ens.Config.Credentials).%OpenId(tCredId)
-	if '$IsObject(tCred) {
-		Quit ##class(OPCUA.REST.Error).BadRequest("Credentials '"_tCredId_"' do not exist in namespace "_$Namespace_". Create them in the Management Portal (Interoperability > Configure > Credentials) first.")
-	}
+	set tSC = ..ReadCredentials(tCredId, .tUser, .tPassword)
+	Quit:$$$ISERR(tSC) tSC
 	set pCheckBody = {}.%FromJSON(pBody.%ToJSON())
-	do pCheckBody.%Set("username", tCred.Username)
-	do pCheckBody.%Set("password", tCred.Password)
+	do pCheckBody.%Set("username", tUser)
+	do pCheckBody.%Set("password", tPassword)
 	Quit $$$OK
+}
+
+/// The username and password in credentials entry <var>pId</var>, for a connect
+/// made on the caller's behalf (deploy's and rebind's coverage checks).
+///
+/// The ID is matched as Ens matches it: case-insensitively, and "" or
+/// <tt>none</tt> mean no credentials (an anonymous session). 400 if no entry
+/// has the ID. 403 if this IRIS account cannot read stored passwords:
+/// <tt>Ens.Config.Credentials</tt> then hands back an empty password with no
+/// error, and the connect would fail with a misleading BadUserAccessDenied.
+ClassMethod ReadCredentials(pId As %String, Output pUser As %String, Output pPassword As %String) As %Status
+{
+	set (pUser, pPassword) = ""
+	Quit:(pId="")||($ZConvert(pId, "L")="none") $$$OK
+	set tId = ..FindCredentialsId(pId)
+	if tId = "" {
+		Quit ##class(OPCUA.REST.Error).BadRequest("Credentials '"_pId_"' do not exist in namespace "_$Namespace_". Create them in the Management Portal (Interoperability > Configure > Credentials) first.")
+	}
+	if '..CanReadCredentials() {
+		Quit ..NoCredentialsAccess("read the password in credentials '"_tId_"'", "R")
+	}
+	set tCred = ##class(Ens.Config.Credentials).%OpenId(tId, 0, .tSC)
+	if '$IsObject(tCred) {
+		Quit ##class(OPCUA.REST.Error).Make(500, "Cannot open credentials '"_tId_"'", tSC)
+	}
+	set pUser = tCred.Username, pPassword = tCred.Password
+	Quit $$$OK
+}
+
+/// The stored ID of the credentials entry whose ID matches <var>pId</var> in any
+/// case, as <tt>Ens.Config.Credentials.GetCredentialsObj</tt> matches it; ""
+/// when there is none.
+ClassMethod FindCredentialsId(pId As %String) As %String
+{
+	Quit:pId="" ""
+	set tLower = $ZConvert(pId, "L"), tId = ""
+	&sql(SELECT TOP 1 SystemName INTO :tId FROM Ens_Config.Credentials WHERE LOWER(SystemName) = :tLower)
+	Quit $Select(SQLCODE=0:tId, 1:"")
+}
+
+/// Whether this process may read stored credentials passwords. Ens keeps them in
+/// <tt>^Ens.SecondaryData.Password</tt>, in the namespace's secondary database,
+/// and reads them with no privilege check of its own, so a reference that
+/// raises &lt;PROTECT&gt; is the only reliable sign. The Portal also requires
+/// %Ens_Credentials to view credentials, so that is checked too.
+ClassMethod CanReadCredentials() As %Boolean
+{
+	Quit:'$System.Security.Check(..#CredentialsResource, "R") 0
+	try {
+		set tOK = ($Data(^Ens.SecondaryData.Password) >= 0)
+	} catch {
+		set tOK = 0
+	}
+	Quit tOK
+}
+
+/// Whether this process may create and delete credentials entries:
+/// %Ens_Credentials:W, which <tt>%SYS.Ensemble</tt> checks before storing or
+/// removing a password.
+ClassMethod CanWriteCredentials() As %Boolean [ CodeMode = expression ]
+{
+$System.Security.Check(..#CredentialsResource, "W")
+}
+
+/// The resource that guards credentials entries.
+Parameter CredentialsResource = "%Ens_Credentials";
+
+/// 403 for a credentials operation this IRIS account may not do.
+/// <var>pWhat</var> describes it ("read the password in credentials 'X'"),
+/// <var>pPermission</var> is the permission it needs on %Ens_Credentials.
+ClassMethod NoCredentialsAccess(pWhat As %String, pPermission As %String) As %Status
+{
+	Quit ##class(OPCUA.REST.Error).Forbidden("IRIS user '"_$Username_"' cannot "_pWhat_": that needs the "_..#CredentialsResource_" resource ("_pPermission_"), as SuperUser has. Sign the console in as a developer with SuperUser rights, or have an administrator create the credentials in the Management Portal and deploy with 'credentials'.")
 }
 
 /// Create credentials entry <var>pId</var> for pipeline <var>pItemName</var> and
@@ -362,9 +452,13 @@ ClassMethod ResolveCredentials(pBody As %DynamicObject, Output pCheckBody As %Dy
 /// An existing entry is never overwritten, whoever made it: 409.
 ClassMethod CreateOwnedCredentials(pId As %String, pItemName As %String, pUsername As %String, pPassword As %String) As %Status [ Private ]
 {
-	if ##class(Ens.Config.Credentials).%ExistsId(pId) {
-		Quit ##class(OPCUA.REST.Error).Conflict("Credentials '"_pId_"' already exist, and are never overwritten. Choose a different pipeline name, or send 'credentials': '"_pId_"' to use them.")
+	// Ens matches credentials IDs in any case, so a taken ID in another case is
+	// taken.
+	set tTaken = ..FindCredentialsId(pId)
+	if tTaken '= "" {
+		Quit ##class(OPCUA.REST.Error).Conflict("Credentials '"_tTaken_"' already exist, and are never overwritten. Choose a different pipeline name, or send 'credentials': '"_tTaken_"' to use them.")
 	}
+	Quit:'..CanWriteCredentials() ..NoCredentialsAccess("create credentials '"_pId_"'", "W")
 	set tSC = ##class(Ens.Config.Credentials).SetCredential(pId, pUsername, pPassword, 0)
 	Quit:$$$ISERR(tSC) ##class(OPCUA.REST.Error).Make(500, "Could not create credentials '"_pId_"'", tSC)
 	set ^OPCUA.OwnedCredentials(pId) = pItemName
@@ -376,14 +470,22 @@ ClassMethod CreateOwnedCredentials(pId As %String, pItemName As %String, pUserna
 /// there is nothing of ours to delete.
 ClassMethod DeleteOwnedCredentials(pId As %String, pItemName As %String) As %Status
 {
-	Quit:pId="" $$$OK
-	Quit:$Get(^OPCUA.OwnedCredentials(pId))'=pItemName $$$OK
+	Quit:'..OwnsCredentials(pId, pItemName) $$$OK
+	Quit:'..CanWriteCredentials() ..NoCredentialsAccess("delete credentials '"_pId_"'", "W")
 	if ##class(Ens.Config.Credentials).%ExistsId(pId) {
 		set tSC = ##class(Ens.Config.Credentials).%DeleteId(pId)
 		Quit:$$$ISERR(tSC) tSC
 	}
 	kill ^OPCUA.OwnedCredentials(pId)
 	Quit $$$OK
+}
+
+/// Whether deploy created credentials entry <var>pId</var> for pipeline
+/// <var>pItemName</var>.
+ClassMethod OwnsCredentials(pId As %String, pItemName As %String) As %Boolean
+{
+	Quit:pId="" 0
+	Quit $Get(^OPCUA.OwnedCredentials(pId))=pItemName
 }
 
 /// The refusal for a pipeline name that is already taken.

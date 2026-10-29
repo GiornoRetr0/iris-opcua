@@ -49,7 +49,7 @@ export function isSignInFailure(err: unknown): boolean {
 /**
  * The message to show for a failed API call, whatever its HTTP status.
  *
- * The API answers errors with a real status (400, 401, 404, 409, 500) and the
+ * The API answers errors with a real status (400, 401, 403, 404, 409, 500) and the
  * envelope {"status":"error","error":"…"}; a 500 says only "Internal error.
  * Reference …", the detail being in the IRIS application error log. Angular
  * puts that envelope in HttpErrorResponse.error. Its own `message` ("Http failure
@@ -143,8 +143,22 @@ export class ApiService {
   }
 
   private post<T>(endpoint: string, params: Record<string, any> = {}, timeoutMs = 15000, server?: ServerProfile): Observable<T> {
+    return this.postBody<T>(endpoint, this.buildBody(params, server), timeoutMs);
+  }
+
+  /**
+   * POST for managing an existing pipeline: sends only `params`, never the
+   * connection fields. The server reads a pipeline's endpoint and credentials
+   * from the pipeline itself (its password sits in an IRIS credentials entry,
+   * audit #15), so the browser's stored OPC UA password has no business here.
+   */
+  private postPlain<T>(endpoint: string, params: Record<string, any>, timeoutMs = 15000): Observable<T> {
+    return this.postBody<T>(endpoint, params, timeoutMs);
+  }
+
+  private postBody<T>(endpoint: string, body: Record<string, any>, timeoutMs: number): Observable<T> {
     return this.http
-      .post<ApiEnvelope<T>>(`${this.baseUrl}${endpoint}`, this.buildBody(params, server), {
+      .post<ApiEnvelope<T>>(`${this.baseUrl}${endpoint}`, body, {
         headers: this.headers,
       })
       .pipe(
@@ -197,15 +211,15 @@ export class ApiService {
   }
 
   listPipelines(): Observable<Pipeline[]> {
-    return this.post<Pipeline[]>('/pipelines', {});
+    return this.postPlain<Pipeline[]>('/pipelines', {});
   }
 
   togglePipeline(name: string): Observable<any> {
-    return this.post('/pipelines/toggle', { name });
+    return this.postPlain('/pipelines/toggle', { name });
   }
 
   deletePipeline(name: string): Observable<any> {
-    return this.post('/pipelines/delete', { name });
+    return this.postPlain('/pipelines/delete', { name });
   }
 
   /**
@@ -226,7 +240,7 @@ export class ApiService {
   ): Observable<{ updated: number; name: string; deviceCount: number; restarted: number; restartNote: string }> {
     const body: Record<string, unknown> = { name, devices };
     if (categories !== undefined) body['categories'] = categories;
-    return this.post('/pipelines/rebind', body, 30000);
+    return this.postPlain('/pipelines/rebind', body, 30000);
   }
 
   // ── Schemas: reusable device types, independent of any pipeline ──

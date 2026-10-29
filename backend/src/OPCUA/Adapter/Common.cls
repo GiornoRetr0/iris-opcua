@@ -172,14 +172,16 @@ Method Connect() As %Status [ Private ]
 		}
 
 		// Username and password come from the Credentials setting, an
-		// Ens.Config.Credentials ID, never from plain-text settings. Unset means
-		// an anonymous session. A set ID that names no entry is an error rather
-		// than a silent anonymous connect. Setting Credentials again reloads the
-		// entry, so a password changed in the Portal applies at the next connect.
+		// Ens.Config.Credentials ID, never from plain-text settings. Ens resolves
+		// the ID case-insensitively, and unset or "none" gives an empty entry: an
+		// anonymous session. An ID that names no entry leaves no object, and is an
+		// error rather than a silent anonymous connect. Setting Credentials again
+		// reloads the entry, so a password changed in the Portal applies at the
+		// next connect.
 		set tUser = "", tPassword = ""
 		if ..Credentials '= "" {
 			set ..Credentials = ..Credentials
-			if '$IsObject(..%CredentialsObj) || '##class(Ens.Config.Credentials).%ExistsId(..Credentials) {
+			if '$IsObject(..%CredentialsObj) {
 				set tSC = $$$ERROR($$$GeneralError, "Credentials entry '"_..Credentials_"' does not exist")
 				Quit
 			}

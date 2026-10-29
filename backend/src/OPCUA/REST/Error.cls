@@ -35,6 +35,13 @@ ClassMethod NotFound(pMessage As %String) As %Status
 	Quit ..Make(404, pMessage)
 }
 
+/// 403: the signed-in IRIS account lacks a privilege the request needs (for
+/// example %Ens_Credentials). Signing in again does not help, so it is not 401.
+ClassMethod Forbidden(pMessage As %String) As %Status
+{
+	Quit ..Make(403, pMessage)
+}
+
 /// 409: the request is fine but clashes with current state (in use, name taken,
 /// another production running, edit lock busy, stale save).
 ClassMethod Conflict(pMessage As %String) As %Status
