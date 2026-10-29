@@ -1,7 +1,7 @@
 import { Component, inject, signal, computed, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
-import { ApiService } from '../../core/services/api.service';
+import { ApiService, apiErrorMessage } from '../../core/services/api.service';
 import { Schema } from '../../core/models/opcua.models';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dialog.component';
 
@@ -274,7 +274,7 @@ export class SchemaLibraryComponent implements OnInit {
         this.loading.set(false);
       },
       error: (err) => {
-        this.error.set(this.message(err));
+        this.error.set(apiErrorMessage(err));
         this.schemas.set([]);
         this.loading.set(false);
       },
@@ -296,7 +296,7 @@ export class SchemaLibraryComponent implements OnInit {
         this.detailLoading.set(false);
       },
       error: (err) => {
-        this.error.set(this.message(err));
+        this.error.set(apiErrorMessage(err));
         this.detailLoading.set(false);
         this.expanded.set('');
       },
@@ -344,11 +344,7 @@ export class SchemaLibraryComponent implements OnInit {
     this.pendingDelete.set(null);
     this.api.deleteSchema(schema.schemaClass).subscribe({
       next: () => this.load(),
-      error: (err) => this.error.set(this.message(err)),
+      error: (err) => this.error.set(apiErrorMessage(err)),
     });
-  }
-
-  private message(err: any): string {
-    return err?.error?.error || err?.message || 'Request failed';
   }
 }

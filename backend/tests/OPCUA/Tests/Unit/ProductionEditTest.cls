@@ -83,6 +83,7 @@ Method TestLockBusy()
 	set tSC = ##class(OPCUA.REST.ProductionEdit).Begin(.tProd, .tStamp, 1)
 	do $$$AssertNotTrue($$$ISOK(tSC), "Begin refuses while another process holds the lock")
 	do $$$AssertTrue($System.Status.GetErrorText(tSC) [ "in progress", "error says in progress: "_$System.Status.GetErrorText(tSC))
+	do $$$AssertEquals(##class(OPCUA.REST.Error).HttpCode(tSC), 409, "lock busy is HTTP 409")
 	do $$$AssertNotTrue($IsObject($Get(tProd)), "no production handed out")
 }
 
@@ -106,6 +107,7 @@ Method TestStaleCommitRefused()
 	do ##class(OPCUA.REST.ProductionEdit).End()
 	do $$$AssertNotTrue($$$ISOK(tSC), "stale Commit is refused")
 	do $$$AssertTrue($System.Status.GetErrorText(tSC) [ "changed by someone else", "error says changed by someone else: "_$System.Status.GetErrorText(tSC))
+	do $$$AssertEquals(##class(OPCUA.REST.Error).HttpCode(tSC), 409, "stale save is HTTP 409")
 	kill tItem, tProd
 
 	do $$$AssertEquals(..StoredDevices("Other"), "fromPortal", "the other change survived in storage")

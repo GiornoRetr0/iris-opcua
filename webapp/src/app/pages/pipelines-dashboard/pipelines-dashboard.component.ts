@@ -2,7 +2,7 @@ import { Component, inject, signal, computed, OnInit, OnDestroy } from '@angular
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
-import { ApiService } from '../../core/services/api.service';
+import { ApiService, apiErrorMessage } from '../../core/services/api.service';
 import { ConfigService } from '../../core/services/config.service';
 import { Pipeline, PipelineHealth } from '../../core/models/opcua.models';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dialog.component';
@@ -619,12 +619,8 @@ export class PipelinesDashboardComponent implements OnInit, OnDestroy {
    * message above it.
    */
   private actionFailed(err: any): void {
-    this.actionError.set(this.message(err));
+    this.actionError.set(apiErrorMessage(err));
     this.loadPipelines(true);
-  }
-
-  private message(err: any): string {
-    return err?.error?.error || err?.message || 'Request failed';
   }
 
   editPipeline(pipeline: Pipeline): void {

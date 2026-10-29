@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { forkJoin, of, Observable } from 'rxjs';
 import { catchError, map, switchMap } from 'rxjs/operators';
-import { ApiService } from '../../core/services/api.service';
+import { ApiService, apiErrorMessage } from '../../core/services/api.service';
 import { ConfigService } from '../../core/services/config.service';
 import { ROOT_NODE, ServerProfile, TreeNode } from '../../core/models/opcua.models';
 import { nodeIcon, nodeIconClass } from '../../shared/opcua-tree/node-icons';
@@ -486,7 +486,7 @@ export class SchemaBuilderComponent implements OnInit {
         this.browsing.set(false);
       },
       error: (err) => {
-        this.error.set(this.message(err));
+        this.error.set(apiErrorMessage(err));
         this.browsing.set(false);
       },
     });
@@ -515,7 +515,7 @@ export class SchemaBuilderComponent implements OnInit {
       },
       error: (err) => {
         node.loading = false;
-        this.error.set(this.message(err));
+        this.error.set(apiErrorMessage(err));
         this.roots.update((r) => [...r]);
       },
     });
@@ -713,7 +713,7 @@ export class SchemaBuilderComponent implements OnInit {
           this.router.navigate(['/schemas']);
         },
         error: (err) => {
-          this.error.set(this.message(err));
+          this.error.set(apiErrorMessage(err));
           this.saving.set(false);
         },
       });
@@ -761,8 +761,4 @@ export class SchemaBuilderComponent implements OnInit {
    */
   icon = nodeIcon;
   iconClass = (node: TreeNode) => nodeIconClass(node);
-
-  private message(err: any): string {
-    return err?.error?.error || err?.message || 'Request failed';
-  }
 }

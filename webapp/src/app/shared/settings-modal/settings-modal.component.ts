@@ -2,7 +2,7 @@ import { Component, inject, signal, output, input, OnInit } from '@angular/core'
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ConfigService } from '../../core/services/config.service';
-import { ApiService } from '../../core/services/api.service';
+import { ApiService, apiErrorMessage } from '../../core/services/api.service';
 import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
 
 @Component({
@@ -265,6 +265,12 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
             <!-- Gateway tab -->
             @if (activeTab() === 'gateway') {
               <section>
+                @if (notice()) {
+                  <p class="mb-4 flex items-start gap-1.5 text-sm text-error font-medium" role="alert">
+                    <span class="material-symbols-outlined text-base shrink-0">error</span>
+                    <span>{{ notice() }}: IRIS did not accept this username and password. Check them and save.</span>
+                  </p>
+                }
                 <header class="mb-4 flex items-center gap-2">
                   <span class="w-1 h-5 bg-tertiary rounded-full"></span>
                   <h3 class="text-xs font-bold uppercase tracking-widest text-on-surface-variant">IRIS API Gateway</h3>
@@ -389,6 +395,8 @@ export class SettingsModalComponent implements OnInit {
 
   closed = output<void>();
   initialTab = input<'servers' | 'gateway'>('servers');
+  /** Why Settings opened by itself, e.g. "Sign-in failed" after a 401. */
+  notice = input('');
 
   readonly hosted = this.configService.hosted;
 
@@ -520,7 +528,7 @@ export class SettingsModalComponent implements OnInit {
       error: (err) => {
         this.testing.set(false);
         this.testFailed.set(true);
-        this.testStatus.set(err.message || 'Error');
+        this.testStatus.set(apiErrorMessage(err, 'Connection test failed'));
         this.serverStatuses.update(s => ({ ...s, [server.id]: 'offline' }));
       },
     });

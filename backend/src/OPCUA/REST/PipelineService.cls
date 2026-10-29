@@ -265,7 +265,7 @@ ClassMethod Toggle(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		Try {
 			set tItem = ##class(OPCUA.REST.ProductionEdit).FindItem(tProd, tName)
 			if '$IsObject(tItem) {
-				set tSC = $$$ERROR($$$GeneralError, "Pipeline '"_tName_"' not found")
+				set tSC = ##class(OPCUA.REST.Error).NotFound("Pipeline '"_tName_"' not found")
 			} else {
 				set tNewState = 'tItem.Enabled
 				// Check before saving, so a refused enable leaves the pipeline disabled
@@ -294,7 +294,7 @@ ClassMethod Toggle(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		set pResult.restarted = tRestarted
 		set pResult.restartNote = tNote
 		if $$$ISERR(tSC) {
-			set tSC = $$$ERROR($$$GeneralError, "Pipeline "_$Select(tNewState:"enabled",1:"disabled")_" and saved, but the production could not be updated: "_$System.Status.GetOneStatusText(tSC))
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Pipeline "_$Select(tNewState:"enabled",1:"disabled")_" and saved, but the production could not be updated: "_##class(OPCUA.REST.Error).Text(tSC), tSC)
 		}
 
 	} Catch (e) {
@@ -329,7 +329,7 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		Try {
 			set tCfgItem = ##class(OPCUA.REST.ProductionEdit).FindItem(tProd, tName, .tFoundIdx)
 			if '$IsObject(tCfgItem) {
-				set tSC = $$$ERROR($$$GeneralError, "Pipeline '"_tName_"' not found in production")
+				set tSC = ##class(OPCUA.REST.Error).NotFound("Pipeline '"_tName_"' not found in production")
 			} else {
 				// Capture the schema and the row ID before removing
 				set tDSClass = ..GetSettingValue(tCfgItem, "DataSourceClass")
@@ -354,7 +354,7 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		// itself, outside our edit, which Commit would then refuse as stale.
 		set tSCApply = ##class(OPCUA.REST.ProductionEdit).ApplyToRunning(.tRestarted, .tNote)
 		if $$$ISERR(tSCApply) {
-			set tSC = $$$ERROR($$$GeneralError, "Pipeline deleted, but the running production could not be updated: "_$System.Status.GetOneStatusText(tSCApply))
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Pipeline deleted, but the running production could not be updated: "_##class(OPCUA.REST.Error).Text(tSCApply), tSCApply)
 		}
 
 		set pResult.deleted = 1
@@ -452,7 +452,7 @@ ClassMethod Rebind(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		set pResult.restarted = tRestarted
 		set pResult.restartNote = tNote
 		if $$$ISERR(tSC) {
-			set tSC = $$$ERROR($$$GeneralError, "Device list saved, but the running pipeline could not be restarted: "_$System.Status.GetOneStatusText(tSC))
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Device list saved, but the running pipeline could not be restarted: "_##class(OPCUA.REST.Error).Text(tSC), tSC)
 		}
 
 		set pResult.updated = 1
@@ -479,18 +479,18 @@ ClassMethod DescribeItem(pItemName As %String, Output pSchemaClass As %String, O
 
 	set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
 	if '$IsObject(tProd) {
-		Quit $$$ERROR($$$GeneralError, "Cannot open production: "_..#ProductionClass)
+		Quit ##class(OPCUA.REST.Error).Make(500, "Cannot open production: "_..#ProductionClass)
 	}
 
 	set tItem = ##class(OPCUA.REST.ProductionEdit).FindItem(tProd, pItemName)
 	if '$IsObject(tItem) {
-		Quit $$$ERROR($$$GeneralError, "Pipeline '"_pItemName_"' not found in production")
+		Quit ##class(OPCUA.REST.Error).NotFound("Pipeline '"_pItemName_"' not found in production")
 	}
 
 	set pSchemaClass = ..GetSettingValue(tItem, "DataSourceClass")
 	set pURL = ..GetSettingValue(tItem, "URL")
 	if pSchemaClass = "" {
-		Quit $$$ERROR($$$GeneralError, "Pipeline '"_pItemName_"' has no DataSourceClass setting")
+		Quit ##class(OPCUA.REST.Error).Make(500, "Pipeline '"_pItemName_"' has no DataSourceClass setting")
 	}
 
 	do pConn.%Set("url", pURL)

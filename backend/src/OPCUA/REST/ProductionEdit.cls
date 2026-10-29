@@ -47,7 +47,7 @@ ClassMethod Begin(Output pProd As Ens.Config.Production, Output pStamp As %Strin
 {
 	set pProd = "", pStamp = ""
 	lock +^OPCUA.ProductionEdit:pTimeout
-	if '$Test Quit $$$ERROR($$$GeneralError, "Another change to the pipelines is in progress; try again.")
+	if '$Test Quit ##class(OPCUA.REST.Error).Conflict("Another change to the pipelines is in progress; try again.")
 
 	#dim tSC As %Status = $$$OK
 	Try {
@@ -57,7 +57,7 @@ ClassMethod Begin(Output pProd As Ens.Config.Production, Output pStamp As %Strin
 		set pStamp = ..Stamp(tClass)
 		set pProd = ##class(Ens.Config.Production).%OpenId(tClass, 0, .tSC)
 		if '$IsObject(pProd) {
-			set tSC = $$$ERROR($$$GeneralError, "Cannot open production: "_tClass)
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Cannot open production: "_tClass, tSC)
 			Quit
 		}
 		// %OpenId hands back an object this process already holds, unchanged.
@@ -85,7 +85,7 @@ ClassMethod Commit(pProd As Ens.Config.Production, pStamp As %String) As %Status
 	#dim tSC As %Status = $$$OK
 	Try {
 		if ..Stamp(pProd.Name) '= pStamp {
-			set tSC = $$$ERROR($$$GeneralError, "The pipeline production was changed by someone else (for example in the Management Portal); reload and try again.")
+			set tSC = ##class(OPCUA.REST.Error).Conflict("The pipeline production was changed by someone else (for example in the Management Portal); reload and try again.")
 			Quit
 		}
 		set tSC = pProd.%Save()
@@ -116,7 +116,7 @@ ClassMethod UpdateItem(pItemName As %String, pSettings As %DynamicObject = "", p
 	Try {
 		set tItem = ..FindItem(tProd, pItemName)
 		if '$IsObject(tItem) {
-			set tSC = $$$ERROR($$$GeneralError, "Pipeline '"_pItemName_"' not found in production")
+			set tSC = ##class(OPCUA.REST.Error).NotFound("Pipeline '"_pItemName_"' not found in production")
 			Quit
 		}
 		if $IsObject(pSettings) {

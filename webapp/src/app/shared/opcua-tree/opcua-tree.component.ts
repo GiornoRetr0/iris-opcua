@@ -1,7 +1,7 @@
 import { Component, inject, signal, input, output, effect, computed, untracked } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ApiService } from '../../core/services/api.service';
+import { ApiService, apiErrorMessage } from '../../core/services/api.service';
 import { ConfigService } from '../../core/services/config.service';
 import { ROOT_NODE, TreeNode, ServerProfile } from '../../core/models/opcua.models';
 import { nodeIcon, nodeIconClass, nodeCategoryLabel } from './node-icons';
@@ -403,7 +403,7 @@ export class OpcuaTreeComponent {
         this.loading.set(false);
       },
       error: (err) => {
-        this.error.set(err?.error?.error || err?.message || 'Could not browse this server');
+        this.error.set(apiErrorMessage(err, 'Could not browse this server'));
         this.loading.set(false);
       },
     });
@@ -426,7 +426,7 @@ export class OpcuaTreeComponent {
       },
       error: (err) => {
         sr.loading = false;
-        sr.error = err?.error?.error || err?.message || 'Could not browse this server';
+        sr.error = apiErrorMessage(err, 'Could not browse this server');
         this.serverRoots.update((r) => [...r]);
       },
     });

@@ -67,7 +67,7 @@ ClassMethod BindExistingSchema(pBody As %DynamicObject, Output pResult As %Dynam
 		set tSchemaClass = pBody.%Get("schemaClass")
 
 		if '##class(%Dictionary.CompiledClass).%ExistsId(tSchemaClass) {
-			set tSC = $$$ERROR($$$GeneralError, "Schema '"_tSchemaClass_"' does not exist or is not compiled")
+			set tSC = ##class(OPCUA.REST.Error).NotFound("Schema '"_tSchemaClass_"' does not exist or is not compiled")
 			Quit
 		}
 		if '##class(OPCUA.REST.SchemaService).IsSchema(tSchemaClass) {
@@ -277,7 +277,7 @@ ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDS
 /// The refusal for a pipeline name that is already taken.
 ClassMethod DuplicateNameError(pName As %String) As %Status [ Private ]
 {
-	Quit $$$ERROR($$$GeneralError, "A pipeline named '"_pName_"' already exists. Choose a different name.")
+	Quit ##class(OPCUA.REST.Error).Conflict("A pipeline named '"_pName_"' already exists. Choose a different name.")
 }
 
 /// Turn a caller-supplied category list into the comma-delimited string
@@ -426,7 +426,7 @@ ClassMethod CheckNoOtherProduction() As %Status
 	set tStateText = $Case(tState, 1:"running", 3:"suspended", 4:"troubled", :"")
 	if tStateText = "" Quit $$$OK
 
-	Quit $$$ERROR($$$GeneralError, "Production '"_tProdName_"' is "_tStateText_" in namespace "_$Namespace_". A namespace runs one production at a time, and pipelines run in '"_..#ProductionClass_"'. Stop '"_tProdName_"' first; it was not changed.")
+	Quit ##class(OPCUA.REST.Error).Conflict("Production '"_tProdName_"' is "_tStateText_" in namespace "_$Namespace_". A namespace runs one production at a time, and pipelines run in '"_..#ProductionClass_"'. Stop '"_tProdName_"' first; it was not changed.")
 }
 
 }

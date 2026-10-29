@@ -2,7 +2,7 @@ import { Component, input, inject, signal, effect, untracked, OnDestroy } from '
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TreeNode, NodeReadResult } from '../../../core/models/opcua.models';
-import { ApiService } from '../../../core/services/api.service';
+import { ApiService, apiErrorMessage } from '../../../core/services/api.service';
 import { ConfigService } from '../../../core/services/config.service';
 import { severityOf, statusText, statusDetail } from '../../../core/opcua-status';
 
@@ -315,7 +315,7 @@ export class NodeDetailComponent implements OnDestroy {
         // The error callback used to only clear the spinner. Recording the
         // failure is what makes staleness visible at all.
         this.readLoading.set(false);
-        this.recordFailure(err?.error?.error || err?.message || 'The read failed');
+        this.recordFailure(apiErrorMessage(err, 'The read failed'));
       },
     });
   }

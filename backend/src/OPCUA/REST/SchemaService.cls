@@ -52,7 +52,7 @@ ClassMethod Create(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		if tDataSourceName = "" set tDataSourceName = $Piece(tClassName, ".", *)
 
 		if ##class(%Dictionary.ClassDefinition).%ExistsId(tClassName) {
-			set tSC = $$$ERROR($$$GeneralError, "Class '"_tClassName_"' already exists. Choose a different name.")
+			set tSC = ##class(OPCUA.REST.Error).Conflict("Class '"_tClassName_"' already exists. Choose a different name.")
 			Quit
 		}
 
@@ -174,7 +174,7 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		}
 
 		if tUsageList '= "" {
-			set tSC = $$$ERROR($$$GeneralError, "Schema '"_tClassName_"' is still used by: "_tUsageList)
+			set tSC = ##class(OPCUA.REST.Error).Conflict("Schema '"_tClassName_"' is still used by: "_tUsageList)
 			Quit
 		}
 
@@ -223,7 +223,7 @@ ClassMethod Validate(pBody As %DynamicObject, Output pResult As %DynamicObject) 
 		set tSC = ##class(OPCUA.DataSource.Resolver).ParseDeviceNodePaths(tSetting, .tDevices, .tParseErrors)
 		if $$$ISERR(tSC) {
 			// Surface the per-line reasons, which are far more useful than the summary.
-			set tMsg = $System.Status.GetOneErrorText(tSC)
+			set tMsg = ##class(OPCUA.REST.Error).Text(tSC)
 			for i=1:1:$LL(tParseErrors) { set tMsg = tMsg_"; "_$LI(tParseErrors, i) }
 			set tSC = $$$ERROR($$$GeneralError, tMsg)
 			Quit
@@ -537,7 +537,7 @@ ClassMethod GenerateSerialClasses(pMainClassName As %String, pDefaultNS As %Inte
 
 			// Check if class already exists
 			if ##class(%Dictionary.ClassDefinition).%ExistsId(tSerialClassName) {
-				set tSC = $$$ERROR($$$GeneralError, "Class '"_tSerialClassName_"' already exists. Choose different folder names or a different schema name.")
+				set tSC = ##class(OPCUA.REST.Error).Conflict("Class '"_tSerialClassName_"' already exists. Choose different folder names or a different schema name.")
 				Quit
 			}
 		}
@@ -703,7 +703,7 @@ ClassMethod RequireSchema(pBody As %DynamicObject, Output pClassName As %String)
 	Quit:$$$ISERR(tSC) tSC
 
 	if '##class(%Dictionary.ClassDefinition).%ExistsId(pClassName) {
-		Quit $$$ERROR($$$GeneralError, "Schema '"_pClassName_"' does not exist")
+		Quit ##class(OPCUA.REST.Error).NotFound("Schema '"_pClassName_"' does not exist")
 	}
 	if '..IsSchema(pClassName) {
 		Quit $$$ERROR($$$GeneralError, "Class '"_pClassName_"' is not an OPCUA.DataSource.DeviceSchema subclass")
@@ -786,14 +786,14 @@ ClassMethod MapSchemaUsage(Output pUsage) As %Status
 	Try {
 		// Test seam: force a failure to test error handling
 		if $Get(^||OPCUA.Tests("failUsage")) {
-			set tSC = $$$ERROR($$$GeneralError, "Forced usage check failure")
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Forced usage check failure")
 			Quit
 		}
 
 		// Iterate every production in the namespace via SQL
 		set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT ID FROM Ens_Config.Production")
 		if '$IsObject($Get(tRS)) {
-			set tSC = $$$ERROR($$$GeneralError, "Failed to query Ens_Config.Production")
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to query Ens_Config.Production")
 			Quit
 		}
 
@@ -801,7 +801,7 @@ ClassMethod MapSchemaUsage(Output pUsage) As %Status
 			set tProdClass = tRS.ID
 			set tProd = ##class(Ens.Config.Production).%OpenId(tProdClass)
 			if '$IsObject(tProd) {
-				set tSC = $$$ERROR($$$GeneralError, "Failed to open production '"_tProdClass_"'")
+				set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to open production '"_tProdClass_"'")
 				Quit
 			}
 

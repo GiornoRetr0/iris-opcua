@@ -1,7 +1,7 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
-import { ApiService } from '../../core/services/api.service';
+import { ApiService, apiErrorMessage } from '../../core/services/api.service';
 import { Schema } from '../../core/models/opcua.models';
 
 /**
@@ -148,7 +148,7 @@ export class ServiceSchemaPickerComponent implements OnInit {
         this.loading.set(false);
       },
       error: (err) => {
-        this.error.set(this.message(err));
+        this.error.set(apiErrorMessage(err, 'Could not load schemas'));
         this.schemas.set([]);
         this.loading.set(false);
       },
@@ -166,9 +166,5 @@ export class ServiceSchemaPickerComponent implements OnInit {
 
   back(): void {
     this.router.navigate(['/pipelines']);
-  }
-
-  private message(err: any): string {
-    return err?.error?.error || err?.message || 'Could not load schemas';
   }
 }
