@@ -1,4 +1,4 @@
-/// Stands in for a business service when <class>MeasurementMetadataTest</class>
+/// Stands in for a business service when <class>OPCUA.Tests.Unit.MeasurementMetadataTest</class>
 /// drives <method>OPCUA.Adapter.TCPSubscriptionInboundAdapter.ProcessBatch</method>
 /// offline. A notification "bad<n>" returns an error naming it, "throw" throws,
 /// anything else succeeds.
