@@ -1,12 +1,10 @@
 Include (%occInclude, Ensemble)
 
-/// Manage deployed OPC UA pipelines: list, toggle, delete.
-/// Reads from the shared production (OPCUA.Pipeline.Production).
+/// Manage deployed OPC UA pipelines: list, toggle, delete, rebind.
+/// Reads and edits the shared production, OPCUA.Pipeline.Production
+/// (<method>OPCUA.REST.ProductionEdit.ProductionClass</method>).
 Class OPCUA.REST.PipelineService
 {
-
-/// The shared production class.
-Parameter ProductionClass = "OPCUA.Pipeline.Production";
 
 /// How long a cached row count stays usable, in seconds.
 ///
@@ -21,14 +19,16 @@ ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %S
 	#dim tSC As %Status = $$$OK
 	set pResult = []
 	Try {
-		if '##class(%Dictionary.ClassDefinition).%ExistsId(..#ProductionClass) Quit
+		// The same production that Toggle, Delete and Rebind edit.
+		set tProdClass = ##class(OPCUA.REST.ProductionEdit).ProductionClass()
+		if '##class(%Dictionary.ClassDefinition).%ExistsId(tProdClass) Quit
 
-		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
+		set tProd = ##class(Ens.Config.Production).%OpenId(tProdClass)
 		if '$IsObject(tProd) Quit
 
-		set tSC = ##class(Ens.Director).GetProductionStatus(.tRunningProd, .tProdState)
+		set tSC = ##class(OPCUA.REST.ProductionEdit).ProductionStatus(.tRunningProd, .tProdState)
 		Quit:$$$ISERR(tSC)
-		set tProdRunning = (tRunningProd = ..#ProductionClass) && (tProdState = 1)
+		set tProdRunning = (tRunningProd = tProdClass) && (tProdState = 1)
 
 		for i=1:1:tProd.Items.Count() {
 			set tCfgItem = tProd.Items.GetAt(i)
