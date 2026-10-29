@@ -3,7 +3,7 @@
 Class OPCUA.Types.NoServerTS.QualifiedNameDataValue Extends OPCUA.Types.NoServerTS.AbstractDataValue
 {
 
-Property Name As %String;
+Property Name As %String(MAXLEN = "");
 
 Property Namespace As %Integer;
 

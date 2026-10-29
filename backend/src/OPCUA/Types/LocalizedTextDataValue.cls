@@ -3,7 +3,7 @@ Class OPCUA.Types.LocalizedTextDataValue Extends OPCUA.Types.AbstractDataValue
 
 Property Text As %String(MAXLEN = "");
 
-Property Locale As %String;
+Property Locale As %String(MAXLEN = "");
 
 Storage Default
 {

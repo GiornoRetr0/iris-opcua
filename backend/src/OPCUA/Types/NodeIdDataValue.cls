@@ -3,7 +3,7 @@ Class OPCUA.Types.NodeIdDataValue Extends OPCUA.Types.AbstractDataValue
 
 Property Namespace As %Integer;
 
-Property Identifier;
+Property Identifier As %String(MAXLEN = "");
 
 Property IdentifierType As %Integer;
 

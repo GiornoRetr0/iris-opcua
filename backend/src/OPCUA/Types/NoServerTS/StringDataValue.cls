@@ -3,7 +3,7 @@
 Class OPCUA.Types.NoServerTS.StringDataValue Extends OPCUA.Types.NoServerTS.AbstractDataValue
 {
 
-Property Value As %String(OPCUAVALUETYPE = "String");
+Property Value As %String(MAXLEN = "", OPCUAVALUETYPE = "String");
 
 Storage Default
 {
