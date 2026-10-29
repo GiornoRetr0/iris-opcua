@@ -185,7 +185,7 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
                   <span class="text-[0.6rem] font-bold text-on-surface-variant uppercase tracking-widest">Used by</span>
                   @for (usage of schema.usedBy; track usage.name + usage.production) {
                     @if (usage.managed) {
-                      <a [routerLink]="['/device-binding']" [queryParams]="{name: usage.name}"
+                      <a [routerLink]="['/pipelines/edit', usage.name]"
                          class="px-2 py-1 rounded-md bg-surface-container text-xs font-medium text-primary hover:bg-primary-fixed/20 cursor-pointer">{{ usage.name }}</a>
                     } @else {
                       <span class="px-2 py-1 rounded-md bg-surface-container-highest text-xs font-medium text-on-surface-variant"
