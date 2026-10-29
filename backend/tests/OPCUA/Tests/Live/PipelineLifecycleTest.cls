@@ -70,7 +70,15 @@ Method TestDeleteThenRecreateSameName()
     }
 }
 
-/// Clean up test artifacts
+/// Remove whatever an earlier, failed run left behind, so it can't break this one.
+Method OnBeforeAllTests() As %Status
+{
+    do ..DoCleanup()
+    Quit $$$OK
+}
+
+/// Clean up test artifacts. %UnitTest runs this whatever the tests did, and
+/// DoCleanup never throws.
 Method OnAfterAllTests() As %Status
 {
     do ..DoCleanup()
@@ -80,8 +88,14 @@ Method OnAfterAllTests() As %Status
 /// Clean up test artifacts - can be called manually or from OnAfterAllTests
 ClassMethod DoCleanup()
 {
+    // Delete the pipeline through the API first: it also updates a running
+    // production, so the item's job stops and the schema class is not in use.
     Try {
-        // Delete the pipeline if it exists
+        do ##class(OPCUA.REST.PipelineService).Delete({"name": (..#PipelineName)}, .tResult)
+    } Catch (eDelete) {}
+
+    Try {
+        // Fallback: remove the item directly if the API delete could not
         if ##class(%Dictionary.ClassDefinition).%ExistsId(..#ProductionClass) {
             set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
             if $IsObject(tProd) {
@@ -103,8 +117,10 @@ ClassMethod DoCleanup()
         // Delete any orphaned config item rows
         set tPipelineName = ..#PipelineName
         &sql(DELETE FROM Ens_Config.Item WHERE Name = :tPipelineName)
+    } Catch (e) {}
 
-        // Delete the schema
+    // Delete the schema, even when the steps above failed
+    Try {
         Try {
             if ##class(%Dictionary.CompiledClass).%ExistsId(..#SchemaClass) {
                 do $classmethod(..#SchemaClass, "%KillExtent")
