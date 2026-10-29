@@ -41,10 +41,19 @@ ClassMethod Install() As %Status
 		ZN "OPCUA"
 
 		// Load include files first (LoadDir skips .inc files)
-		Do $System.OBJ.Load("/opt/irisapp/src/OPCUA/Constants.inc", "k")
+		Set tSC = $System.OBJ.Load("/opt/irisapp/src/OPCUA/Constants.inc", "ck")
+		$$$ThrowOnError(tSC)
+
 		// Load all classes then compile
-		Do $System.OBJ.LoadDir("/opt/irisapp/src/", "k", , 1)
-		Do $System.OBJ.CompileAll("ck")
+		Set tSC = $System.OBJ.LoadDir("/opt/irisapp/src/", "ck", .tErrors, 1)
+		$$$ThrowOnError(tSC)
+		If $Get(tErrors) > 0 {
+			Set tSC = $$$ERROR($$$GeneralError, "LoadDir reported " _ tErrors _ " error(s)")
+			$$$ThrowOnError(tSC)
+		}
+
+		Set tSC = $System.OBJ.CompileAll("ck")
+		$$$ThrowOnError(tSC)
 
 		// Configure connector (non-fatal if .so missing), credentials, and web app
 		Do ..LoadConnectorAndDemos("OPCUA")
