@@ -353,9 +353,9 @@ ClassMethod GetRequestParams(Output pBody As %DynamicObject) As %Status [ Privat
 /// busy, stale save), failed sign-in 401 (<method>Login</method>), anything else
 /// 500. 4xx responses carry our own message without the "ERROR #5001: " prefix.
 ///
-/// A 500 never carries internal detail. The full error goes to the application
-/// error log (System Operation &gt; System Logs &gt; Application Error Log) under a
-/// reference that the response quotes. An unexpected error answers
+/// A 500 never carries internal detail. The full error goes to the
+/// Interoperability event log (<method>LogInternal</method>) under a reference that
+/// the response quotes. An unexpected error answers
 /// "Internal error. Reference &lt;ref&gt;". A change that was saved but whose
 /// follow-up failed (the "... saved, but ..." errors from Rebind, Toggle and
 /// Delete) is a 500 built with <method>OPCUA.REST.Error.Make</method>: it shows
@@ -373,8 +373,7 @@ ClassMethod Respond(pSC As %Status, pData = "") As %Status
 	if $IsObject($Get(%request)) {
 		set tWhere = " ("_%request.Method_" "_%request.URL_")"
 	}
-	set tLog = $$$ERROR($$$GeneralError, "OPC UA REST error, reference "_tRef_tWhere_": "_$System.Status.GetErrorText(pSC))
-	do ##class(%Exception.StatusException).CreateFromStatus(tLog).Log()
+	do ..LogInternal("OPC UA REST error, reference "_tRef_tWhere_": "_$System.Status.GetErrorText(pSC))
 
 	if ##class(OPCUA.REST.Error).Carried(pSC) {
 		set tMsg = ##class(OPCUA.REST.Error).Message(pSC)_" (Reference "_tRef_")"
@@ -382,6 +381,64 @@ ClassMethod Respond(pSC As %Status, pData = "") As %Status
 		set tMsg = "Internal error. Reference "_tRef
 	}
 	Quit ..SendError(500, tMsg, tRef)
+}
+
+/// Write the text of an internal error to the Interoperability event log
+/// (Interoperability &gt; View &gt; Event Log, source OPCUA.REST.Handler).
+///
+/// Not the application error log: <tt>LOG^%ETN</tt> saves every stack frame's
+/// variables, the request body and its parsed objects among them, which would copy
+/// OPC UA passwords into <tt>^ERRORS</tt>. The event log entry holds only this text,
+/// and any password-like value from the request is masked in it first.
+ClassMethod LogInternal(pText As %String) [ Private ]
+{
+	set tText = pText
+	try {
+		do ..RequestSecrets(.tSecrets)
+		set tSecret = ""
+		for {
+			set tSecret = $Order(tSecrets(tSecret), -1)
+			Quit:tSecret=""
+			set tText = $Replace(tText, tSecret, "*****")
+		}
+	} catch e {
+		// Could not read the request: log no request-derived text at all.
+		set tText = $Piece(tText, ": ", 1)_": (error text withheld, the request could not be checked for secrets)"
+	}
+	do ##class(Ens.Util.Log).LogError($ClassName(), "Respond", $Extract(tText, 1, 32000))
+}
+
+/// The non-empty values of every request field whose name contains "password",
+/// in the JSON body (at any depth) or the query string, as <var>pSecrets</var>(value).
+ClassMethod RequestSecrets(Output pSecrets) [ Private ]
+{
+	kill pSecrets
+	Quit:'$IsObject($Get(%request))
+	set tName = ""
+	for {
+		set tName = $Order(%request.Data(tName))
+		Quit:tName=""
+		set tValue = $Get(%request.Data(tName, 1))
+		set:($ZConvert(tName, "L") [ "password")&&(tValue'="") pSecrets(tValue) = ""
+	}
+	set tContent = %request.Content
+	Quit:tContent=""
+	do:$IsObject(tContent) tContent.Rewind()
+	set tBody = {}.%FromJSON(tContent)
+	do ..CollectSecrets(tBody, .pSecrets)
+}
+
+ClassMethod CollectSecrets(pNode, ByRef pSecrets) [ Private ]
+{
+	Quit:'$IsObject(pNode)
+	set tIter = pNode.%GetIterator()
+	while tIter.%GetNext(.tKey, .tValue) {
+		if $IsObject(tValue) {
+			do ..CollectSecrets(tValue, .pSecrets)
+		} elseif ($ZConvert(tKey, "L") [ "password") && (tValue '= "") {
+			set pSecrets(tValue) = ""
+		}
+	}
 }
 
 /// Send a success response envelope.
@@ -395,7 +452,7 @@ ClassMethod SendOK(pData) As %Status
 }
 
 /// Send an error response envelope with HTTP status <var>pHttp</var>.
-/// <var>pRef</var>, for a 500, is the application error log reference.
+/// <var>pRef</var>, for a 500, is the event log reference.
 ClassMethod SendError(pHttp As %Integer, pMessage As %String, pRef As %String = "") As %Status [ Private ]
 {
 	set %response.Status = $Case(pHttp,

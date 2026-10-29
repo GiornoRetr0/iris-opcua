@@ -19,6 +19,18 @@ Method TestHttpCode()
 	do $$$AssertEquals($System.Status.GetOneStatusText(##class(OPCUA.REST.Error).Make(409, "x")), "x", "the carried code does not change the text")
 }
 
+/// A datatype validation failure is the caller's input, so 400 with its text.
+Method TestValidationIs400()
+{
+	set tSC = ##class(%Dictionary.Classname).IsValid("OPCUA.DS.Bad-Name Rvw")
+	do $$$AssertEquals(##class(OPCUA.REST.Error).HttpCode(tSC), 400, "#5794 is 400")
+	set tText = ##class(OPCUA.REST.Error).Message(tSC)
+	do $$$AssertTrue(tText [ "Bad-Name Rvw", "the text names the value: "_tText)
+	do $$$AssertTrue(tText '[ "ERROR #", "no ERROR # prefix: "_tText)
+	set tSC = $$$ADDSC($System.Status.Error(5802, "Ens.Config.Item:Name", "x"), $System.Status.Error(7201, "x", 128))
+	do $$$AssertEquals(##class(OPCUA.REST.Error).HttpCode(tSC), 400, "#5802 + #7201 is 400")
+}
+
 /// Text strips the "ERROR #5001" prefix and never repeats an ObjectScript error.
 Method TestText()
 {
@@ -56,7 +68,7 @@ Method TestRespondOK()
 }
 
 /// An unexpected error is a 500 whose body has a reference and no detail, and the
-/// full error goes to the application error log under the same reference.
+/// full error goes to the Interoperability event log under the same reference.
 Method TestRespondInternalError()
 {
 	do ..Capture(..UndefinedStatus(), .tBody, .tStatus)
@@ -70,8 +82,36 @@ Method TestRespondInternalError()
 	do $$$AssertEquals(tJSON.error, "Internal error. Reference "_tRef, "generic message")
 
 	set tLogged = ..FindLogged(tRef)
-	do $$$AssertTrue(tLogged '= "", "an application error log entry names reference "_tRef)
+	do $$$AssertTrue(tLogged '= "", "an event log entry names reference "_tRef)
 	do $$$AssertTrue(tLogged [ "<UNDEFINED>", "the logged entry has the full error: "_tLogged)
+	do ..ForgetLogged(tRef)
+}
+
+/// A 500 must not copy request secrets into any log. LOG^%ETN (the application
+/// error log) saves every stack frame's locals, the request body among them, so
+/// it is not used; the event log entry holds only the error text, with any
+/// password from the request body masked.
+Method TestRespondLogsNoPassword()
+{
+	set tPassword = "s3cretErrMapTest"
+	set tBefore = ..LastErrorsEntry()
+	set tRequest = ##class(%CSP.Request).%New()
+	set tRequest.Content = ##class(%Stream.TmpCharacter).%New()
+	do tRequest.Content.Write({"url": "opc.tcp://plc", "password": (tPassword), "server": {"apiPassword": (tPassword_"2")}}.%ToJSON())
+	// An internal error whose text happens to contain the secret.
+	set tSC = $System.Status.Error(5002, "<UNDEFINED>x *"_tPassword_" "_tPassword_"2")
+
+	do ..Capture(tSC, .tBody, .tStatus, , tRequest)
+	do $$$AssertEquals(+tStatus, 500, "HTTP status: "_tStatus)
+	set tRef = {}.%FromJSON(tBody).ref
+	do $$$AssertTrue(tBody '[ tPassword, "the response has no password")
+	set tLogged = ..FindLogged(tRef)
+	do $$$AssertTrue(tLogged '= "", "logged under reference "_tRef)
+	do $$$AssertTrue(tLogged '[ tPassword, "the event log entry has no password: "_tLogged)
+	do $$$AssertTrue(tLogged [ "<UNDEFINED>", "but it has the error: "_tLogged)
+	set tLeak = ..ErrorsContaining(tBefore, tPassword)
+	do $$$AssertEquals(tLeak, "", "no ^ERRORS entry created during the test holds the password: "_tLeak)
+	do ..ForgetLogged(tRef)
 }
 
 /// A 500 built with our own message (a saved change whose follow-up failed) shows
@@ -86,6 +126,7 @@ Method TestRespondCarried500()
 	do $$$AssertTrue(tJSON.error [ tJSON.ref, "and the reference")
 	do $$$AssertTrue(tBody '[ "<UNDEFINED>", "the cause is not shown")
 	do $$$AssertTrue(..FindLogged(tJSON.ref) [ "<UNDEFINED>", "the cause is logged")
+	do ..ForgetLogged(tJSON.ref)
 }
 
 /// The status a caught &lt;UNDEFINED&gt; becomes.
@@ -101,11 +142,13 @@ ClassMethod UndefinedStatus() As %Status
 	Quit tSC
 }
 
-/// Run Handler.Respond against a fresh %response and capture what it writes.
-ClassMethod Capture(pSC As %Status, Output pBody As %String, Output pStatus As %String, pData = "")
+/// Run Handler.Respond against a fresh %response, and <var>pRequest</var> as
+/// %request (none by default), and capture what it writes.
+ClassMethod Capture(pSC As %Status, Output pBody As %String, Output pStatus As %String, pData = "", pRequest = "")
 {
-	new %response
+	new %response, %request
 	set %response = ##class(%CSP.Response).%New()
+	set:$IsObject(pRequest) %request = pRequest
 	set tFile = ##class(%File).TempFilename("json")
 	set tIO = $IO
 	open tFile:"WNS":5
@@ -130,21 +173,53 @@ ClassMethod Capture(pSC As %Status, Output pBody As %String, Output pStatus As %
 	do ##class(%File).Delete(tFile)
 }
 
-/// The text of the newest application error log entry naming <var>pRef</var>.
+/// The text of the event log entry naming <var>pRef</var>.
 ClassMethod FindLogged(pRef As %String) As %String
 {
 	Quit:pRef="" ""
-	set tDay = ""
-	for tDays=1:1:2 {
-		set tDay = $Order(^ERRORS(tDay), -1)
-		Quit:tDay=""
-		set tN = ""
-		for tTries=1:1:50 {
-			set tN = $Order(^ERRORS(tDay, tN), -1)
+	set tLike = "%"_pRef_"%", tText = ""
+	&sql(SELECT TOP 1 Text INTO :tText FROM Ens_Util.Log WHERE Text LIKE :tLike ORDER BY ID DESC)
+	Quit $Select(SQLCODE=0:tText, 1:"")
+}
+
+/// Delete the event log entries this test wrote under <var>pRef</var>.
+ClassMethod ForgetLogged(pRef As %String)
+{
+	Quit:pRef=""
+	set tLike = "%"_pRef_"%"
+	&sql(DELETE FROM Ens_Util.Log WHERE Text LIKE :tLike)
+}
+
+/// $LB(day, entry) of the newest application error log entry, or "".
+ClassMethod LastErrorsEntry() As %List
+{
+	set tDay = $Order(^ERRORS(""), -1)
+	Quit:tDay="" ""
+	Quit $ListBuild(tDay, $Order(^ERRORS(tDay, ""), -1))
+}
+
+/// The first ^ERRORS node created after <var>pBefore</var> whose subscripts or
+/// value contain <var>pText</var>, or "".
+ClassMethod ErrorsContaining(pBefore As %List, pText As %String) As %String
+{
+	set tDay = $ListGet(pBefore, 1), tEntry = $ListGet(pBefore, 2)
+	set tDay = $Select(tDay="":$Order(^ERRORS("")), 1:tDay)
+	while tDay '= "" {
+		set tN = $Select(tDay=$ListGet(pBefore, 1):tEntry, 1:"")
+		for {
+			set tN = $Order(^ERRORS(tDay, tN))
 			Quit:tN=""
-			set tText = $Get(^ERRORS(tDay, tN, "*STACK", 0, "V", "$ZE"))
-			Return:tText[pRef tText
+			set tRoot = $Name(^ERRORS(tDay, tN)), tNode = tRoot
+			for {
+				set tNode = $Query(@tNode)
+				Quit:tNode=""
+				Quit:($QSubscript(tNode, 1)'=tDay)||($QSubscript(tNode, 2)'=tN)
+				if (tNode [ pText) || ($Get(@tNode) [ pText) {
+					Return tNode
+				}
+			}
 		}
+		set tDay = $Order(^ERRORS(tDay))
 	}
 	Quit ""
 }

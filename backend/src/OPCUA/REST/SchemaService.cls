@@ -676,23 +676,29 @@ ClassMethod AddParameter(pClassDef As %Dictionary.ClassDefinition, pName As %Str
 
 /// Resolve the target class name from `className`, or from `name` plus an
 /// optional `packagePath` (defaulting to OPCUA.DS).
+///
+/// The result must be a valid class name, so a bad name is a 400 saying so here,
+/// rather than a %Dictionary datatype error later.
 ClassMethod ResolveClassName(pBody As %DynamicObject, Output pClassName As %String) As %Status [ Private ]
 {
 	set pClassName = pBody.%Get("className")
-	if pClassName '= "" Quit $$$OK
-
-	set tName = pBody.%Get("name")
-	if tName = "" {
-		Quit $$$ERROR($$$GeneralError, "Missing schema name (supply 'className', or 'name' with optional 'packagePath')")
+	if pClassName = "" {
+		set tName = pBody.%Get("name")
+		if tName = "" {
+			Quit $$$ERROR($$$GeneralError, "Missing schema name (supply 'className', or 'name' with optional 'packagePath')")
+		}
+		if tName [ "." {
+			// A dotted name is already fully qualified.
+			set pClassName = tName
+		} else {
+			set tPackage = pBody.%Get("packagePath")
+			if tPackage = "" set tPackage = ..#DefaultPackage
+			set pClassName = tPackage_"."_tName
+		}
 	}
-	// A dotted name is already fully qualified.
-	if tName [ "." {
-		set pClassName = tName
-		Quit $$$OK
+	if '##class(%Dictionary.Classname).IsValid(pClassName) {
+		Quit ##class(OPCUA.REST.Error).BadRequest("'"_pClassName_"' is not a valid schema name. Use letters and digits only, starting with a letter (no spaces, hyphens or underscores), with dots only between package parts.")
 	}
-	set tPackage = pBody.%Get("packagePath")
-	if tPackage = "" set tPackage = ..#DefaultPackage
-	set pClassName = tPackage_"."_tName
 	Quit $$$OK
 }
 

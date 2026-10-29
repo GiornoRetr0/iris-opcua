@@ -42,19 +42,30 @@ ClassMethod Conflict(pMessage As %String) As %Status
 	Quit ..Make(409, pMessage)
 }
 
+/// Error codes that say a value the caller supplied failed datatype validation:
+/// #5794 (type), #5802 (property) and #7201 (longer than MAXLEN). Their text names
+/// the value and the rule, nothing internal, so they are 400 and shown.
+Parameter ValidationCodes = ",5794,5802,7201,";
+
 /// The HTTP code for <var>pSC</var>: the code its first error carries, else 400
-/// when every error in it is a plain <tt>$$$GeneralError</tt>, else 500.
+/// when every error in it is a plain <tt>$$$GeneralError</tt> or a datatype
+/// validation failure (<parameter>ValidationCodes</parameter>), else 500.
 ClassMethod HttpCode(pSC As %Status) As %Integer
 {
 	Quit:$$$ISOK(pSC) 200
 	do $System.Status.DecomposeStatus(pSC, .tErr)
 	Quit:..Carried(pSC) +$Get(tErr(1, "param", 2))
 	for i=1:1:+$Get(tErr) {
-		if tErr(i, "code") '= ..GeneralCode() {
+		if (tErr(i, "code") '= ..GeneralCode()) && '..IsValidationCode(tErr(i, "code")) {
 			Return 500
 		}
 	}
 	Quit 400
+}
+
+ClassMethod IsValidationCode(pCode As %String) As %Boolean [ CodeMode = expression, Private ]
+{
+(..#ValidationCodes [ (","_pCode_","))
 }
 
 /// Whether the first error of <var>pSC</var> carries an explicit HTTP code, i.e.
@@ -79,8 +90,9 @@ ClassMethod Message(pSC As %Status) As %String
 
 /// The readable text of <var>pSC</var>, without the "ERROR #5001: " prefix.
 /// A <tt>$$$GeneralError</tt> contributes its bare message; an ObjectScript error
-/// (with its routine offset) only the words "an unexpected internal error"; any
-/// other error its usual one-line text. Several errors are joined with "; ".
+/// (with its routine offset) only the words "an unexpected internal error"; a
+/// datatype validation failure its text without the "ERROR #n: " prefix; any other
+/// error its usual one-line text. Several errors are joined with "; ".
 ClassMethod Text(pSC As %Status) As %String
 {
 	Quit:$$$ISOK(pSC) ""
@@ -92,6 +104,9 @@ ClassMethod Text(pSC As %Status) As %String
 			set tPart = $Get(tErr(i, "param", 1))
 		} elseif tCode = ..ObjectScriptCode() {
 			set tPart = "an unexpected internal error"
+		} elseif ..IsValidationCode(tCode) {
+			// "ERROR #5794: Datatype validation failed ..." without the prefix.
+			set tPart = $Piece($System.Status.GetOneErrorText(pSC, i), ": ", 2, *)
 		} else {
 			set tPart = $System.Status.GetOneErrorText(pSC, i)
 		}

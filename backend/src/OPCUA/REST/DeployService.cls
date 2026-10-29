@@ -64,6 +64,9 @@ ClassMethod BindExistingSchema(pBody As %DynamicObject, Output pResult As %Dynam
 	set pResult.started = 0
 	set pResult.productionClass = ..#ProductionClass
 	Try {
+		set tSC = ..ValidateItemName(pBody.%Get("dataSourceName"))
+		Quit:$$$ISERR(tSC)
+
 		set tSchemaClass = pBody.%Get("schemaClass")
 
 		if '##class(%Dictionary.CompiledClass).%ExistsId(tSchemaClass) {
@@ -409,6 +412,24 @@ ClassMethod StartOrUpdateProduction() As %Status
 
 	// Start our production
 	Quit ##class(Ens.Director).StartProduction(..#ProductionClass)
+}
+
+/// 400 unless <var>pName</var> ("" means the default, which is valid) can name a
+/// config item: Ens.Config.Item allows at most 128 characters and refuses some
+/// separators (<method>Ens.Config.Item.CheckForIllegalCharacters</method>). Checked
+/// up front so the caller gets a readable 400, not a failed save.
+ClassMethod ValidateItemName(pName As %String) As %Status
+{
+	Quit:pName="" $$$OK
+	if $Length(pName) > 128 {
+		Quit ##class(OPCUA.REST.Error).BadRequest("Pipeline name is too long: "_$Length(pName)_" characters, at most 128.")
+	}
+	set tSC = ##class(Ens.Config.Item).%New().CheckForIllegalCharacters(pName)
+	if $$$ISERR(tSC) {
+		do $System.Status.DecomposeStatus(tSC, .tErr)
+		Quit ##class(OPCUA.REST.Error).BadRequest("Pipeline name '"_pName_"' is not valid: "_$Get(tErr(1, "param", 1), $System.Status.GetOneErrorText(tSC))_".")
+	}
+	Quit $$$OK
 }
 
 /// Error if a production other than ours holds this namespace.

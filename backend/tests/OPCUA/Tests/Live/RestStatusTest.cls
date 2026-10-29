@@ -81,6 +81,40 @@ Method TestBadRequest()
 	do $$$AssertEquals(tJSON.error, "Missing pipeline name", "bare message")
 }
 
+/// A schema name that is not a valid class name is the caller's mistake: 400 with
+/// a message saying so, not an opaque 500 from %Dictionary.
+Method TestBadSchemaName()
+{
+	set tBody = {"name": "Bad-Name Rvw", "columns": [{"displayName": "SA1", "inferredType": "%Integer", "relativePath": ["SA1"], "nodeNs": 1}]}
+	set tSC = ..Call("POST", "/schemas", tBody, .tHttp, .tJSON)
+	do $$$AssertStatusOK(tSC, "request sent")
+	do $$$AssertEquals(tHttp, 400, "bad schema name is 400")
+	do $$$AssertTrue(tJSON.error [ "not a valid schema name", "message: "_tJSON.error)
+	do $$$AssertTrue(tJSON.error [ "Bad-Name Rvw", "names the value: "_tJSON.error)
+}
+
+/// A pipeline name Ens.Config.Item would refuse is a 400 with a readable message.
+Method TestBadPipelineName()
+{
+	for tName = "Bad|Name", "Bad;Name", $Translate($Justify("", 129), " ", "p") {
+		set tSC = ..Call("POST", "/deploy", {"dataSourceName": (tName), "schemaClass": (..#SchemaClass), "url": (..URL()), "devices": "i=85|Objects"}, .tHttp, .tJSON)
+		do $$$AssertStatusOK(tSC, "request sent")
+		do $$$AssertEquals(tHttp, 400, "pipeline name '"_$Extract(tName, 1, 20)_"' is 400")
+		do $$$AssertTrue(tJSON.error [ "Pipeline name", "message: "_tJSON.error)
+	}
+}
+
+/// /test reports a failed connect in a 200 body; its text has no "ERROR #" prefix.
+Method TestConnectErrorText()
+{
+	set tSC = ..Call("POST", "/test", {"url": "opc.tcp://nosuchhost.invalid:4840"}, .tHttp, .tJSON)
+	do $$$AssertStatusOK(tSC, "request sent")
+	do $$$AssertEquals(tHttp, 200, "a failed connect is a result, not an error")
+	do $$$AssertEquals(tJSON.data.connected, 0, "not connected")
+	do $$$AssertTrue(tJSON.data.error '= "", "says why: "_tJSON.data.error)
+	do $$$AssertTrue(tJSON.data.error '[ "ERROR #", "no ERROR # prefix: "_tJSON.data.error)
+}
+
 /// Audit #16, as decided: a wrong password gets no Basic challenge (so no browser
 /// pop-up over the console) and no envelope. Under the default security setup the
 /// status is IRIS's own 404: CSP runs the dispatch class's Login as CSPSystem, which
