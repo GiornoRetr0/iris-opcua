@@ -185,7 +185,8 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		set tSC = $classmethod(tClassName, "%KillExtent")
 		Quit:$$$ISERR(tSC)
 
-		do ##class(OPCUA.REST.PipelineService).DeleteSerialSubclasses(tClassName)
+		set tSC = ##class(OPCUA.REST.PipelineService).DeleteSerialSubclasses(tClassName)
+		Quit:$$$ISERR(tSC)
 		set tSC = $System.OBJ.Delete(tClassName, "-d")
 		Quit:$$$ISERR(tSC)
 		kill ^OPCUA.DataSource(tClassName)
@@ -382,6 +383,7 @@ ClassMethod GenerateSchemaClass(pClassName As %String, pDataSourceName As %Strin
 	#dim tSC As %Status = $$$OK
 	kill pSerialClasses
 	set pSerialClasses = 0
+	kill tCreatedClasses
 	Try {
 		// Separate flat columns from nested ones and build the folder tree.
 		kill tFolderColumns
@@ -404,7 +406,7 @@ ClassMethod GenerateSchemaClass(pClassName As %String, pDataSourceName As %Strin
 
 		// Serial classes must exist before the main class references them.
 		if tHasNesting {
-			set tSC = ..GenerateSerialClasses(pClassName, pDefaultNS, .tFolderColumns, .pSerialClasses, pIncludeServerTS)
+			set tSC = ..GenerateSerialClasses(pClassName, pDefaultNS, .tFolderColumns, .pSerialClasses, pIncludeServerTS, .tCreatedClasses)
 			Quit:$$$ISERR(tSC)
 		}
 
@@ -425,6 +427,13 @@ ClassMethod GenerateSchemaClass(pClassName As %String, pDataSourceName As %Strin
 		do tProp.Parameters.SetAt(500, "MAXLEN")
 		do tClassDef.Properties.Insert(tProp)
 
+		// Test hook: inject a bad property type to force compile failure
+		if $Get(^||OPCUA.Tests("badProp")) {
+			set tProp = ##class(%Dictionary.PropertyDefinition).%New()
+			set tProp.Name = "BadProperty"
+			set tProp.Type = "ThisClassDoesNotExist"
+			do tClassDef.Properties.Insert(tProp)
+		}
 
 		// Column properties
 		kill tEmittedFolders, tUsedNames
@@ -469,29 +478,45 @@ ClassMethod GenerateSchemaClass(pClassName As %String, pDataSourceName As %Strin
 
 		set tSC = tClassDef.%Save()
 		$$$ThrowOnError(tSC)
+		set tCreatedClasses($Increment(tCreatedClasses)) = pClassName
 		set tSC = $System.OBJ.Compile(pClassName, "ck-d")
 		$$$ThrowOnError(tSC)
 
 	} Catch (e) {
 		set tSC = e.AsStatus()
+		// Clean up any classes created by this call
+		set i = ""
+		for {
+			set i = $Order(tCreatedClasses(i))
+			quit:i=""
+			set tClassName = tCreatedClasses(i)
+			if ##class(%Dictionary.ClassDefinition).%ExistsId(tClassName) {
+				do $System.OBJ.Delete(tClassName, "-d")
+			}
+		}
 	}
 	Quit tSC
 }
 
 /// Generate and compile %SerialObject classes for nested folder columns.
-ClassMethod GenerateSerialClasses(pMainClassName As %String, pDefaultNS As %Integer, ByRef pFolderColumns, Output pSerialClasses, pIncludeServerTS As %Boolean = 1) As %Status
+///
+/// On any error, deletes exactly the classes this call created and returns the
+/// original error. The pCreatedClasses array tracks all classes created across
+/// both this method and the caller (GenerateSchemaClass), so cleanup can be
+/// thorough.
+ClassMethod GenerateSerialClasses(pMainClassName As %String, pDefaultNS As %Integer, ByRef pFolderColumns, Output pSerialClasses, pIncludeServerTS As %Boolean = 1, ByRef pCreatedClasses) As %Status
 {
 	#dim tSC As %Status = $$$OK
 	Try {
 		set pSerialClasses = 0
 
+		// Check all target serial class names upfront
 		set tFolderName = ""
 		for {
 			set tFolderName = $Order(pFolderColumns(tFolderName))
 			if tFolderName = "" Quit
 
 			set tSerialClassName = ..SerialClassName(pMainClassName, tFolderName)
-			set tColumns = pFolderColumns(tFolderName)
 
 			// Sanitising is lossy, so two folder names can collapse onto one class
 			// name ("A_B" and "AB"). Silently generating the second over the first
@@ -501,6 +526,23 @@ ClassMethod GenerateSerialClasses(pMainClassName As %String, pDefaultNS As %Inte
 				Quit
 			}
 			set tTakenNames(tSerialClassName) = tFolderName
+
+			// Check if class already exists
+			if ##class(%Dictionary.ClassDefinition).%ExistsId(tSerialClassName) {
+				set tSC = $$$ERROR($$$GeneralError, "Class '"_tSerialClassName_"' already exists. Choose different folder names or a different schema name.")
+				Quit
+			}
+		}
+		Quit:$$$ISERR(tSC)
+
+		// Now create and compile the serial classes
+		set tFolderName = ""
+		for {
+			set tFolderName = $Order(pFolderColumns(tFolderName))
+			if tFolderName = "" Quit
+
+			set tSerialClassName = ..SerialClassName(pMainClassName, tFolderName)
+			set tColumns = pFolderColumns(tFolderName)
 
 			set tClassDef = ##class(%Dictionary.ClassDefinition).%New(tSerialClassName)
 			set tClassDef.Description = "Auto-generated serial object for nested OPC UA folder: "_tFolderName
@@ -523,6 +565,7 @@ ClassMethod GenerateSerialClasses(pMainClassName As %String, pDefaultNS As %Inte
 
 			set tSC = tClassDef.%Save()
 			$$$ThrowOnError(tSC)
+			set pCreatedClasses($Increment(pCreatedClasses)) = tSerialClassName
 			set tSC = $System.OBJ.Compile(tSerialClassName, "ck-d")
 			$$$ThrowOnError(tSC)
 

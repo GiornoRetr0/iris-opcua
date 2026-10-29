@@ -568,8 +568,16 @@ ClassMethod GetRowSourceInfo(pClassName As %String, pDeviceNodePaths As %String 
 /// Delete serial object subclasses for a DataSource class.
 /// Scans the class's properties for types extending %SerialObject (excluding OPCUA.Types.*).
 /// Also called by <class>OPCUA.REST.SchemaService</class> when deleting a schema.
-ClassMethod DeleteSerialSubclasses(pClassName As %String)
+/// Delete serial subclasses that belong to this schema and are not shared.
+///
+/// A serial class is deleted only if:
+/// 1. Its name matches SerialClassName(pClassName, <folder>) for some folder
+/// 2. No other compiled class (outside pClassName) has a property of that type
+///
+/// Returns %Status so errors propagate to SchemaService.Delete.
+ClassMethod DeleteSerialSubclasses(pClassName As %String) As %Status
 {
+	#dim tSC As %Status = $$$OK
 	Try {
 		set tClassDef = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
 		if '$IsObject(tClassDef) Quit
@@ -584,16 +592,55 @@ ClassMethod DeleteSerialSubclasses(pClassName As %String)
 			// Check if it extends %SerialObject
 			Try {
 				if $classmethod(tType, "%Extends", "%SerialObject") {
-					// This is a pipeline-generated serial class — delete it
+					// Check if the serial class name matches the generated pattern
+					if '..IsGeneratedSerialClass(pClassName, tType) continue
+
+					// Check if any other class uses this serial class
+					if ..SerialClassIsShared(pClassName, tType) continue
+
+					// This is a pipeline-generated serial class that is not shared — delete it
 					if ##class(%Dictionary.ClassDefinition).%ExistsId(tType) {
-						do $System.OBJ.Delete(tType, "-d")
+						set tSC = $System.OBJ.Delete(tType, "-d")
+						Quit:$$$ISERR(tSC)
 					}
 				}
 			} Catch (eInner) {
 				// Type class may not exist — skip
 			}
 		}
-	} Catch (e) {}
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit tSC
+}
+
+/// Check if a serial class name matches the pattern SerialClassName would generate
+/// for the main schema class.
+ClassMethod IsGeneratedSerialClass(pMainClass As %String, pSerialClass As %String) As %Boolean [ Private ]
+{
+	// Generated serial classes are nested under the main class: OPCUA.DS.Foo.BarType
+	// Main class: OPCUA.DS.Foo, serial: OPCUA.DS.Foo.<something>Type
+	if $Extract(pSerialClass, 1, $Length(pMainClass)+1) '= (pMainClass_".") {
+		Return 0
+	}
+	if $Extract(pSerialClass, *-3, *) '= "Type" {
+		Return 0
+	}
+	Return 1
+}
+
+/// Check if a serial class is used by any class other than pMainClass.
+ClassMethod SerialClassIsShared(pMainClass As %String, pSerialClass As %String) As %Boolean [ Private ]
+{
+	#dim rs As %SQL.StatementResult
+	set tSQL = "SELECT Parent FROM %Dictionary.CompiledProperty WHERE Type = ? AND Parent <> ?"
+	set rs = ##class(%SQL.Statement).%ExecDirect(, tSQL, pSerialClass, pMainClass)
+	if '$IsObject(rs) Return 0
+	if rs.%Next() {
+		// At least one other class uses this serial class
+		Return 1
+	}
+	Return 0
 }
 
 }
