@@ -1,53 +1,69 @@
 #!/bin/bash
+#
+# Loads backend/src, backend/tests and backend/examples into the running IRIS
+# container (namespace OPCUA) without rebuilding the image. Runs from any cwd.
+# Exits non-zero if any copy step fails, docker exec fails, or IRIS reports a
+# load/compile error.
+#
+# Container defaults to iris-opcua-iris-1; override with IRIS_CONTAINER.
 
-# Loads backend/src, backend/tests and backend/examples into the IRIS container
-# for development iteration without rebuilding the Docker image.
-# Runs from any working directory.
+set -euo pipefail
 
-set -e
-
-# Resolve repo root from this script's location
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd "$script_dir/../.." && pwd)
-
-# Allow override of container name for different environments
 IRIS_CONTAINER="${IRIS_CONTAINER:-iris-opcua-iris-1}"
+dev=/tmp/opcua-dev
 
 echo "Loading OPCUA sources into $IRIS_CONTAINER..."
 
-# Create temporary directory in the container
-docker exec "$IRIS_CONTAINER" mkdir -p /tmp/opcua-dev
+# Start from an empty staging dir so files deleted from the repo are not reloaded.
+docker exec --user root "$IRIS_CONTAINER" rm -rf "$dev"
+docker exec "$IRIS_CONTAINER" mkdir -p "$dev"
+for d in src tests examples; do
+    echo "Copying backend/$d..."
+    docker cp "$repo_root/backend/$d/." "$IRIS_CONTAINER:$dev/$d/"
+done
+docker exec --user root "$IRIS_CONTAINER" chmod -R a+rX "$dev"
 
-# Copy source directories
-echo "Copying backend/src..."
-docker cp "$repo_root/backend/src/." "$IRIS_CONTAINER:/tmp/opcua-dev/src/"
+# %UnitTest.Manager discovers test classes from files under ^UnitTestRoot (/tmp),
+# even with /noload. Mirror the Unit and Live test files there. A package with
+# no .cls files is skipped; any other failure (e.g. cp) fails the script.
+for pkg in Unit Live; do
+    docker exec --user root "$IRIS_CONTAINER" bash -c "
+        set -e; shopt -s nullglob
+        rm -rf /tmp/OPCUA/Tests/$pkg; mkdir -p /tmp/OPCUA/Tests/$pkg
+        files=($dev/tests/OPCUA/Tests/$pkg/*.cls)
+        if [ \${#files[@]} -gt 0 ]; then cp \"\${files[@]}\" /tmp/OPCUA/Tests/$pkg/; fi"
+done
 
-echo "Copying backend/tests..."
-docker cp "$repo_root/backend/tests/." "$IRIS_CONTAINER:/tmp/opcua-dev/tests/"
+# One session, one trivial line per step. The exit code of an interactive
+# iris session is not reliable, so success is judged from the output.
+# LoadDir skips .inc files, hence the explicit Load of Constants.inc first.
+script='zn "OPCUA"
+set sc=$System.OBJ.Load("'$dev'/src/OPCUA/Constants.inc","ck") write !,"Constants.inc: ",$select($System.Status.IsOK(sc):"loaded",1:"FAILED"),! do:$System.Status.IsError(sc) $System.OBJ.DisplayError(sc)
+do $System.OBJ.LoadDir("'$dev'/src","ck",.e1,1) write !,"src: ",+$get(e1)," errors",!
+do $System.OBJ.LoadDir("'$dev'/tests","ck",.e2,1) write !,"tests: ",+$get(e2)," errors",!
+do $System.OBJ.LoadDir("'$dev'/examples","ck",.e3,1) write !,"examples: ",+$get(e3)," errors",!
+halt
+'
 
-echo "Copying backend/examples..."
-docker cp "$repo_root/backend/examples/." "$IRIS_CONTAINER:/tmp/opcua-dev/examples/"
+if ! output=$(printf '%s' "$script" | docker exec -i "$IRIS_CONTAINER" iris session iris 2>&1); then
+    printf '%s\n' "$output"
+    echo "FAILED: docker exec / iris session failed"
+    exit 1
+fi
+printf '%s\n' "$output"
 
-# Fix permissions so IRIS can read the files
-docker exec --user root "$IRIS_CONTAINER" chmod -R a+rX /tmp/opcua-dev/
-
-# Copy test files to ^UnitTestRoot location for %UnitTest.Manager
-docker exec --user root "$IRIS_CONTAINER" mkdir -p /tmp/OPCUA/Tests/Unit /tmp/OPCUA/Tests/Live
-docker exec --user root "$IRIS_CONTAINER" bash -c "cp /tmp/opcua-dev/tests/OPCUA/Tests/Unit/*.cls /tmp/OPCUA/Tests/Unit/ 2>/dev/null || true"
-docker exec --user root "$IRIS_CONTAINER" bash -c "cp /tmp/opcua-dev/tests/OPCUA/Tests/Live/*.cls /tmp/OPCUA/Tests/Live/ 2>/dev/null || true"
-
-# Load into IRIS (Constants.inc loads as part of src directory)
-echo "Loading into IRIS namespace OPCUA..."
-
-# Load all three directories - Constants.inc is in src and will be loaded first due to dependencies
-printf 'zn "OPCUA"\ndo $System.OBJ.LoadDir("/tmp/opcua-dev/src","ck",.err,1)\ndo $System.OBJ.LoadDir("/tmp/opcua-dev/tests","ck",.err,1)\ndo $System.OBJ.LoadDir("/tmp/opcua-dev/examples","ck",.err,1)\nhalt\n' | docker exec -i "$IRIS_CONTAINER" iris session iris
-
-exit_code=$?
-
-if [ $exit_code -ne 0 ]; then
-    echo "ERROR: Load failed with exit code $exit_code"
-    exit $exit_code
+if grep -Eq 'ERROR #|ERROR:|Detected [0-9]+ errors|Constants\.inc: FAILED|: [1-9][0-9]* errors' <<<"$output"; then
+    echo
+    echo "FAILED: load/compile errors (see ERROR lines above)"
+    exit 1
+fi
+if ! grep -q 'Constants.inc: loaded' <<<"$output" || ! grep -q 'examples: 0 errors' <<<"$output"; then
+    echo
+    echo "FAILED: load did not run to completion"
+    exit 1
 fi
 
-echo "Load complete."
-exit 0
+echo
+echo "Load complete: no errors."
