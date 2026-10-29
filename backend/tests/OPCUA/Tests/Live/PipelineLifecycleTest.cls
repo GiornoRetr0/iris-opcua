@@ -17,7 +17,7 @@ Method TestDeleteThenRecreateSameName()
 {
     #dim tSC As %Status = $$$OK
     Try {
-        // Arrange: build schema offline like PortalPipelineTest does
+        // Arrange: build schema offline like Live.PortalPipelineTest does
         set tSC = ..BuildSchema()
         Do $$$AssertStatusOK(tSC, "Schema creation should succeed")
         Quit:$$$ISERR(tSC)
