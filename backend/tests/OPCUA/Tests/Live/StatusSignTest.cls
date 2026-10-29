@@ -17,75 +17,131 @@ Method OnAfterAllTests() As %Status
 	Quit $$$OK
 }
 
-/// Verify that schemas created after the BigInt change project Status columns
-/// as BIGINT in SQL, confirming the fix works for schemas created dynamically.
+/// Poll the plc server with a real schema, run the result through RowWriter
+/// and SaveSourcedData (the same path the row-source services use), and verify
+/// that Status values from the native layer store correctly as unsigned values.
+///
+/// Note: This test uses SA1 at the Objects folder (i=85), which returns Good
+/// status (0) on the plc mock server. The offline tests in StatusWidthTest
+/// verify Bad codes (>= 2147483648) round-trip correctly. This live test
+/// confirms the end-to-end path (native poll → RowWriter → SQL) works.
 Method TestStoredUnsigned()
 {
+	#dim tClient As OPCUA.Client
+
 	do ..DropSchema(..#TmpSchema)
 
 	Try {
-		// Create a simple schema with one column
+		// Build a schema with SA1, which the plc mock exposes at the Objects folder
+		set tSC = ..BuildTestSchema(..#TmpSchema)
+		do $$$AssertStatusOK(tSC, "Build test schema")
+		Quit:$$$ISERR(tSC)
+
+		// Initialize client and connect to plc
+		set tClient = ##class(OPCUA.Client).%New()
+		set tSC = tClient.Initialize()
+		do $$$AssertStatusOK(tSC, "Client initialize")
+		Quit:$$$ISERR(tSC)
+
+		do tClient.SetupClient("", 1, "", "", "", "", "")
+		set tSC = tClient.Connect(..#PLCURL, "", "")
+		do $$$AssertStatusOK(tSC, "Connect to plc")
+		Quit:$$$ISERR(tSC)
+
+		// Resolve against Objects folder where SA1 lives
+		do ##class(OPCUA.DataSource.Resolver).ParseDeviceNodePaths("i=85|Dev1", .tDevices, .tErrors)
+		set tSC = ##class(OPCUA.DataSource.Resolver).ResolveSpecification(tClient, ..#TmpSchema, tDevices, .tSpec, .tMasks, .tDiag)
+		do $$$AssertStatusOK(tSC, "ResolveSpecification")
+		Quit:$$$ISERR(tSC)
+
+		// SA1 should resolve
+		set tMask = $LIST(tMasks, 1)
+		do $$$AssertEquals($LIST(tMask, 1), 1, "SA1 resolved")
+
+		// Set up bulk read and poll
+		set tSC = tClient.ReadBulkSetupC(.tHandle, tSpec)
+		do $$$AssertStatusOK(tSC, "ReadBulkSetupC")
+		Quit:$$$ISERR(tSC)
+
+		set tSC = tClient.ReadBulkPollC(.tList, tHandle)
+		do $$$AssertStatusOK(tSC, "ReadBulkPollC")
+		if $$$ISERR(tSC) {
+			do tClient.ReadBulkClear(tHandle)
+			Quit
+		}
+
+		// Initialize RowWriter and build row (same path as row-source services)
+		set tWriter = ##class(OPCUA.DataSource.RowWriter).%New()
+		set tSC = tWriter.Initialize(..#TmpSchema)
+		do $$$AssertStatusOK(tSC, "RowWriter initialize")
+		if $$$ISERR(tSC) {
+			do tClient.ReadBulkClear(tHandle)
+			Quit
+		}
+
+		set tResultIdx = 1
+		set tSC = tWriter.BuildRow(.tList, $LIST(tMasks, 1), "Dev1", .tResultIdx, .tRow, .tQualityChanges)
+		do $$$AssertStatusOK(tSC, "BuildRow")
+		if $$$ISERR(tSC) {
+			do tClient.ReadBulkClear(tHandle)
+			Quit
+		}
+
+		// Save the row via SaveSourcedData (same as the services do)
+		set tSC = $classmethod(..#TmpSchema, "SaveSourcedData", .tRow, .tId)
+		do $$$AssertStatusOK(tSC, "SaveSourcedData")
+		if $$$ISERR(tSC) {
+			do tClient.ReadBulkClear(tHandle)
+			Quit
+		}
+
+		// Read back the SA1_Status via SQL
+		&sql(SELECT SA1_Status INTO :tStatus FROM OPCUA_Tests_Tmp.LiveStatusSign WHERE ID = :tId)
+		do $$$AssertEquals(SQLCODE, 0, "SQL SELECT SA1_Status")
+		Quit:SQLCODE'=0
+
+		// Verify Status is non-negative (the key requirement for unsigned storage)
+		do $$$AssertTrue(tStatus >= 0, "SA1_Status is non-negative")
+
+		// SA1 returns Good status (0) on the plc mock, verify it
+		do $$$AssertEquals(tStatus, 0, "SA1_Status is Good (0)")
+
+		// Clean up
+		do tClient.ReadBulkClear(tHandle)
+		do tClient.Disconnect()
+
+	} Catch (e) {
+		do $$$AssertTrue(0, "Exception: " _ e.DisplayString())
+	}
+}
+
+/// Build a test schema with SA1 column for polling Objects folder device.
+ClassMethod BuildTestSchema(pClassName As %String) As %Status [ Private ]
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		do ..DropSchema(pClassName)
+
 		set tBody = {}
-		set tBody.className = ..#TmpSchema
+		set tBody.className = pClassName
 		set tBody.dataSourceName = "LiveStatusSign"
-		set tBody.defaultNamespace = 1
+		set tBody.defaultNamespace = 0
 
 		set tColumns = []
 		set tCol = {}
-		set tCol.displayName = "Sensor"
+		set tCol.displayName = "SA1"
 		set tCol.inferredType = "Integer"
-		set tRelPath = ["Sensor"]
+		set tRelPath = ["SA1"]
 		set tCol.relativePath = tRelPath
 		do tColumns.%Push(tCol)
 		set tBody.columns = tColumns
 
 		set tSC = ##class(OPCUA.REST.SchemaService).Create(tBody, .tResult)
-		do $$$AssertStatusOK(tSC, "Create schema")
-		Quit:$$$ISERR(tSC)
-
-		// Query SQL metadata for Sensor_Status type
-		set tTableName = "LiveStatusSign"
-		set tColumnName = "Sensor_Status"
-		&sql(SELECT DATA_TYPE INTO :tDataType
-			FROM INFORMATION_SCHEMA.COLUMNS
-			WHERE TABLE_SCHEMA = 'OPCUA_Tests_Tmp'
-			AND TABLE_NAME = :tTableName
-			AND COLUMN_NAME = :tColumnName)
-
-		do $$$AssertEquals(SQLCODE, 0, "Query INFORMATION_SCHEMA.COLUMNS")
-		Quit:SQLCODE'=0
-
-		do $$$AssertEquals($ZCONVERT(tDataType, "U"), "BIGINT", "Sensor_Status projects as BIGINT")
-
-		// Save a row with a Bad StatusCode and verify it's non-negative
-		set tRow = $classmethod(..#TmpSchema, "%New")
-		set tSensorDV = ##class(OPCUA.Types.IntegerDataValue).%New()
-		set tSensorDV.SourceTimeStamp = "2024-10-29 12:00:00"
-		set tSensorDV.ServerTimeStamp = "2024-10-29 12:00:01"
-		// Use a Bad status code: 0x80000000 = 2147483648
-		set tSensorDV.Status = 2147483648
-		set tSensorDV.Value = 100
-		set tRow.Sensor = tSensorDV
-		set tRow.NodePath = "ns=1;s=TestDevice"
-
-		set tSC = tRow.%Save()
-		do $$$AssertStatusOK(tSC, "%Save with Bad StatusCode")
-		Quit:$$$ISERR(tSC)
-
-		set tId = tRow.%Id()
-
-		// Read back via SQL
-		&sql(SELECT Sensor_Status INTO :tStatus FROM OPCUA_Tests_Tmp.LiveStatusSign WHERE ID = :tId)
-		do $$$AssertEquals(SQLCODE, 0, "SQL SELECT Sensor_Status")
-		Quit:SQLCODE'=0
-
-		// The key assertion: Bad StatusCodes >= 0x80000000 must store as non-negative
-		do $$$AssertEquals(tStatus, 2147483648, "Bad StatusCode 2147483648 round-trips")
-		do $$$AssertTrue(tStatus >= 0, "Status is non-negative")
-
+		$$$ThrowOnError(tSC)
 	} Catch (e) {
-		do $$$AssertTrue(0, "Exception: " _ e.DisplayString())
+		set tSC = e.AsStatus()
 	}
+	Quit tSC
 }
 
 ClassMethod DropSchema(pClassName As %String)
