@@ -48,12 +48,16 @@ ClassMethod RunSuite(pPackage As %String, pURL As %String = "") As %Boolean [ In
     // Every level holds $LB(status, duration, ...), status 0 when something under
     // it failed. Asserts hold $LB(status, action, description, location).
     //
+    // A skipped assert ($$$AssertSkipped, status 2) is reported and counted apart:
+    // a test that could not check anything is neither passed nor failed.
+    //
     // A failed assert is one failure. A level that failed with no failed assert
     // beneath it is one more: that is how IRIS records an error thrown in a test
     // method, or a failed OnBefore*/OnAfter*. Counting asserts alone passed those.
     Set suitePath = $Replace(pPackage, ".", "\")
     Set totalPassed = 0
     Set totalFailed = 0
+    Set totalSkipped = 0
 
     Write !
     Set suiteFailed = 0
@@ -79,6 +83,10 @@ ClassMethod RunSuite(pPackage As %String, pURL As %String = "") As %Boolean [ In
                 Continue:action="LogMessage"
                 If $ListGet(assertData, 1) = 1 {
                     Set totalPassed = totalPassed + 1
+                } ElseIf $ListGet(assertData, 1) = 2 {
+                    // $$$AssertSkipped: nothing was checked, so neither a pass nor a failure.
+                    Set totalSkipped = totalSkipped + 1
+                    Write "SKIPPED: ", className, ":", testMethod, " - ", $ListGet(assertData, 3), !
                 } Else {
                     Set methodFailed = methodFailed + 1
                     Write "FAILED: ", className, ":", testMethod, " - ", $ListGet(assertData, 3), !
@@ -99,7 +107,8 @@ ClassMethod RunSuite(pPackage As %String, pURL As %String = "") As %Boolean [ In
         Set suiteFailed = suiteFailed + caseFailed
     }
     Set suiteData = $Get(^UnitTest.Result(logIndex, suitePath))
-    If ('suiteFailed) && ($ListGet(suiteData, 1) '= 1) {
+    // A suite with skips but no failures is recorded as 2, not 1.
+    If ('suiteFailed) && ('$ListFind($ListBuild(1, 2), $ListGet(suiteData, 1))) {
         Set suiteFailed = 1
         Write "FAILED: suite ", suitePath, " - ", $Select(suiteData="":"no results recorded", 1:..LevelError(suiteData)), !
     }
@@ -113,6 +122,9 @@ ClassMethod RunSuite(pPackage As %String, pURL As %String = "") As %Boolean [ In
     Write !,"Summary: ", totalPassed, " passed"
     If totalFailed > 0 {
         Write ", ", totalFailed, " failed"
+    }
+    If totalSkipped > 0 {
+        Write ", ", totalSkipped, " skipped"
     }
     Write !
 
