@@ -73,9 +73,7 @@ ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %S
 
 			// Derive table name from DataSource class
 			if tItem.dataSourceClass '= "" {
-				set tPkg = $Piece(tItem.dataSourceClass, ".", 1, *-1)
-				set tShort = $Piece(tItem.dataSourceClass, ".", *)
-				set tItem.tableName = $Select(tPkg="":tShort, 1:$Replace(tPkg, ".", "_")_"."_tShort)
+				set tItem.tableName = ##class(OPCUA.REST.SchemaService).TableName(tItem.dataSourceClass)
 			}
 
 			if tProdRunning {
@@ -214,11 +212,8 @@ ClassMethod GetRowCount(pClassName As %String) As %Integer [ Private ]
 				Quit
 			}
 		}
-		// SQL schema.table: package becomes schema, last part becomes table
-		set tPkg = $Piece(pClassName, ".", 1, *-1)
-		set tCls = $Piece(pClassName, ".", *)
-		set tSchema = $Select(tPkg="":"SQLUser", 1:$Replace(tPkg, ".", "_"))
-		set tTable = tSchema_"."_tCls
+		// Get SQL qualified table name
+		set tTable = ##class(OPCUA.REST.SchemaService).TableName(pClassName)
 		set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT COUNT(*) FROM "_tTable)
 		if $IsObject(tRS) && tRS.%Next() set tCount = tRS.%GetData(1)
 		set ^IRIS.Temp.OPCUARowCount(pClassName) = $ListBuild(tNow, tCount)

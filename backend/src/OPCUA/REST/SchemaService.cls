@@ -768,12 +768,36 @@ ClassMethod ExtractDeviceSetting(pBody As %DynamicObject, Output pSetting As %St
 	Quit $$$OK
 }
 
-/// Derive the SQL table name for a class.
+/// Derive the SQL table name for a class, honoring SqlTableName and SqlSchemaName.
+/// Returns the qualified name as "schema.table" (unquoted).
 ClassMethod TableName(pClassName As %String) As %String
 {
-	set tPackage = $Piece(pClassName, ".", 1, *-1)
-	set tShort = $Piece(pClassName, ".", *)
-	Quit $Select(tPackage="":tShort, 1:$Replace(tPackage, ".", "_")_"."_tShort)
+	Set tCompiledClass = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
+	If '$IsObject(tCompiledClass) {
+		// Fallback: derive from package structure
+		Set tPackage = $Piece(pClassName, ".", 1, *-1)
+		Set tShort = $Piece(pClassName, ".", *)
+		Quit $Select(tPackage="":tShort, 1:$Replace(tPackage, ".", "_")_"."_tShort)
+	}
+
+	// Get SqlTableName (defaults to short class name)
+	Set tTableName = tCompiledClass.SqlTableName
+	If tTableName = "" {
+		Set tTableName = $Piece(pClassName, ".", *)
+	}
+
+	// Get SqlSchemaName (defaults to package with dots replaced by underscores)
+	Set tSchemaName = tCompiledClass.SqlSchemaName
+	If tSchemaName = "" {
+		Set tPackage = $Piece(pClassName, ".", 1, *-1)
+		If tPackage = "" {
+			Set tSchemaName = "SQLUser"
+		} Else {
+			Set tSchemaName = $Replace(tPackage, ".", "_")
+		}
+	}
+
+	Quit tSchemaName_"."_tTableName
 }
 
 }
