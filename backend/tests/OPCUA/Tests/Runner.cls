@@ -41,11 +41,11 @@ ClassMethod RunSuite(pPackage As %String, pURL As %String = "") As %Boolean [ In
         Return 0
     }
 
-    // The result structure is: ^UnitTest.Result(logIndex, suitePath, className, testMethod)
+    // The result structure is: ^UnitTest.Result(logIndex, suitePath, className, testMethod, assertionIdx)
     // Convert package to suite path (dots to backslashes)
     Set suitePath = $Replace(pPackage, ".", "\")
 
-    // Count passed/failed by walking the result tree
+    // Count passed/failed by walking the result tree and examining assertions
     Set totalPassed = 0
     Set totalFailed = 0
 
@@ -61,20 +61,28 @@ ClassMethod RunSuite(pPackage As %String, pURL As %String = "") As %Boolean [ In
             Set testMethod = $Order(^UnitTest.Result(logIndex, suitePath, className, testMethod))
             Quit:testMethod=""
 
-            // Get test result: $LB(status, duration, ..., errorMessage)
-            Set testData = ^UnitTest.Result(logIndex, suitePath, className, testMethod)
-            Set status = $ListGet(testData, 1)
-            Set errorMsg = $ListGet(testData, 4)
+            // Iterate through assertions within this test method
+            // Each assertion is stored as ^UnitTest.Result(logIndex, suitePath, className, testMethod, assertionIdx)
+            // with data = $LB(status, action, description, location)
+            Set assertIdx = ""
+            For {
+                Set assertIdx = $Order(^UnitTest.Result(logIndex, suitePath, className, testMethod, assertIdx))
+                Quit:assertIdx=""
 
-            If status = 1 {
-                Set totalPassed = totalPassed + 1
-            } Else {
-                Set totalFailed = totalFailed + 1
-                Write "FAILED: ", className, ":", testMethod
-                If errorMsg '= "" {
-                    Write " - ", errorMsg
+                Set assertData = ^UnitTest.Result(logIndex, suitePath, className, testMethod, assertIdx)
+                Set status = $ListGet(assertData, 1)
+                Set action = $ListGet(assertData, 2)
+                Set description = $ListGet(assertData, 3)
+
+                // Only count actual assertions, not LogMessage entries
+                If action '= "LogMessage" {
+                    If status = 1 {
+                        Set totalPassed = totalPassed + 1
+                    } Else {
+                        Set totalFailed = totalFailed + 1
+                        Write "FAILED: ", className, ":", testMethod, " - ", description, !
+                    }
                 }
-                Write !
             }
         }
     }
@@ -90,13 +98,12 @@ ClassMethod RunSuite(pPackage As %String, pURL As %String = "") As %Boolean [ In
     Return (totalFailed = 0)
 }
 
-/// Exit the IRIS process
-/// Note: IRIS terminal mode does not support setting exit codes directly.
-/// The calling script should check the return value of Offline()/Live() and exit accordingly.
-/// @param pOK 1 for success, 0 for failure (for documentation/future use)
+/// Exit the IRIS process with the appropriate exit code
+/// @param pOK 1 for success (exit 0), 0 for failure (exit 1)
 ClassMethod Exit(pOK As %Boolean)
 {
-    Halt
+    Set exitCode = $Select(pOK:0, 1:1)
+    Do $SYSTEM.Process.Terminate($JOB, exitCode)
 }
 
 }
