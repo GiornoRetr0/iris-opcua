@@ -17,7 +17,7 @@ Class OPCUA.Types.NoServerTS.AbstractDataValue Extends %SerialObject [ PropertyC
 
 Property SourceTimeStamp As %TimeStamp [ SqlFieldName = "SourceTS" ];
 
-Property Status As %Integer;
+Property Status As %BigInt;
 
 Storage Default
 {
