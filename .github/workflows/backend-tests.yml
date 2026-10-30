@@ -1,0 +1,72 @@
+# Runs the offline backend tests (OPCUA.Tests.Unit) on a stock IRIS Community
+# container: no OPC UA server, no running production and no native library.
+# A load/compile error or a failed test fails the job.
+
+name: backend-tests
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "backend/**"
+      - "demo/ci/**"
+      - "demo/iris/dev-load.sh"
+      - "demo/iris/IRISConfig/**"
+      - ".github/workflows/backend-tests.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "demo/ci/**"
+      - "demo/iris/dev-load.sh"
+      - "demo/iris/IRISConfig/**"
+      - ".github/workflows/backend-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    name: offline tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      IRIS_CONTAINER: iris
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same tag as demo/iris/Dockerfile's base image.
+      - name: Start IRIS
+        run: docker run -d --name "$IRIS_CONTAINER" intersystems/iris-community:2025.3
+
+      - name: Create the OPCUA namespace
+        run: ./demo/ci/prepare-iris.sh
+
+      - name: Load and compile the backend
+        run: ./demo/iris/dev-load.sh
+
+      # Piped, because `iris session -U OPCUA '<expr>'` rejects a nested call
+      # (<INVALID ARGUMENT>, exit 0). Runner.Exit sets the exit code, but a
+      # session that errors before reaching it exits 0 at end of input, so the
+      # runner's summary line must also be present and report no failures.
+      - name: Run the offline tests
+        run: |
+          set +e
+          printf 'do ##class(OPCUA.Tests.Runner).Exit(##class(OPCUA.Tests.Runner).Offline())\n' \
+            | docker exec -i "$IRIS_CONTAINER" iris session IRIS -U OPCUA 2>&1 | tee tests.log
+          code=${PIPESTATUS[1]}
+          grep '^FAILED:' tests.log | sed 's/^/::error title=Offline test failed::/'
+          summary=$(grep '^Summary: ' tests.log)
+          if [ -z "$summary" ]; then
+            echo "::error::The test runner did not finish (no summary line)"
+            exit 1
+          fi
+          if [ "$code" -ne 0 ] || grep -q 'failed' <<<"$summary"; then
+            echo "::error::$summary (exit code $code)"
+            exit 1
+          fi
+          echo "$summary"
+
+      - name: IRIS log on failure
+        if: failure()
+        run: docker exec "$IRIS_CONTAINER" tail -n 100 /usr/irissys/mgr/messages.log || true
