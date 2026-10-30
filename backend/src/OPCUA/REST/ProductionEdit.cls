@@ -173,13 +173,16 @@ ClassMethod SetSetting(pItem As Ens.Config.Item, pTarget As %String, pName As %S
 	do pItem.Settings.Insert(tSetting)
 }
 
-/// The production class's last-change time, read from disk. Every SaveToClass
-/// moves it.
+/// The production class's last-change time (<tt>TimeChanged</tt>), read from the
+/// class dictionary on disk. Every SaveToClass moves it.
+///
+/// Read straight from the dictionary, not through SQL or <tt>%OpenId</tt>: dynamic
+/// SQL on <tt>%Dictionary.ClassDefinition</tt> needs a SELECT privilege the
+/// installer's OPCUA_API role does not grant (SQLCODE -99), and <tt>%OpenId</tt>
+/// can hand back a copy this process already holds.
 ClassMethod Stamp(pClass As %String) As %String [ Private ]
 {
-	set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT TimeChanged FROM %Dictionary.ClassDefinition WHERE ID = ?", pClass)
-	if tRS.%SQLCODE < 0 $$$ThrowStatus($$$ERROR($$$SQLError, tRS.%SQLCODE, tRS.%Message))
-	Quit $Select(tRS.%Next():tRS.TimeChanged, 1:"")
+	Quit $$$defClassKeyGet(pClass, $$$cCLASStimechanged)
 }
 
 /// The namespace's production name and state, with status. Tests stand in for a

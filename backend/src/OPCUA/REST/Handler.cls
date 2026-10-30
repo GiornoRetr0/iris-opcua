@@ -368,7 +368,9 @@ ClassMethod Respond(pSC As %Status, pData = "") As %Status
 		Quit ..SendError(tHttp, ##class(OPCUA.REST.Error).Message(pSC))
 	}
 
-	set tRef = $ZDateTime($Horolog, 8)_"-"_$Job
+	// yyyymmddThhmmss-job-n: no space, so it copies as one word, and the
+	// per-process counter keeps two errors in one second apart.
+	set tRef = $Translate($ZDateTime($Horolog, 8), " :", "T")_"-"_$Job_"-"_$Increment(^||OPCUA.REST("ref"))
 	set tWhere = ""
 	if $IsObject($Get(%request)) {
 		set tWhere = " ("_%request.Method_" "_%request.URL_")"
@@ -458,6 +460,7 @@ ClassMethod SendError(pHttp As %Integer, pMessage As %String, pRef As %String = 
 	set %response.Status = $Case(pHttp,
 		400: ..#HTTP400BADREQUEST,
 		401: ..#HTTP401UNAUTHORIZED,
+		403: ..#HTTP403FORBIDDEN,
 		404: ..#HTTP404NOTFOUND,
 		409: ..#HTTP409CONFLICT,
 		: ..#HTTP500INTERNALSERVERERROR)

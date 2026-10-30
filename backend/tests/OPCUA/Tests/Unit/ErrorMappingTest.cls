@@ -49,6 +49,18 @@ Method TestRespondConflict()
 	do $$$AssertEquals(tJSON.error, "Schema 'X' is still used by: P", "bare message")
 }
 
+/// A missing privilege is a 403 on the wire (not only in HttpCode), with the bare message.
+Method TestRespondForbidden()
+{
+	do $$$AssertEquals(##class(OPCUA.REST.Error).HttpCode(##class(OPCUA.REST.Error).Forbidden("x")), 403, "Forbidden carries 403")
+	do ..Capture(##class(OPCUA.REST.Error).Forbidden("Your IRIS account lacks %Ens_Credentials"), .tBody, .tStatus)
+	do $$$AssertEquals(+tStatus, 403, "%response.Status: "_tStatus)
+	set tJSON = {}.%FromJSON(tBody)
+	do $$$AssertEquals(tJSON.status, "error", "envelope status")
+	do $$$AssertEquals(tJSON.error, "Your IRIS account lacks %Ens_Credentials", "bare message")
+	do $$$AssertEquals(tJSON.ref, "", "no reference on a 4xx")
+}
+
 /// A plain GeneralError is a 400 with the bare message.
 Method TestRespondBadRequest()
 {
@@ -85,6 +97,22 @@ Method TestRespondInternalError()
 	do $$$AssertTrue(tLogged '= "", "an event log entry names reference "_tRef)
 	do $$$AssertTrue(tLogged [ "<UNDEFINED>", "the logged entry has the full error: "_tLogged)
 	do ..ForgetLogged(tRef)
+}
+
+/// Two 500s in the same second from the same process get different references,
+/// and a reference has no space, so it can be copied as one word.
+Method TestReferenceUniqueNoSpace()
+{
+	do ..Capture(..UndefinedStatus(), .tBody1, .tStatus1)
+	do ..Capture(..UndefinedStatus(), .tBody2, .tStatus2)
+	set tRef1 = {}.%FromJSON(tBody1).ref, tRef2 = {}.%FromJSON(tBody2).ref
+	do $$$AssertTrue(tRef1 '= "", "first reference: "_tRef1)
+	do $$$AssertNotEquals(tRef1, tRef2, "references differ")
+	do $$$AssertTrue(tRef1 '[ " ", "no space in '"_tRef1_"'")
+	do $$$AssertTrue(..FindLogged(tRef1) '= "", "first is logged under its reference")
+	do $$$AssertTrue(..FindLogged(tRef2) '= "", "second is logged under its reference")
+	do ..ForgetLogged(tRef1)
+	do ..ForgetLogged(tRef2)
 }
 
 /// A 500 must not copy request secrets into any log. LOG^%ETN (the application

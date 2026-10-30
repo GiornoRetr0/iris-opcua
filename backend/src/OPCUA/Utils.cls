@@ -229,9 +229,16 @@ ClassMethod GetVersion(Output pOut As %List) As %Status
 /// <tt>%ExecDirect</tt> reports a failure (a missing table, a missing SELECT
 /// privilege) in the result's <tt>%SQLCODE</tt> rather than by throwing, so a
 /// caller that only checks <tt>$IsObject</tt> reads a failed query as an empty one.
+///
+/// A missing privilege (SQLCODE -99) throws <method>OPCUA.REST.Error.Forbidden</method>,
+/// a readable 403, rather than an opaque 500: signing in again does not help, an
+/// administrator has to grant it.
 ClassMethod ExecQuery(pSQL As %String, pArgs...) As %SQL.StatementResult
 {
 	set tRS = ##class(%SQL.Statement).%ExecDirect(, pSQL, pArgs...)
+	if tRS.%SQLCODE = -99 {
+		$$$ThrowStatus(##class(OPCUA.REST.Error).Forbidden("Your IRIS account ("_$Username_") lacks an SQL privilege this request needs: "_tRS.%Message_". Ask an administrator to grant it, or use an account with more privileges."))
+	}
 	if tRS.%SQLCODE < 0 $$$ThrowStatus($$$ERROR($$$SQLError, tRS.%SQLCODE, tRS.%Message))
 	Quit tRS
 }

@@ -51,7 +51,8 @@ export function isSignInFailure(err: unknown): boolean {
  *
  * The API answers errors with a real status (400, 401, 403, 404, 409, 500) and the
  * envelope {"status":"error","error":"…"}; a 500 says only "Internal error.
- * Reference …", the detail being in the IRIS application error log. Angular
+ * Reference …", the detail being in the Interoperability event log (source
+ * OPCUA.REST.Handler), not the application error log. Angular
  * puts that envelope in HttpErrorResponse.error. Its own `message` ("Http failure
  * response for …") is never shown.
  */
