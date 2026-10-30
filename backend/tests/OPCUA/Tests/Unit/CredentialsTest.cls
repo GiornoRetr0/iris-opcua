@@ -122,6 +122,48 @@ Method TestExistingIdNeverOverwritten()
 	do $$$AssertNotTrue(..ItemExists(tName), "no item added")
 }
 
+/// A pipeline deleted in the Portal leaves its entry and ownership marker behind.
+/// Redeploying under the name with a username then replaces that entry: it is
+/// ours (the marker names this pipeline) and no item references it.
+Method TestOrphanedOwnedEntryReplaced()
+{
+	set tName = "TmpCredOrphan"
+	set tId = ##class(OPCUA.REST.DeployService).CredentialsId(tName)
+	do $$$AssertStatusOK(..Add(tName, {"username": "olduser", "password": "oldpw"}), "first deploy")
+	do $$$AssertStatusOK(..RemoveItemLikePortal(tName), "pipeline deleted in the Portal")
+	do $$$AssertTrue(##class(Ens.Config.Credentials).%ExistsId(tId), "its entry is left behind")
+
+	set tSC = ..Add(tName, {"username": "opcuser", "password": (..#Password)})
+	do $$$AssertStatusOK(tSC, "redeploy replaces the orphaned entry")
+	set tCred = ##class(Ens.Config.Credentials).%OpenId(tId)
+	do $$$AssertTrue($IsObject(tCred), "entry exists")
+	Quit:'$IsObject(tCred)
+	do tCred.%Reload()
+	do $$$AssertEquals(tCred.Username, "opcuser", "entry has the new username")
+	do $$$AssertTrue(tCred.Password = ..#Password, "and the new password")
+	do $$$AssertEquals($Get(^OPCUA.OwnedCredentials(tId)), tName, "still recorded as ours")
+	do $$$AssertTrue(..ItemExists(tName), "item added")
+}
+
+/// Our own leftover entry that another item still references is not replaced:
+/// 409, entry unchanged, and the message says how to fix it in the Portal.
+Method TestOwnedEntryStillReferencedRefused()
+{
+	set tName = "TmpCredRef"
+	set tId = ##class(OPCUA.REST.DeployService).CredentialsId(tName)
+	do $$$AssertStatusOK(..Add(tName, {"username": "olduser", "password": "oldpw"}), "first deploy")
+	do $$$AssertStatusOK(..Add("TmpCredRefUser", {"credentials": (tId)}), "a second pipeline uses the entry")
+	do $$$AssertStatusOK(..RemoveItemLikePortal(tName), "first pipeline deleted in the Portal")
+
+	set tSC = ..Add(tName, {"username": "opcuser", "password": (..#Password)})
+	set tText = ##class(OPCUA.REST.Error).Text(tSC)
+	do $$$AssertEquals(##class(OPCUA.REST.Error).HttpCode(tSC), 409, "refused with 409: "_tText)
+	do $$$AssertTrue(tText [ "Management Portal", "message names the Portal fix: "_tText)
+	set tCred = ##class(Ens.Config.Credentials).%OpenId(tId)
+	do $$$AssertTrue($IsObject(tCred) && (tCred.Username = "olduser") && (tCred.Password = "oldpw"), "entry unchanged")
+	do $$$AssertNotTrue(..ItemExists(tName), "no item added")
+}
+
 /// Pipeline delete removes the entry deploy created, and leaves alone one the
 /// pipeline merely pointed at, even when that entry has the pipeline's own
 /// credentials ID.
@@ -144,6 +186,54 @@ Method TestDeleteRemovesOnlyOwned()
 	do $$$AssertEquals($Data(^OPCUA.OwnedCredentials(tIdA)), 0, "A's ownership marker removed")
 	do $$$AssertTrue(##class(Ens.Config.Credentials).%ExistsId(tIdB), "entry with B's ID survives")
 	do $$$AssertTrue(##class(Ens.Config.Credentials).%ExistsId(..#ClientEntry), "client entry survives")
+}
+
+/// The config item row's delete fails after the pipeline was removed from the
+/// production (another process holds the row's lock). Delete still removes the
+/// owned credentials entry and updates the running production, and reports the
+/// row failure in its "Pipeline deleted, but ..." 500, not as a bare error.
+Method TestItemRowDeleteFailureStillFollowsUp()
+{
+	set tName = "TmpCredRowLock"
+	set tId = ##class(OPCUA.REST.DeployService).CredentialsId(tName)
+	do $$$AssertStatusOK(..Add(tName, {"username": "opcuser", "password": (..#Password)}), "owned pipeline")
+	set tProd = ##class(Ens.Config.Production).%OpenId(..#Production, 0)
+	set tItemId = ##class(OPCUA.REST.ProductionEdit).FindItem(tProd, tName).%Id()
+
+	kill ^IRIS.Temp.OPCUATests("rowlock")
+	set ^IRIS.Temp.OPCUATests("rowlock", "hold") = 1
+	job ##class(OPCUA.Tests.Unit.CredentialsTest).HoldItemLock(tItemId)::5
+	do $$$AssertTrue($Test, "lock-holding job started")
+	for i=1:1:50 { quit:$Get(^IRIS.Temp.OPCUATests("rowlock", "held"))  hang 0.1 }
+	do $$$AssertTrue($Get(^IRIS.Temp.OPCUATests("rowlock", "held")), "job holds the item row's lock")
+
+	do $System.SQL.Util.SetOption("ProcessLockTimeout", 1, .tOldTimeout)
+	set tSC = ##class(OPCUA.REST.PipelineService).Delete({"name": (tName)}, .tResult)
+	do $System.SQL.Util.SetOption("ProcessLockTimeout", tOldTimeout)
+	kill ^IRIS.Temp.OPCUATests("rowlock", "hold")
+	for i=1:1:50 { quit:'$Data(^IRIS.Temp.OPCUATests("rowlock", "held"))  hang 0.1 }
+
+	set tText = ##class(OPCUA.REST.Error).Message(tSC)
+	do $$$AssertEquals(##class(OPCUA.REST.Error).HttpCode(tSC), 500, "a 500: "_tText)
+	do $$$AssertTrue(##class(OPCUA.REST.Error).Carried(tSC), "with our own message")
+	do $$$AssertTrue(tText [ "Pipeline deleted, but", "says the pipeline is deleted: "_tText)
+	do $$$AssertTrue(tText [ "config item", "and names the row failure: "_tText)
+	do $$$AssertNotTrue(..ItemExists(tName), "pipeline gone from the production")
+	do $$$AssertNotTrue(##class(Ens.Config.Credentials).%ExistsId(tId), "owned entry still deleted")
+	do $$$AssertEquals($Data(^OPCUA.OwnedCredentials(tId)), 0, "and its marker")
+	do:##class(Ens.Config.Item).%ExistsId(tItemId) ##class(Ens.Config.Item).%DeleteId(tItemId)
+	kill ^IRIS.Temp.OPCUATests("rowlock")
+}
+
+/// JOB entry: hold the lock on config item row <var>pId</var> until the test
+/// kills the flag.
+ClassMethod HoldItemLock(pId As %String)
+{
+	lock +^Ens.Config.ItemD(pId)
+	set ^IRIS.Temp.OPCUATests("rowlock", "held") = 1
+	for i=1:1:300 { quit:'$Get(^IRIS.Temp.OPCUATests("rowlock", "hold"))  hang 0.1 }
+	lock -^Ens.Config.ItemD(pId)
+	kill ^IRIS.Temp.OPCUATests("rowlock", "held")
 }
 
 /// Review Focus 5. With neither username nor credentials, deploy sets no
@@ -295,6 +385,24 @@ ClassMethod Add(pName As %String, pBody As %DynamicObject) As %Status
 	Quit ##class(OPCUA.REST.DeployService).AddServiceItem(pBody, ..#Schema, pName, "polling", "i=85")
 }
 
+/// Delete item <var>pName</var> the way the Portal does: from the production and
+/// its class, without touching credentials or ownership markers.
+ClassMethod RemoveItemLikePortal(pName As %String) As %Status
+{
+	set tProd = ##class(Ens.Config.Production).%OpenId(..#Production, 0)
+	Quit:'$IsObject(tProd) $$$ERROR($$$GeneralError, "no production")
+	do tProd.%Reload()
+	set tItem = ##class(OPCUA.REST.ProductionEdit).FindItem(tProd, pName, .tIdx)
+	Quit:'$IsObject(tItem) $$$ERROR($$$GeneralError, "no item "_pName)
+	set tItemId = tItem.%Id()
+	do tProd.Items.RemoveAt(tIdx)
+	set tSC = tProd.%Save()
+	Quit:$$$ISERR(tSC) tSC
+	set tSC = tProd.SaveToClass()
+	Quit:$$$ISERR(tSC) tSC
+	Quit ##class(Ens.Config.Item).%DeleteId(tItemId)
+}
+
 ClassMethod ProductionXml() As %String
 {
 	set tX = ##class(%Dictionary.XDataDefinition).%OpenId(..#Production_"||ProductionDefinition")
@@ -399,7 +507,7 @@ ClassMethod Cleanup()
 	set tIds = $LB(..#ClientEntry, "opcua-tmpcredcase")
 	do ..DropNoAccessUser()
 	kill ^IRIS.Temp.OPCUATests("cred")
-	for tName = "TmpCred|Rollback", "TmpCredCase", "TmpCredNoAccess", "TmpCredNoWrite", "TmpCredNoRead", "TmpCred", "TmpCredA", "TmpCredOwned", "TmpCredShared", "TmpCredClient", "TmpCredAnon", "TmpCredUser", "TmpCredUnknown" {
+	for tName = "TmpCred|Rollback", "TmpCredCase", "TmpCredNoAccess", "TmpCredNoWrite", "TmpCredNoRead", "TmpCred", "TmpCredA", "TmpCredOwned", "TmpCredShared", "TmpCredClient", "TmpCredAnon", "TmpCredUser", "TmpCredUnknown", "TmpCredOrphan", "TmpCredRef", "TmpCredRefUser", "TmpCredRowLock" {
 		set tId = "OPCUA-"_tName
 		Try { set tId = ##class(OPCUA.REST.DeployService).CredentialsId(tName) } Catch {}
 		set tIds = tIds_$LB(tId)

@@ -449,20 +449,75 @@ ClassMethod NoCredentialsAccess(pWhat As %String, pPermission As %String) As %St
 /// record that deploy made it, in <tt>^OPCUA.OwnedCredentials(pId)</tt>, so that
 /// deleting the pipeline deletes it and nothing else.
 ///
-/// An existing entry is never overwritten, whoever made it: 409.
+/// An existing entry is never overwritten, with one exception: our own leftover.
+/// A pipeline deleted in the Management Portal leaves its entry and our marker
+/// behind. When the marker names this same pipeline and no item in any production
+/// references the entry, it is ours and orphaned, so it is replaced. Any other
+/// existing entry is a 409.
 ClassMethod CreateOwnedCredentials(pId As %String, pItemName As %String, pUsername As %String, pPassword As %String) As %Status [ Private ]
 {
 	// Ens matches credentials IDs in any case, so a taken ID in another case is
 	// taken.
 	set tTaken = ..FindCredentialsId(pId)
 	if tTaken '= "" {
-		Quit ##class(OPCUA.REST.Error).Conflict("Credentials '"_tTaken_"' already exist, and are never overwritten. Choose a different pipeline name, or send 'credentials': '"_tTaken_"' to use them.")
+		set tSC = ..CredentialsUsers(tTaken, .tUsers)
+		Quit:$$$ISERR(tSC) tSC
+		if '..OwnsCredentials(tTaken, pItemName) || (tUsers '= "") {
+			Quit ##class(OPCUA.REST.Error).Conflict("Credentials '"_tTaken_"' already exist"_$Select(tUsers'="":" and are used by "_tUsers, 1:"")_", and are never overwritten. Choose a different pipeline name, or send 'credentials': '"_tTaken_"' to use them. If they are left over from a pipeline deleted in the Management Portal, delete them under Interoperability > Configure > Credentials, then deploy again.")
+		}
+		set pId = tTaken
 	}
 	Quit:'..CanWriteCredentials() ..NoCredentialsAccess("create credentials '"_pId_"'", "W")
-	set tSC = ##class(Ens.Config.Credentials).SetCredential(pId, pUsername, pPassword, 0)
+	set tSC = ##class(Ens.Config.Credentials).SetCredential(pId, pUsername, pPassword, (tTaken '= ""))
 	Quit:$$$ISERR(tSC) ##class(OPCUA.REST.Error).Make(500, "Could not create credentials '"_pId_"'", tSC)
 	set ^OPCUA.OwnedCredentials(pId) = pItemName
 	Quit $$$OK
+}
+
+/// The items, in any production of this namespace, whose Credentials setting
+/// names entry <var>pId</var> (in any case), as "Item (Production)" joined with
+/// ", " in <var>pUsers</var>; "" when none. Any failure is an error, so a caller
+/// never treats an entry as unused on a guess. Embedded SQL, which checks no SQL
+/// privilege.
+ClassMethod CredentialsUsers(pId As %String, Output pUsers As %String) As %Status [ Private ]
+{
+	set pUsers = "", tLower = $ZConvert(pId, "L")
+	#dim tSC As %Status = $$$OK
+	Try {
+		&sql(DECLARE cCredProd CURSOR FOR SELECT ID INTO :tProdClass FROM Ens_Config.Production)
+		&sql(OPEN cCredProd)
+		if SQLCODE < 0 {
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to query Ens_Config.Production", $$$ERROR($$$SQLError, SQLCODE, $Get(%msg)))
+			Quit
+		}
+		for {
+			&sql(FETCH cCredProd)
+			if SQLCODE = 100 Quit
+			if SQLCODE < 0 {
+				set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to query Ens_Config.Production", $$$ERROR($$$SQLError, SQLCODE, $Get(%msg)))
+				Quit
+			}
+			set tProd = ##class(Ens.Config.Production).%OpenId(tProdClass, 0)
+			if '$IsObject(tProd) {
+				set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to open production '"_tProdClass_"'")
+				Quit
+			}
+			for i=1:1:tProd.Items.Count() {
+				set tItem = tProd.Items.GetAt(i)
+				for j=1:1:tItem.Settings.Count() {
+					set tS = tItem.Settings.GetAt(j)
+					if (tS.Name = "Credentials") && ($ZConvert(tS.Value, "L") = tLower) {
+						set pUsers = pUsers_$Select(pUsers="":"", 1:", ")_tItem.Name_" ("_tProdClass_")"
+					}
+				}
+			}
+		}
+		&sql(CLOSE cCredProd)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+		&sql(CLOSE cCredProd)
+	}
+	Quit tSC
 }
 
 /// Delete credentials entry <var>pId</var> if, and only if, deploy created it for
