@@ -48,7 +48,7 @@ jobs:
         shell: bash
         working-directory: installer
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # The installer embeds the console build, so it must exist before cargo runs.
       - uses: actions/setup-node@v4
@@ -96,7 +96,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Check the tag matches Cargo.toml
         run: |

@@ -33,7 +33,7 @@ jobs:
     env:
       IRIS_CONTAINER: iris
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Same tag as demo/iris/Dockerfile's base image.
       - name: Start IRIS
