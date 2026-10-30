@@ -323,9 +323,37 @@ or on error:
 ```json
 {
   "status": "error",
-  "error": "Human-readable error message"
+  "error": "Human-readable error message",
+  "ref": "20261030T095246-1409-3"
 }
 ```
+
+Errors carry a real HTTP status (`OPCUA.REST.Error.HttpCode`, sent by `Handler.Respond`):
+
+| Status | Meaning |
+|--------|---------|
+| 400 | The request is wrong: missing or invalid input, a plain `$$$GeneralError`, a datatype validation failure |
+| 401 | Sign-in failed (`Handler.Login`; no Basic challenge, so no browser pop-up) |
+| 403 | The IRIS account lacks a privilege: `%Ens_Credentials` for credentials, or an SQL privilege (SQLCODE -99) |
+| 404 | The named schema or pipeline does not exist |
+| 409 | Conflict with current state: schema in use, name or credentials ID taken, another production running, edit lock busy, stale save |
+| 500 | Anything else |
+
+A 4xx `error` is our own message, without the "ERROR #5001: " prefix. A 500 never
+carries internal detail: it says "Internal error. Reference <ref>" (or, for a change
+that was saved but whose follow-up failed, its own "... saved, but ..." message plus the
+reference), and only a 500 has the `ref` field. The full error is in the
+**Interoperability event log** (Interoperability > View > Event Log, source
+`OPCUA.REST.Handler`) under that reference, with any password from the request masked.
+It is deliberately not the application error log: `LOG^%ETN` saves every stack frame's
+variables, request passwords among them. A reference is `yyyymmddThhmmss-<job>-<n>`,
+with no space, unique per process.
+
+**Sign-in heuristic.** Under the default security setup a wrong password never reaches
+our `Login`: CSP runs it as CSPSystem, which cannot read the code database, and IRIS
+answers a bare text/html 404 itself. A real 404 from our API always carries the
+envelope, so the console (`isSignInFailure` in `api.service.ts`) treats a 401, or a 404
+without the envelope, as "Sign-in failed" and opens Settings.
 
 ### ClientManager: per-request connections
 
@@ -395,7 +423,7 @@ That is why adding a second pipeline over an existing schema costs one config it
 4. **Add a service item** (`AddServiceItem()`):
    - Create an `Ens.Config.Item`, set its class to `OPCUA.Service.TCPPollingRowSourceService` or `OPCUA.Service.TCPSubscriptionRowSourceService` (chosen by `mode`)
    - Configure settings: `DataSourceClass`, **`DeviceNodePaths`**, `URL`, poll/subscription intervals, security parameters
-   - Credentials: never a password setting. `credentials` in the body names an existing `Ens.Config.Credentials` entry (400 if missing). A `username` (+ `password`) is saved as a new entry, `DeployService.CredentialsId(name)` (`OPCUA-<name>`, sanitised), which deploy refuses with 409 if it already exists and records in `^OPCUA.OwnedCredentials`. The item's `Credentials` setting names the entry. Deleting the pipeline deletes the entry only if deploy created it for that pipeline. IDs match case-insensitively, as in Ens. Credentials need `%Ens_Credentials` (SuperUser has it); without it the API answers 403
+   - Credentials: never a password setting. `credentials` in the body names an existing `Ens.Config.Credentials` entry (400 if missing). A `username` (+ `password`) is saved as a new entry, `DeployService.CredentialsId(name)` (`OPCUA-<name>`, sanitised), which deploy records in `^OPCUA.OwnedCredentials` and refuses with 409 if it already exists. The one exception is our own leftover from a pipeline deleted in the Portal: when the marker names this same pipeline and no item in any production references the entry, deploy replaces it. The 409 message says how to remove a leftover in the Portal. The item's `Credentials` setting names the entry. Deleting the pipeline deletes the entry only if deploy created it for that pipeline. IDs match case-insensitively, as in Ens. Credentials need `%Ens_Credentials` (SuperUser has it); without it the API answers 403
    - Add it with **`Enabled = 0`**, save the production, call `SaveToClass()`
 
 5. **Stop.** The production is deliberately **not** started, and the item is created switched off.
@@ -847,11 +875,18 @@ For Docker, `demo/certgen/generate.sh` generates all necessary certificates usin
 ### Who can use the console
 
 The OPC UA Console is meant for SuperUser-level developer accounts. An account with
-only the installer's `OPCUA_API_<NS>` role can call the API but cannot edit pipelines:
-deploy, toggle, rebind and delete fail with SQL -99 on the `%Dictionary` stamp query in
-`ProductionEdit`. It cannot write credentials either (`%Ens_Credentials`), and gets a
-403. For such accounts an admin creates the `Ens.Config.Credentials` entries in the
-Portal, and pipelines name them.
+only the installer's `OPCUA_API_<NS>` role (`OPCUA_API:U` plus RW on the namespace
+database) can list, create and delete schemas, and deploy, rebind, delete and list
+pipelines for anonymous servers (`OPCUA.Tests.Live.ApiRoleTest`). That works because
+the console's own queries need no SQL privilege: `ProductionEdit.Stamp` reads
+`TimeChanged` straight from the class dictionary, and the usage and serial-class checks
+are embedded SQL. Dynamic SQL that does need a privilege (`Utils.ExecQuery`, SQLCODE
+-99) answers 403 naming the account; the dashboard's row count is the one such query,
+and shows as unknown. The role cannot use credentials: reading or writing an
+`Ens.Config.Credentials` entry needs `%Ens_Credentials`, so deploy and rebind of a
+pipeline whose server needs a username get a 403. Use a SuperUser-level account for
+those pipelines, or have an administrator deploy them. Toggle, which starts or updates
+the production, is not yet verified for the role.
 
 ---
 
