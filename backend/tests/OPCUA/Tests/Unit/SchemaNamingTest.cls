@@ -53,4 +53,41 @@ Method TestTableNameHonoursSqlTableName()
     }
 }
 
+/// A schema whose short name is an SQL reserved word still gets a row count: the
+/// dashboard's COUNT(*) quotes the schema and table names. Group, because an
+/// unquoted Order happens to parse after a dot, and Group does not.
+Method TestRowCountReservedWordTable()
+{
+    Set tClassName = "OPCUA.Tests.Tmp.Group"
+    Do ..DropClass(tClassName)
+    Set tClassDef = ##class(%Dictionary.ClassDefinition).%New(tClassName)
+    Set tClassDef.Super = "%Persistent"
+    Set tClassDef.Description = "Throwaway class for SchemaNamingTest"
+    Set tProp = ##class(%Dictionary.PropertyDefinition).%New()
+    Set tProp.Name = "TestProp", tProp.Type = "%String"
+    Do tClassDef.Properties.Insert(tProp)
+    Set tSC = tClassDef.%Save()
+    Do $$$AssertStatusOK(tSC, "class saved")
+    Set:$$$ISOK(tSC) tSC = $System.OBJ.Compile(tClassName, "ck-d")
+    Do $$$AssertStatusOK(tSC, "class compiled")
+    If $$$ISOK(tSC) {
+        Set tRow = $ClassMethod(tClassName, "%New")
+        Set tRow.TestProp = "x"
+        Do $$$AssertStatusOK(tRow.%Save(), "one row")
+        Kill ^IRIS.Temp.OPCUARowCount(tClassName)
+        Do $$$AssertEquals(##class(OPCUA.REST.PipelineService).GetRowCount(tClassName), 1, "row count for table "_##class(OPCUA.REST.SchemaService).TableName(tClassName))
+        Do $$$AssertEquals(##class(OPCUA.REST.SchemaService).QuotedTableName(tClassName), """OPCUA_Tests_Tmp"".""Group""", "quoted name")
+        Kill ^IRIS.Temp.OPCUARowCount(tClassName)
+    }
+    Do ..DropClass(tClassName)
+}
+
+ClassMethod DropClass(pClassName As %String)
+{
+    If ##class(%Dictionary.ClassDefinition).%ExistsId(pClassName) {
+        Try { Do $ClassMethod(pClassName, "%KillExtent") } Catch {}
+        Do $System.OBJ.Delete(pClassName, "-d")
+    }
+}
+
 }

@@ -13,11 +13,14 @@ Parameter TmpSerial = "OPCUA.Tests.Tmp.SchemaCreate.MotorType";
 
 Parameter TmpHandWritten = "OPCUA.Tests.Tmp.HandWritten";
 
+Parameter TmpSerial2 = "OPCUA.Tests.Tmp.SchemaCreate.PumpType";
+
 Method OnAfterAllTests() As %Status
 {
 	do ..DropSchema(..#TmpSchema)
 	do ..DropClass(..#TmpSerial)
 	do ..DropClass(..#TmpHandWritten)
+	do ..DropClass(..#TmpSerial2)
 	kill ^||OPCUA.Tests("badProp")
 	kill ^||OPCUA.Tests("deleteFailClass")
 	Quit $$$OK
@@ -127,6 +130,40 @@ Method TestFailedCompileCleansUp()
 
 	do $$$AssertTrue(##class(%Dictionary.ClassDefinition).%ExistsId(..#TmpSchema), "main class exists after successful create")
 	do $$$AssertTrue(##class(%Dictionary.ClassDefinition).%ExistsId(..#TmpSerial), "serial class exists after successful create")
+}
+
+/// Make the SECOND serial class fail to compile (the hook injects an invalid
+/// property type into serial class number 2). The first one was already created
+/// and compiled; assert it is rolled back too, no main class is left, and an
+/// immediate retry without the hook succeeds.
+Method TestSecondSerialFailureCleansUp()
+{
+	do ..DropSchema(..#TmpSchema)
+	do ..DropClass(..#TmpSerial)
+	do ..DropClass(..#TmpSerial2)
+	set ^||OPCUA.Tests("badProp", "serial") = 2
+
+	set tBody = {"className": (..#TmpSchema), "dataSourceName": "SchemaCreate", "defaultNamespace": 1}
+	set tBody.columns = [
+		{"displayName": "Temperature", "inferredType": "Double", "relativePath": ["Motor", "Temperature"]},
+		{"displayName": "Pressure", "inferredType": "Double", "relativePath": ["Pump", "Pressure"]},
+		{"displayName": "Humidity", "inferredType": "Double", "relativePath": ["Humidity"]}
+	]
+	set tSC = ##class(OPCUA.REST.SchemaService).Create(tBody, .tResult)
+	do $$$AssertNotTrue($$$ISOK(tSC), "Create fails when the second serial class fails")
+	set tMsg = $System.Status.GetErrorText(tSC)
+	do $$$AssertTrue(tMsg [ "ThisClassDoesNotExist", "error is the serial class's compile error: "_tMsg)
+	do $$$AssertNotTrue(##class(%Dictionary.ClassDefinition).%ExistsId(..#TmpSerial), "first serial class rolled back")
+	do $$$AssertNotTrue(##class(%Dictionary.ClassDefinition).%ExistsId(..#TmpSerial2), "second serial class rolled back")
+	do $$$AssertNotTrue(##class(%Dictionary.ClassDefinition).%ExistsId(..#TmpSchema), "no main class")
+
+	kill ^||OPCUA.Tests("badProp")
+	set tSC = ##class(OPCUA.REST.SchemaService).Create(tBody, .tResult)
+	do $$$AssertStatusOK(tSC, "an immediate retry succeeds")
+	do $$$AssertTrue(##class(%Dictionary.ClassDefinition).%ExistsId(..#TmpSerial2), "retry created the second serial class")
+	do ..DropSchema(..#TmpSchema)
+	do ..DropClass(..#TmpSerial)
+	do ..DropClass(..#TmpSerial2)
 }
 
 /// Make the main class fail to compile and the cleanup delete also fail. Assert the

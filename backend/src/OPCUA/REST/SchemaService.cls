@@ -412,8 +412,10 @@ ClassMethod GenerateSchemaClass(pClassName As %String, pDataSourceName As %Strin
 
 		// Serial classes must exist before the main class references them.
 		if tHasNesting {
+			// Throw, not Quit: the Catch below removes the serial classes this
+			// call already created. A Quit would leave the Try without it.
 			set tSC = ..GenerateSerialClasses(pClassName, pDefaultNS, .tFolderColumns, .pSerialClasses, pIncludeServerTS, .tCreatedClasses)
-			Quit:$$$ISERR(tSC)
+			$$$ThrowOnError(tSC)
 		}
 
 		set tClassDef = ##class(%Dictionary.ClassDefinition).%New(pClassName)
@@ -514,10 +516,9 @@ ClassMethod GenerateSchemaClass(pClassName As %String, pDataSourceName As %Strin
 
 /// Generate and compile %SerialObject classes for nested folder columns.
 ///
-/// On any error, deletes exactly the classes this call created and returns the
-/// original error. The pCreatedClasses array tracks all classes created across
-/// both this method and the caller (GenerateSchemaClass), so cleanup can be
-/// thorough.
+/// On any error, returns it with every class created so far recorded in
+/// pCreatedClasses, which tracks the classes created across both this method and
+/// the caller (GenerateSchemaClass). The caller's Catch deletes exactly those.
 ClassMethod GenerateSerialClasses(pMainClassName As %String, pDefaultNS As %Integer, ByRef pFolderColumns, Output pSerialClasses, pIncludeServerTS As %Boolean = 1, ByRef pCreatedClasses) As %Status
 {
 	#dim tSC As %Status = $$$OK
@@ -562,6 +563,15 @@ ClassMethod GenerateSerialClasses(pMainClassName As %String, pDefaultNS As %Inte
 			set tClassDef.Description = "Auto-generated serial object for nested OPC UA folder: "_tFolderName
 			set tClassDef.Super = "%SerialObject"
 			set tClassDef.PropertyClass = "OPCUA.DataSource.PropertyClass"
+
+			// Test hook: inject a bad property type into serial class number N
+			// (^||OPCUA.Tests("badProp", "serial") = N) to force its compile to fail.
+			if $Get(^||OPCUA.Tests("badProp", "serial")) = (pSerialClasses + 1) {
+				set tProp = ##class(%Dictionary.PropertyDefinition).%New()
+				set tProp.Name = "BadProperty"
+				set tProp.Type = "ThisClassDoesNotExist"
+				do tClassDef.Properties.Insert(tProp)
+			}
 
 			kill tUsedNames
 			for i=0:1:tColumns.%Size()-1 {
@@ -813,18 +823,24 @@ ClassMethod MapSchemaUsage(Output pUsage) As %Status
 			Quit
 		}
 
-		// Iterate every production in the namespace via SQL
-		// A failed query (e.g. no SELECT privilege for this user) must stop the
-		// caller: read as "no productions", schema delete would skip its in-use check.
-		Try {
-			set tRS = ##class(OPCUA.Utils).ExecQuery("SELECT ID FROM Ens_Config.Production")
-		} Catch (eQuery) {
-			set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to query Ens_Config.Production", eQuery.AsStatus())
+		// Iterate every production in the namespace. Embedded SQL, which checks no
+		// SQL privilege, so an account with only the installer's OPCUA_API role can
+		// run it (dynamic SQL gave it SQLCODE -99). A failed query must still stop
+		// the caller: read as "no productions", schema delete would skip its
+		// in-use check.
+		&sql(DECLARE cUsageProd CURSOR FOR SELECT ID INTO :tProdClass FROM Ens_Config.Production)
+		&sql(OPEN cUsageProd)
+		if SQLCODE < 0 {
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to query Ens_Config.Production", $$$ERROR($$$SQLError, SQLCODE, $Get(%msg)))
+			Quit
 		}
-		Quit:$$$ISERR(tSC)
-
-		while tRS.%Next() {
-			set tProdClass = tRS.ID
+		for {
+			&sql(FETCH cUsageProd)
+			if SQLCODE = 100 Quit
+			if SQLCODE < 0 {
+				set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to query Ens_Config.Production", $$$ERROR($$$SQLError, SQLCODE, $Get(%msg)))
+				Quit
+			}
 			set tProd = ##class(Ens.Config.Production).%OpenId(tProdClass)
 			if '$IsObject(tProd) {
 				set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to open production '"_tProdClass_"'")
@@ -841,8 +857,10 @@ ClassMethod MapSchemaUsage(Output pUsage) As %Status
 				}
 			}
 		}
+		&sql(CLOSE cUsageProd)
 	} Catch (e) {
 		set tSC = e.AsStatus()
+		&sql(CLOSE cUsageProd)
 	}
 	Quit tSC
 }
@@ -910,35 +928,38 @@ ClassMethod ExtractDeviceSetting(pBody As %DynamicObject, Output pSetting As %St
 }
 
 /// Derive the SQL table name for a class, honoring SqlTableName and SqlSchemaName.
-/// Returns the qualified name as "schema.table" (unquoted).
+/// Returns the qualified name as "schema.table" (unquoted), for display. SQL
+/// built from it must use <method>QuotedTableName</method>.
 ClassMethod TableName(pClassName As %String) As %String
 {
-	Set tCompiledClass = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
-	If '$IsObject(tCompiledClass) {
-		// Fallback: derive from package structure
-		Set tPackage = $Piece(pClassName, ".", 1, *-1)
-		Set tShort = $Piece(pClassName, ".", *)
-		Quit $Select(tPackage="":tShort, 1:$Replace(tPackage, ".", "_")_"."_tShort)
-	}
-
-	// Get SqlTableName (defaults to short class name)
-	Set tTableName = tCompiledClass.SqlTableName
-	If tTableName = "" {
-		Set tTableName = $Piece(pClassName, ".", *)
-	}
-
-	// Get SqlSchemaName (defaults to package with dots replaced by underscores)
-	Set tSchemaName = tCompiledClass.SqlSchemaName
-	If tSchemaName = "" {
-		Set tPackage = $Piece(pClassName, ".", 1, *-1)
-		If tPackage = "" {
-			Set tSchemaName = "SQLUser"
-		} Else {
-			Set tSchemaName = $Replace(tPackage, ".", "_")
-		}
-	}
-
+	do ..TableParts(pClassName, .tSchemaName, .tTableName)
 	Quit tSchemaName_"."_tTableName
+}
+
+/// The qualified table name as delimited identifiers, <tt>"schema"."table"</tt>,
+/// safe in SQL text even when a name is a reserved word (a schema called Group).
+ClassMethod QuotedTableName(pClassName As %String) As %String
+{
+	do ..TableParts(pClassName, .tSchemaName, .tTableName)
+	Quit ..QuoteIdentifier(tSchemaName)_"."_..QuoteIdentifier(tTableName)
+}
+
+ClassMethod QuoteIdentifier(pName As %String) As %String [ CodeMode = expression, Private ]
+{
+""""_$Replace(pName, """", """""")_""""
+}
+
+/// The SQL schema and table name of a class.
+ClassMethod TableParts(pClassName As %String, Output pSchemaName As %String, Output pTableName As %String) [ Private ]
+{
+	Set tPackage = $Piece(pClassName, ".", 1, *-1)
+	Set tCompiledClass = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
+	// SqlTableName defaults to the short class name, SqlSchemaName to the
+	// package with dots replaced by underscores.
+	Set pTableName = $Select($IsObject(tCompiledClass):tCompiledClass.SqlTableName, 1:"")
+	Set:pTableName="" pTableName = $Piece(pClassName, ".", *)
+	Set pSchemaName = $Select($IsObject(tCompiledClass):tCompiledClass.SqlSchemaName, 1:"")
+	Set:pSchemaName="" pSchemaName = $Select(tPackage="":"SQLUser", 1:$Replace(tPackage, ".", "_"))
 }
 
 }

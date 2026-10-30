@@ -240,8 +240,10 @@ ClassMethod GetRowCount(pClassName As %String) As %Integer [ Internal ]
 				Quit
 			}
 		}
-		// Get SQL qualified table name
-		set tTable = ##class(OPCUA.REST.SchemaService).TableName(pClassName)
+		// Quoted, so a reserved word as schema or table name (Group) still parses.
+		// Dynamic SQL: an account without SELECT on the table (the installer's
+		// OPCUA_API role) gets a 403 here, caught below as an unknown count.
+		set tTable = ##class(OPCUA.REST.SchemaService).QuotedTableName(pClassName)
 		set tRS = ##class(OPCUA.Utils).ExecQuery("SELECT COUNT(*) FROM "_tTable)
 		if tRS.%Next() set tCount = tRS.%GetData(1)
 		set ^IRIS.Temp.OPCUARowCount(pClassName) = $ListBuild(tNow, tCount)
@@ -378,10 +380,16 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		do ##class(OPCUA.REST.ProductionEdit).End()
 		Quit:$$$ISERR(tSC)
 
-		// Delete the config item row to prevent orphans
+		// Delete the config item row to prevent orphans. The pipeline is already
+		// gone from the production, so a failure here is reported with the other
+		// follow-ups below, which still run.
+		set tSCItem = $$$OK
 		if tItemId '= "" {
-			set tSC = ##class(Ens.Config.Item).%DeleteId(tItemId)
-			$$$ThrowOnError(tSC)
+			Try {
+				set tSCItem = ##class(Ens.Config.Item).%DeleteId(tItemId)
+			} Catch (eItem) {
+				set tSCItem = eItem.AsStatus()
+			}
 		}
 
 		// The credentials entry goes too, but only if deploy created it for this
@@ -394,11 +402,21 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		set tSCApply = ##class(OPCUA.REST.ProductionEdit).ApplyToRunning(.tRestarted, .tNote)
 
 		// Report every follow-up that failed, not just the last.
-		set tFailed = ""
-		if $$$ISERR(tSCCred) set tFailed = "its credentials '"_tCredId_"' could not be deleted: "_##class(OPCUA.REST.Error).Text(tSCCred)
-		if $$$ISERR(tSCApply) set tFailed = tFailed_$Select(tFailed="":"", 1:"; and ")_"the running production could not be updated: "_##class(OPCUA.REST.Error).Text(tSCApply)
+		set tFailed = "", tCause = $$$OK
+		if $$$ISERR(tSCItem) {
+			set tFailed = "its config item row "_tItemId_" could not be removed: "_##class(OPCUA.REST.Error).Text(tSCItem)
+			set tCause = $$$ADDSC(tCause, tSCItem)
+		}
+		if $$$ISERR(tSCCred) {
+			set tFailed = tFailed_$Select(tFailed="":"", 1:"; and ")_"its credentials '"_tCredId_"' could not be deleted: "_##class(OPCUA.REST.Error).Text(tSCCred)
+			set tCause = $$$ADDSC(tCause, tSCCred)
+		}
+		if $$$ISERR(tSCApply) {
+			set tFailed = tFailed_$Select(tFailed="":"", 1:"; and ")_"the running production could not be updated: "_##class(OPCUA.REST.Error).Text(tSCApply)
+			set tCause = $$$ADDSC(tCause, tSCApply)
+		}
 		if tFailed '= "" {
-			set tSC = ##class(OPCUA.REST.Error).Make(500, "Pipeline deleted, but "_tFailed, $Select($$$ISERR(tSCCred):tSCCred, 1:tSCApply))
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Pipeline deleted, but "_tFailed, tCause)
 		}
 
 		set pResult.deleted = 1
@@ -714,16 +732,15 @@ ClassMethod IsGeneratedSerialClass(pMainClass As %String, pSerialClass As %Strin
 /// Check if a serial class is used by any class other than pMainClass.
 ClassMethod SerialClassIsShared(pMainClass As %String, pSerialClass As %String) As %Boolean [ Private ]
 {
-	#dim rs As %SQL.StatementResult
-	set tSQL = "SELECT Parent FROM %Dictionary.CompiledProperty WHERE Type = ? AND Parent <> ?"
-	// ExecQuery throws on a failed query: reading it as "not shared" would delete
-	// a class another schema still uses.
-	set rs = ##class(OPCUA.Utils).ExecQuery(tSQL, pSerialClass, pMainClass)
-	if rs.%Next() {
-		// At least one other class uses this serial class
-		Return 1
-	}
-	Return 0
+	// Embedded SQL checks no SQL privilege, so this works for an account with only
+	// the installer's OPCUA_API role (dynamic SQL gave it SQLCODE -99). A failed
+	// query throws: reading it as "not shared" would delete a class another schema
+	// still uses.
+	set tParent = ""
+	&sql(SELECT TOP 1 Parent INTO :tParent FROM %Dictionary.CompiledProperty WHERE Type = :pSerialClass AND Parent <> :pMainClass)
+	if SQLCODE < 0 $$$ThrowStatus($$$ERROR($$$SQLError, SQLCODE, $Get(%msg)))
+	// SQLCODE 0: at least one other class uses this serial class.
+	Quit (SQLCODE = 0)
 }
 
 }

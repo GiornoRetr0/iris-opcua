@@ -104,6 +104,32 @@ Method TestBadPipelineName()
 	}
 }
 
+/// A missing privilege goes out as HTTP 403 on the wire, not 500. An account with
+/// only the installer's OPCUA_API role (<class>OPCUA.Tests.Live.ApiRoleTest</class>'s
+/// throwaway user) deploys with an existing credentials entry, which needs
+/// %Ens_Credentials.
+Method TestForbiddenIsWire403()
+{
+	set tEntry = "OPCUA.Tests.StatusCred"
+	set tSC = ##class(OPCUA.Tests.Live.ApiRoleTest).CreateUser(.tPassword)
+	do $$$AssertStatusOK(tSC, "throwaway user with only the installer's role")
+	Quit:$$$ISERR(tSC)
+	Try {
+		do $$$AssertStatusOK(##class(Ens.Config.Credentials).SetCredential(tEntry, "u", "p", 1), "credentials entry to read")
+		set tBody = {"dataSourceName": "TmpRestStatus403", "schemaClass": (..#SchemaClass), "url": "opc.tcp://nowhere.invalid:4840", "devices": "i=85|Objects", "credentials": (tEntry)}
+		set tSC = ..Call("POST", "/deploy", tBody, .tHttp, .tJSON, ##class(OPCUA.Tests.Live.ApiRoleTest).#User, tPassword)
+		do $$$AssertStatusOK(tSC, "request sent")
+		do $$$AssertEquals(tHttp, 403, "HTTP status on the wire")
+		do $$$AssertEquals(tJSON.status, "error", "error envelope")
+		do $$$AssertTrue(tJSON.error [ "%Ens_Credentials", "names the privilege: "_tJSON.error)
+		do $$$AssertEquals(tJSON.ref, "", "no reference: not an internal error")
+	} Catch (e) {
+		do $$$AssertTrue(0, "Exception: "_e.DisplayString())
+	}
+	do ##class(OPCUA.Tests.Live.ApiRoleTest).DropUser()
+	do:##class(Ens.Config.Credentials).%ExistsId(tEntry) ##class(Ens.Config.Credentials).%DeleteId(tEntry)
+}
+
 /// /test reports a failed connect in a 200 body; its text has no "ERROR #" prefix.
 Method TestConnectErrorText()
 {
