@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Export generator="IRIS" version="26" zv="IRIS for UNIX (Ubuntu Server LTS for ARM64 Containers) 2025.3 (Build 226U)" ts="2026-10-30 09:13:11">
+<Export generator="IRIS" version="26" zv="IRIS for UNIX (Ubuntu Server LTS for ARM64 Containers) 2025.3 (Build 226U)" ts="2026-10-30 10:01:37">
 <Class name="Examples.OPCUA.SecureBrowse">
 <Description>
 IRIS OPC UA Secure Browse Example</Description>
 <IncludeCode>OPCUA.Constants,Ensemble</IncludeCode>
-<TimeChanged>67864,28001.19653427</TimeChanged>
-<TimeCreated>67864,28001.19653427</TimeCreated>
+<TimeChanged>67873,33287.936454654</TimeChanged>
+<TimeCreated>67873,33287.936454654</TimeCreated>
 
 <Method name="Run">
 <ClassMethod>1</ClassMethod>
@@ -131,8 +131,8 @@ IRIS OPC UA Secure Browse Example</Description>
 <Description>
 IRIS OPC UA Secure Write Example</Description>
 <IncludeCode>OPCUA.Constants,Ensemble</IncludeCode>
-<TimeChanged>67864,28001.193109895</TimeChanged>
-<TimeCreated>67864,28001.193109895</TimeCreated>
+<TimeChanged>67873,33287.935404618</TimeChanged>
+<TimeCreated>67873,33287.935404618</TimeCreated>
 
 <Method name="Run">
 <Description>
@@ -219,8 +219,8 @@ when that data feed is enabled and sourcing data. </Description>
 <Description>
 IRIS OPC UA Simple Browse Example</Description>
 <IncludeCode>OPCUA.Constants,Ensemble</IncludeCode>
-<TimeChanged>67864,28001.197621145</TimeChanged>
-<TimeCreated>67864,28001.197621145</TimeCreated>
+<TimeChanged>67873,33287.935415952</TimeChanged>
+<TimeCreated>67873,33287.935415952</TimeCreated>
 
 <Method name="Run">
 <ClassMethod>1</ClassMethod>
@@ -344,8 +344,8 @@ IRIS OPC UA Simple Browse Example</Description>
 <Description>
 IRIS OPC UA Simple Write Example</Description>
 <IncludeCode>OPCUA.Constants,Ensemble</IncludeCode>
-<TimeChanged>67864,28001.195229437</TimeChanged>
-<TimeCreated>67864,28001.195229437</TimeCreated>
+<TimeChanged>67873,33287.937716939</TimeChanged>
+<TimeCreated>67873,33287.937716939</TimeCreated>
 
 <Method name="Run">
 <Description>
@@ -436,8 +436,8 @@ reading values from the node beforehand and afterwards.</Description>
 
 <Class name="Examples.OPCUADS.ArrayExample">
 <Super>%Persistent,OPCUA.DataSource.Definition</Super>
-<TimeChanged>67873,33183.113365229</TimeChanged>
-<TimeCreated>67864,28001.227855312</TimeCreated>
+<TimeChanged>67873,36097.750969862</TimeChanged>
+<TimeCreated>67873,33287.954685808</TimeCreated>
 
 <Parameter name="OPCUADATASOURCE">
 <Default>MyDataSource2</Default>
@@ -501,8 +501,8 @@ reading values from the node beforehand and afterwards.</Description>
 <Description>
 IRIS OPC UA Internet polling demo node id and data type specifications</Description>
 <Super>%Persistent,OPCUA.DataSource.Definition</Super>
-<TimeChanged>67873,33183.112566237</TimeChanged>
-<TimeCreated>67864,28001.22233502</TimeCreated>
+<TimeChanged>67873,36097.755642378</TimeChanged>
+<TimeCreated>67873,33287.951395617</TimeCreated>
 
 <Parameter name="OPCUADATASOURCE">
 <Default>MyDataSource2</Default>
@@ -550,8 +550,8 @@ IRIS OPC UA Internet polling demo node id and data type specifications</Descript
 <Description>
 IRIS Internet OPC UA subscription demo node id and data type specifications</Description>
 <Super>%Persistent,OPCUA.DataSource.Definition</Super>
-<TimeChanged>67873,33183.115313042</TimeChanged>
-<TimeCreated>67864,28001.216414104</TimeCreated>
+<TimeChanged>67873,36097.752444534</TimeChanged>
+<TimeCreated>67873,33287.957900666</TimeCreated>
 
 <Parameter name="OPCUADATASOURCE">
 <Default>MyDataSource2</Default>
@@ -599,8 +599,8 @@ IRIS Internet OPC UA subscription demo node id and data type specifications</Des
 <Description>
 IRIS OPC UA local polling demo node id and data type specifications</Description>
 <Super>%Persistent,OPCUA.DataSource.Definition</Super>
-<TimeChanged>67873,33183.118661465</TimeChanged>
-<TimeCreated>67864,28001.232939479</TimeCreated>
+<TimeChanged>67873,36097.749895317</TimeChanged>
+<TimeCreated>67873,33287.958588787</TimeCreated>
 
 <Parameter name="OPCUADATASOURCE">
 <Default>MyDataSource2</Default>
@@ -670,8 +670,8 @@ IRIS OPC UA local polling demo node id and data type specifications</Description
 
 <Class name="Examples.OPCUADS.Production">
 <Super>Ens.Production</Super>
-<TimeChanged>67872,86211.917427342</TimeChanged>
-<TimeCreated>67864,28001.207116145</TimeCreated>
+<TimeChanged>67873,33287.95333894</TimeChanged>
+<TimeCreated>67873,33287.95333894</TimeCreated>
 
 <XData name="ProductionDefinition">
 <Data><![CDATA[
@@ -748,8 +748,8 @@ IRIS OPC UA local polling demo node id and data type specifications</Description
 <Description>
 IRIS local OPC UA subscription demo node id and data type specifications</Description>
 <Super>%Persistent,OPCUA.DataSource.Definition</Super>
-<TimeChanged>67873,33183.113424811</TimeChanged>
-<TimeCreated>67864,28001.21894702</TimeCreated>
+<TimeChanged>67873,36097.743434128</TimeChanged>
+<TimeCreated>67873,33287.959436074</TimeCreated>
 
 <Parameter name="OPCUADATASOURCE">
 <Default>MyDataSource2</Default>
@@ -797,8 +797,8 @@ IRIS local OPC UA subscription demo node id and data type specifications</Descri
 <Description>
 IRIS local OPC UA subscription demo node id and data type specifications</Description>
 <Super>%Persistent,OPCUA.DataSource.Definition</Super>
-<TimeChanged>67873,33183.110136471</TimeChanged>
-<TimeCreated>67864,28001.214256145</TimeCreated>
+<TimeChanged>67873,36097.746646056</TimeChanged>
+<TimeCreated>67873,33287.956707047</TimeCreated>
 
 <Parameter name="OPCUADATASOURCE">
 <Default>MyDataSource2</Default>
@@ -867,8 +867,8 @@ IRIS local OPC UA subscription demo node id and data type specifications</Descri
 
 
 <Class name="Examples.OPCUADS.Utils">
-<TimeChanged>67864,28001.221673104</TimeChanged>
-<TimeCreated>67864,28001.221673104</TimeCreated>
+<TimeChanged>67873,33287.963809218</TimeChanged>
+<TimeCreated>67873,33287.963809218</TimeCreated>
 
 <Method name="LoadOnInstallation">
 <ClassMethod>1</ClassMethod>
@@ -883,8 +883,8 @@ IRIS local OPC UA subscription demo node id and data type specifications</Descri
 <Class name="OPCUA.Adapter.Common">
 <IncludeCode>%callout,OPCUA.Constants</IncludeCode>
 <Super>Ens.InboundAdapter</Super>
-<TimeChanged>67872,83467.813660357</TimeChanged>
-<TimeCreated>67864,28001.238530145</TimeCreated>
+<TimeChanged>67873,33287.975876195</TimeChanged>
+<TimeCreated>67873,33287.975876195</TimeCreated>
 
 <Parameter name="SETTINGS">
 <Description>
@@ -1338,8 +1338,8 @@ logged once per (device, column) and stored as NULL.</Description>
 An inbound adapter for accessing data on an OPC UA server
 by repeated polling of the server for results.</Description>
 <Super>OPCUA.Adapter.Common</Super>
-<TimeChanged>67872,84074.452482322</TimeChanged>
-<TimeCreated>67864,28001.241355854</TimeCreated>
+<TimeChanged>67873,33287.97875168</TimeChanged>
+<TimeCreated>67873,33287.97875168</TimeCreated>
 
 <Property name="Specification">
 <Type>%List</Type>
@@ -1589,8 +1589,8 @@ Used internally to disconnect the OPC-UA client.</Description>
 An inbound adapter for accessing data 
 using an OPC UA subscription to monitored items on an OPC UA server.</Description>
 <Super>OPCUA.Adapter.Common</Super>
-<TimeChanged>67872,84074.460108829</TimeChanged>
-<TimeCreated>67864,28001.240945979</TimeCreated>
+<TimeChanged>67873,33287.983285989</TimeChanged>
+<TimeCreated>67873,33287.983285989</TimeCreated>
 
 <Parameter name="SETTINGS">
 <Description>
@@ -2149,8 +2149,8 @@ the server using <method>DeleteSubscriptionSet</method>.</li>
 </ul>]]></Description>
 <IncludeCode>%callout,OPCUA.Constants,Ensemble</IncludeCode>
 <Super>%RegisteredObject</Super>
-<TimeChanged>67872,83467.819544486</TimeChanged>
-<TimeCreated>67864,28001.235682562</TimeCreated>
+<TimeChanged>67873,33287.981921247</TimeChanged>
+<TimeCreated>67873,33287.981921247</TimeCreated>
 
 <Parameter name="DOMAIN">
 <Description>
@@ -3254,7 +3254,7 @@ $$$OpcuaNodeIdTypeString or $$$OpcuaNodeIdTypeNumeric.)</li>
 </Class>
 
 
-<Routine name="OPCUA.Constants" type="INC" timestamp="67872,52321.428924994"><![CDATA[
+<Routine name="OPCUA.Constants" type="INC" timestamp="67873,33287.914701895"><![CDATA[
 
 
 #; *** zf Function Ordinals ***
@@ -3469,8 +3469,8 @@ runtime instead. See OPCUA.REST.DeployService and ARCHITECTURE.md.]]></Descripti
 <Abstract>1</Abstract>
 <PropertyClass>OPCUA.DataSource.PropertyClass</PropertyClass>
 <Super>%Persistent</Super>
-<TimeChanged>67872,83467.811972772</TimeChanged>
-<TimeCreated>67864,28001.251542479</TimeCreated>
+<TimeChanged>67873,33287.981926663</TimeChanged>
+<TimeCreated>67873,33287.981926663</TimeCreated>
 <NoExtent>1</NoExtent>
 
 <Projection name="OPCUADataSource">
@@ -3550,8 +3550,8 @@ this class excludes the hand-authored Examples and OPCUA.Tests classes, which
 also extend Definition but would fail in a row-source service.]]></Description>
 <Abstract>1</Abstract>
 <Super>OPCUA.DataSource.Definition</Super>
-<TimeChanged>67864,28001.247595479</TimeChanged>
-<TimeCreated>67864,28001.247595479</TimeCreated>
+<TimeChanged>67873,33287.983583113</TimeChanged>
+<TimeCreated>67873,33287.983583113</TimeCreated>
 <NoExtent>1</NoExtent>
 </Class>
 
@@ -3588,8 +3588,8 @@ do ##class(OPCUA.DataSource.Generator).Generate(
     "/usr/irissys/mgr/User/")
 </example>]]></Description>
 <IncludeCode>OPCUA.Constants,Ensemble</IncludeCode>
-<TimeChanged>67872,84074.47561805</TimeChanged>
-<TimeCreated>67864,28001.255122937</TimeCreated>
+<TimeChanged>67873,33287.993504477</TimeChanged>
+<TimeCreated>67873,33287.993504477</TimeCreated>
 
 <Method name="Generate">
 <Description><![CDATA[
@@ -4258,8 +4258,8 @@ Write the generated DataSource class definition to a .cls file.</Description>
 Comes with OPCUA Adapter
 https://docs.intersystems.com/irislatest/csp/docbook/Doc.View.cls?KEY=GOBJ_projections</Description>
 <Super>%Projection.AbstractProjection</Super>
-<TimeChanged>67872,52321.986075051</TimeChanged>
-<TimeCreated>67864,28001.262103187</TimeCreated>
+<TimeChanged>67873,33287.992686648</TimeChanged>
+<TimeCreated>67873,33287.992686648</TimeCreated>
 
 <Method name="CreateProjection">
 <Description>
@@ -4552,8 +4552,8 @@ This method is invoked when a class is 'uncompiled'</Description>
 
 
 <Class name="OPCUA.DataSource.PropertyClass">
-<TimeChanged>67864,28001.262705312</TimeChanged>
-<TimeCreated>67864,28001.262705312</TimeCreated>
+<TimeChanged>67873,33287.989758122</TimeChanged>
+<TimeCreated>67873,33287.989758122</TimeCreated>
 
 <Parameter name="OPCUANAMESPACE">
 <Type>%String</Type>
@@ -4587,8 +4587,8 @@ from DisplayName, so the fallback is what makes existing schemas resolve).
 A column whose node is absent simply gets mask bit 0 and stores NULL, which
 preserves the semantics of the old precomputed column masks.</Description>
 <IncludeCode>OPCUA.Constants,%occInclude</IncludeCode>
-<TimeChanged>67872,85498.136175084</TimeChanged>
-<TimeCreated>67864,28001.264767145</TimeCreated>
+<TimeChanged>67873,33288.005630121</TimeChanged>
+<TimeCreated>67873,33288.005630121</TimeCreated>
 
 <Method name="ParseDeviceNodePaths">
 <Description>
@@ -5190,8 +5190,8 @@ New schemas store complete OPCUA.Types DataValues, including inside folders.
 Existing plain schemas retain their old storage layout without recompilation.</Description>
 <IncludeCode>%occInclude,Ensemble</IncludeCode>
 <Super>%RegisteredObject</Super>
-<TimeChanged>67872,83467.841859296</TimeChanged>
-<TimeCreated>67864,28001.27634502</TimeCreated>
+<TimeChanged>67873,33288.010814177</TimeChanged>
+<TimeCreated>67873,33288.010814177</TimeCreated>
 
 <Property name="NestingSpec">
 <Description>
@@ -5604,8 +5604,8 @@ For "serial" entries, builds an inner $LB for the serial object's properties.</D
 Date and time-related utility functions used in conjunction with
 the OPC-UA connector.</Description>
 <IncludeCode>%callout,OPCUA.Constants,Ensemble</IncludeCode>
-<TimeChanged>67872,55355.874290658</TimeChanged>
-<TimeCreated>67864,28001.237472395</TimeCreated>
+<TimeChanged>67873,33287.970410849</TimeChanged>
+<TimeCreated>67873,33287.970410849</TimeCreated>
 
 <Method name="OPCUA2HOROLOG">
 <ClassMethod>1</ClassMethod>
@@ -5751,8 +5751,8 @@ the OPC-UA connector.</Description>
 <Description>
 Browse OPC UA node children and return JSON array for lazy-loading tree.</Description>
 <IncludeCode>OPCUA.Constants,%occInclude</IncludeCode>
-<TimeChanged>67872,83467.841374587</TimeChanged>
-<TimeCreated>67864,28001.27717177</TimeCreated>
+<TimeChanged>67873,33288.005592955</TimeChanged>
+<TimeCreated>67873,33288.005592955</TimeCreated>
 
 <Method name="Browse">
 <Description><![CDATA[
@@ -6270,8 +6270,8 @@ to nothing; guessing "leaf" wrongly hides a subtree, which is worse.]]></Descrip
 Manages per-request OPC UA client lifecycle for REST endpoints.
 Creates a connected client, executes work, then disconnects.</Description>
 <IncludeCode>OPCUA.Constants,%occInclude</IncludeCode>
-<TimeChanged>67864,28001.260843979</TimeChanged>
-<TimeCreated>67864,28001.260843979</TimeCreated>
+<TimeChanged>67873,33287.998812407</TimeChanged>
+<TimeCreated>67873,33287.998812407</TimeCreated>
 
 <Method name="Connect">
 <Description>
@@ -6357,8 +6357,8 @@ Returns URL by reference. Other params are optional with defaults.</Description>
 <Description>
 Test OPC UA server connectivity and return response time.</Description>
 <IncludeCode>OPCUA.Constants,%occInclude</IncludeCode>
-<TimeChanged>67872,73199.832254069</TimeChanged>
-<TimeCreated>67864,28001.268259937</TimeCreated>
+<TimeChanged>67873,33288.000756439</TimeChanged>
+<TimeCreated>67873,33288.000756439</TimeCreated>
 
 <Method name="Test">
 <Description>
@@ -6426,8 +6426,8 @@ real table is a decision of its own, so it is left to an explicit start
 (<method>OPCUA.REST.PipelineService.Toggle</method>, or the Portal) once the
 operator has looked the pipeline over.]]></Description>
 <IncludeCode>%occInclude</IncludeCode>
-<TimeChanged>67872,80832.988068544</TimeChanged>
-<TimeCreated>67864,28001.271474812</TimeCreated>
+<TimeChanged>67873,35387.337759334</TimeChanged>
+<TimeCreated>67873,33288.014794072</TimeCreated>
 
 <Parameter name="ProductionClass">
 <Description>
@@ -6928,7 +6928,11 @@ Create credentials entry <var>pId</var> for pipeline <var>pItemName</var> and
 record that deploy made it, in <tt>^OPCUA.OwnedCredentials(pId)</tt>, so that
 deleting the pipeline deletes it and nothing else.
 
-An existing entry is never overwritten, whoever made it: 409.]]></Description>
+An existing entry is never overwritten, with one exception: our own leftover.
+A pipeline deleted in the Management Portal leaves its entry and our marker
+behind. When the marker names this same pipeline and no item in any production
+references the entry, it is ours and orphaned, so it is replaced. Any other
+existing entry is a 409.]]></Description>
 <ClassMethod>1</ClassMethod>
 <FormalSpec>pId:%String,pItemName:%String,pUsername:%String,pPassword:%String</FormalSpec>
 <Private>1</Private>
@@ -6938,13 +6942,70 @@ An existing entry is never overwritten, whoever made it: 409.]]></Description>
 	// taken.
 	set tTaken = ..FindCredentialsId(pId)
 	if tTaken '= "" {
-		Quit ##class(OPCUA.REST.Error).Conflict("Credentials '"_tTaken_"' already exist, and are never overwritten. Choose a different pipeline name, or send 'credentials': '"_tTaken_"' to use them.")
+		set tSC = ..CredentialsUsers(tTaken, .tUsers)
+		Quit:$$$ISERR(tSC) tSC
+		if '..OwnsCredentials(tTaken, pItemName) || (tUsers '= "") {
+			Quit ##class(OPCUA.REST.Error).Conflict("Credentials '"_tTaken_"' already exist"_$Select(tUsers'="":" and are used by "_tUsers, 1:"")_", and are never overwritten. Choose a different pipeline name, or send 'credentials': '"_tTaken_"' to use them. If they are left over from a pipeline deleted in the Management Portal, delete them under Interoperability > Configure > Credentials, then deploy again.")
+		}
+		set pId = tTaken
 	}
 	Quit:'..CanWriteCredentials() ..NoCredentialsAccess("create credentials '"_pId_"'", "W")
-	set tSC = ##class(Ens.Config.Credentials).SetCredential(pId, pUsername, pPassword, 0)
+	set tSC = ##class(Ens.Config.Credentials).SetCredential(pId, pUsername, pPassword, (tTaken '= ""))
 	Quit:$$$ISERR(tSC) ##class(OPCUA.REST.Error).Make(500, "Could not create credentials '"_pId_"'", tSC)
 	set ^OPCUA.OwnedCredentials(pId) = pItemName
 	Quit $$$OK
+]]></Implementation>
+</Method>
+
+<Method name="CredentialsUsers">
+<Description><![CDATA[
+The items, in any production of this namespace, whose Credentials setting
+names entry <var>pId</var> (in any case), as "Item (Production)" joined with
+", " in <var>pUsers</var>; "" when none. Any failure is an error, so a caller
+never treats an entry as unused on a guess. Embedded SQL, which checks no SQL
+privilege.]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pId:%String,*pUsers:%String</FormalSpec>
+<Private>1</Private>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	set pUsers = "", tLower = $ZConvert(pId, "L")
+	#dim tSC As %Status = $$$OK
+	Try {
+		&sql(DECLARE cCredProd CURSOR FOR SELECT ID INTO :tProdClass FROM Ens_Config.Production)
+		&sql(OPEN cCredProd)
+		if SQLCODE < 0 {
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to query Ens_Config.Production", $$$ERROR($$$SQLError, SQLCODE, $Get(%msg)))
+			Quit
+		}
+		for {
+			&sql(FETCH cCredProd)
+			if SQLCODE = 100 Quit
+			if SQLCODE < 0 {
+				set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to query Ens_Config.Production", $$$ERROR($$$SQLError, SQLCODE, $Get(%msg)))
+				Quit
+			}
+			set tProd = ##class(Ens.Config.Production).%OpenId(tProdClass, 0)
+			if '$IsObject(tProd) {
+				set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to open production '"_tProdClass_"'")
+				Quit
+			}
+			for i=1:1:tProd.Items.Count() {
+				set tItem = tProd.Items.GetAt(i)
+				for j=1:1:tItem.Settings.Count() {
+					set tS = tItem.Settings.GetAt(j)
+					if (tS.Name = "Credentials") && ($ZConvert(tS.Value, "L") = tLower) {
+						set pUsers = pUsers_$Select(pUsers="":"", 1:", ")_tItem.Name_" ("_tProdClass_")"
+					}
+				}
+			}
+		}
+		&sql(CLOSE cCredProd)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+		&sql(CLOSE cCredProd)
+	}
+	Quit tSC
 ]]></Implementation>
 </Method>
 
@@ -7210,8 +7271,8 @@ Anything else (an ObjectScript error, a %Dictionary or Ens error) is
 unexpected, so it is 500 and its text never goes into a response.]]></Description>
 <Abstract>1</Abstract>
 <IncludeCode>%occInclude</IncludeCode>
-<TimeChanged>67872,80833.000276847</TimeChanged>
-<TimeCreated>67872,70521.791035308</TimeCreated>
+<TimeChanged>67873,33288.011069592</TimeChanged>
+<TimeCreated>67873,33288.011069592</TimeCreated>
 
 <Method name="Make">
 <Description><![CDATA[
@@ -7403,8 +7464,8 @@ REST dispatch handler for OPC UA adapter endpoints.
 Routes requests to service classes and formats consistent JSON responses.</Description>
 <IncludeCode>%occInclude</IncludeCode>
 <Super>%CSP.REST</Super>
-<TimeChanged>67872,73199.880133162</TimeChanged>
-<TimeCreated>67864,28001.280733437</TimeCreated>
+<TimeChanged>67873,35574.756571538</TimeChanged>
+<TimeCreated>67873,33288.024208689</TimeCreated>
 
 <Parameter name="HandleCorsRequest">
 <Description>
@@ -7855,7 +7916,9 @@ its own message, so the console can say what was saved, plus the reference.]]></
 		Quit ..SendError(tHttp, ##class(OPCUA.REST.Error).Message(pSC))
 	}
 
-	set tRef = $ZDateTime($Horolog, 8)_"-"_$Job
+	// yyyymmddThhmmss-job-n: no space, so it copies as one word, and the
+	// per-process counter keeps two errors in one second apart.
+	set tRef = $Translate($ZDateTime($Horolog, 8), " :", "T")_"-"_$Job_"-"_$Increment(^||OPCUA.REST("ref"))
 	set tWhere = ""
 	if $IsObject($Get(%request)) {
 		set tWhere = " ("_%request.Method_" "_%request.URL_")"
@@ -7970,6 +8033,7 @@ Send an error response envelope with HTTP status <var>pHttp</var>.
 	set %response.Status = $Case(pHttp,
 		400: ..#HTTP400BADREQUEST,
 		401: ..#HTTP401UNAUTHORIZED,
+		403: ..#HTTP403FORBIDDEN,
 		404: ..#HTTP404NOTFOUND,
 		409: ..#HTTP409CONFLICT,
 		: ..#HTTP500INTERNALSERVERERROR)
@@ -7990,8 +8054,8 @@ Manage deployed OPC UA pipelines: list, toggle, delete, rebind.
 Reads and edits the shared production, OPCUA.Pipeline.Production
 (<method>OPCUA.REST.ProductionEdit.ProductionClass</method>).]]></Description>
 <IncludeCode>%occInclude,Ensemble</IncludeCode>
-<TimeChanged>67872,85730.659888005</TimeChanged>
-<TimeCreated>67864,28001.287461604</TimeCreated>
+<TimeChanged>67873,35550.015423715</TimeChanged>
+<TimeCreated>67873,33288.02337461</TimeCreated>
 
 <Parameter name="RowCountTTL">
 <Description>
@@ -8257,8 +8321,10 @@ the class has no table or the user may not SELECT from it. 0 would read as
 				Quit
 			}
 		}
-		// Get SQL qualified table name
-		set tTable = ##class(OPCUA.REST.SchemaService).TableName(pClassName)
+		// Quoted, so a reserved word as schema or table name (Group) still parses.
+		// Dynamic SQL: an account without SELECT on the table (the installer's
+		// OPCUA_API role) gets a 403 here, caught below as an unknown count.
+		set tTable = ##class(OPCUA.REST.SchemaService).QuotedTableName(pClassName)
 		set tRS = ##class(OPCUA.Utils).ExecQuery("SELECT COUNT(*) FROM "_tTable)
 		if tRS.%Next() set tCount = tRS.%GetData(1)
 		set ^IRIS.Temp.OPCUARowCount(pClassName) = $ListBuild(tNow, tCount)
@@ -8411,10 +8477,16 @@ refuses while any pipeline still references it.]]></Description>
 		do ##class(OPCUA.REST.ProductionEdit).End()
 		Quit:$$$ISERR(tSC)
 
-		// Delete the config item row to prevent orphans
+		// Delete the config item row to prevent orphans. The pipeline is already
+		// gone from the production, so a failure here is reported with the other
+		// follow-ups below, which still run.
+		set tSCItem = $$$OK
 		if tItemId '= "" {
-			set tSC = ##class(Ens.Config.Item).%DeleteId(tItemId)
-			$$$ThrowOnError(tSC)
+			Try {
+				set tSCItem = ##class(Ens.Config.Item).%DeleteId(tItemId)
+			} Catch (eItem) {
+				set tSCItem = eItem.AsStatus()
+			}
 		}
 
 		// The credentials entry goes too, but only if deploy created it for this
@@ -8427,11 +8499,21 @@ refuses while any pipeline still references it.]]></Description>
 		set tSCApply = ##class(OPCUA.REST.ProductionEdit).ApplyToRunning(.tRestarted, .tNote)
 
 		// Report every follow-up that failed, not just the last.
-		set tFailed = ""
-		if $$$ISERR(tSCCred) set tFailed = "its credentials '"_tCredId_"' could not be deleted: "_##class(OPCUA.REST.Error).Text(tSCCred)
-		if $$$ISERR(tSCApply) set tFailed = tFailed_$Select(tFailed="":"", 1:"; and ")_"the running production could not be updated: "_##class(OPCUA.REST.Error).Text(tSCApply)
+		set tFailed = "", tCause = $$$OK
+		if $$$ISERR(tSCItem) {
+			set tFailed = "its config item row "_tItemId_" could not be removed: "_##class(OPCUA.REST.Error).Text(tSCItem)
+			set tCause = $$$ADDSC(tCause, tSCItem)
+		}
+		if $$$ISERR(tSCCred) {
+			set tFailed = tFailed_$Select(tFailed="":"", 1:"; and ")_"its credentials '"_tCredId_"' could not be deleted: "_##class(OPCUA.REST.Error).Text(tSCCred)
+			set tCause = $$$ADDSC(tCause, tSCCred)
+		}
+		if $$$ISERR(tSCApply) {
+			set tFailed = tFailed_$Select(tFailed="":"", 1:"; and ")_"the running production could not be updated: "_##class(OPCUA.REST.Error).Text(tSCApply)
+			set tCause = $$$ADDSC(tCause, tSCApply)
+		}
 		if tFailed '= "" {
-			set tSC = ##class(OPCUA.REST.Error).Make(500, "Pipeline deleted, but "_tFailed, $Select($$$ISERR(tSCCred):tSCCred, 1:tSCApply))
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Pipeline deleted, but "_tFailed, tCause)
 		}
 
 		set pResult.deleted = 1
@@ -8787,16 +8869,15 @@ Check if a serial class is used by any class other than pMainClass.</Description
 <Private>1</Private>
 <ReturnType>%Boolean</ReturnType>
 <Implementation><![CDATA[
-	#dim rs As %SQL.StatementResult
-	set tSQL = "SELECT Parent FROM %Dictionary.CompiledProperty WHERE Type = ? AND Parent <> ?"
-	// ExecQuery throws on a failed query: reading it as "not shared" would delete
-	// a class another schema still uses.
-	set rs = ##class(OPCUA.Utils).ExecQuery(tSQL, pSerialClass, pMainClass)
-	if rs.%Next() {
-		// At least one other class uses this serial class
-		Return 1
-	}
-	Return 0
+	// Embedded SQL checks no SQL privilege, so this works for an account with only
+	// the installer's OPCUA_API role (dynamic SQL gave it SQLCODE -99). A failed
+	// query throws: reading it as "not shared" would delete a class another schema
+	// still uses.
+	set tParent = ""
+	&sql(SELECT TOP 1 Parent INTO :tParent FROM %Dictionary.CompiledProperty WHERE Type = :pSerialClass AND Parent <> :pMainClass)
+	if SQLCODE < 0 $$$ThrowStatus($$$ERROR($$$SQLError, SQLCODE, $Get(%msg)))
+	// SQLCODE 0: at least one other class uses this serial class.
+	Quit (SQLCODE = 0)
 ]]></Implementation>
 </Method>
 </Class>
@@ -8828,8 +8909,8 @@ check and its SaveToClass is still overwritten in the class.</li>
 console's change. That is the Portal's code, so it can't be closed from our side.</li>
 </ol>]]></Description>
 <IncludeCode>%occInclude</IncludeCode>
-<TimeChanged>67872,70521.800174958</TimeChanged>
-<TimeCreated>67872,65916.151941068</TimeCreated>
+<TimeChanged>67873,35166.610597975</TimeChanged>
+<TimeCreated>67873,33288.020778916</TimeCreated>
 
 <Parameter name="ProductionClass">
 <Description>
@@ -9015,17 +9096,19 @@ Set a setting on an item, adding it when absent.</Description>
 </Method>
 
 <Method name="Stamp">
-<Description>
-The production class's last-change time, read from disk. Every SaveToClass
-moves it.</Description>
+<Description><![CDATA[
+The production class's last-change time (<tt>TimeChanged</tt>), read from the
+class dictionary on disk. Every SaveToClass moves it.
+
+Read straight from the dictionary, not through SQL or <tt>%OpenId</tt>: dynamic
+SQL on <tt>%Dictionary.ClassDefinition</tt> needs a SELECT privilege the
+installer's OPCUA_API role does not grant (SQLCODE -99), and <tt>%OpenId</tt>
+can hand back a copy this process already holds.]]></Description>
 <ClassMethod>1</ClassMethod>
 <FormalSpec>pClass:%String</FormalSpec>
 <Private>1</Private>
 <ReturnType>%String</ReturnType>
-<Implementation><![CDATA[
-	set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT TimeChanged FROM %Dictionary.ClassDefinition WHERE ID = ?", pClass)
-	if tRS.%SQLCODE < 0 $$$ThrowStatus($$$ERROR($$$SQLError, tRS.%SQLCODE, tRS.%Message))
-	Quit $Select(tRS.%Next():tRS.TimeChanged, 1:"")
+<Implementation><![CDATA[	Quit $$$defClassKeyGet(pClass, $$$cCLASStimechanged)
 ]]></Implementation>
 </Method>
 
@@ -9091,8 +9174,8 @@ update fails, the error says why. Callers prefix it with what was saved.]]></Des
 <Description>
 Read a single OPC UA node value and return as JSON, typed from the node's DataType.</Description>
 <IncludeCode>OPCUA.Constants,%occInclude</IncludeCode>
-<TimeChanged>67872,83467.866222565</TimeChanged>
-<TimeCreated>67864,28001.279025062</TimeCreated>
+<TimeChanged>67873,33288.023608817</TimeChanged>
+<TimeCreated>67873,33288.023608817</TimeCreated>
 
 <Method name="Read">
 <Description>
@@ -9277,8 +9360,8 @@ effects — binding devices to a schema is a separate act, performed either by
 
 This class owns all schema *generation*; DeployService owns device *binding*.]]></Description>
 <IncludeCode>%occInclude</IncludeCode>
-<TimeChanged>67872,83467.890853709</TimeChanged>
-<TimeCreated>67864,28001.29202027</TimeCreated>
+<TimeChanged>67873,35549.988970251</TimeChanged>
+<TimeCreated>67873,33288.02719259</TimeCreated>
 
 <Parameter name="DefaultPackage">
 <Description>
@@ -9726,8 +9809,10 @@ OPCUA.Types.NoServerTS counterpart, which has no ServerTimeStamp property.</Desc
 
 		// Serial classes must exist before the main class references them.
 		if tHasNesting {
+			// Throw, not Quit: the Catch below removes the serial classes this
+			// call already created. A Quit would leave the Try without it.
 			set tSC = ..GenerateSerialClasses(pClassName, pDefaultNS, .tFolderColumns, .pSerialClasses, pIncludeServerTS, .tCreatedClasses)
-			Quit:$$$ISERR(tSC)
+			$$$ThrowOnError(tSC)
 		}
 
 		set tClassDef = ##class(%Dictionary.ClassDefinition).%New(pClassName)
@@ -9831,10 +9916,9 @@ OPCUA.Types.NoServerTS counterpart, which has no ServerTimeStamp property.</Desc
 <Description>
 Generate and compile %SerialObject classes for nested folder columns.
 
-On any error, deletes exactly the classes this call created and returns the
-original error. The pCreatedClasses array tracks all classes created across
-both this method and the caller (GenerateSchemaClass), so cleanup can be
-thorough.</Description>
+On any error, returns it with every class created so far recorded in
+pCreatedClasses, which tracks the classes created across both this method and
+the caller (GenerateSchemaClass). The caller's Catch deletes exactly those.</Description>
 <ClassMethod>1</ClassMethod>
 <FormalSpec><![CDATA[pMainClassName:%String,pDefaultNS:%Integer,&pFolderColumns,*pSerialClasses,pIncludeServerTS:%Boolean=1,&pCreatedClasses]]></FormalSpec>
 <ReturnType>%Status</ReturnType>
@@ -9881,6 +9965,15 @@ thorough.</Description>
 			set tClassDef.Description = "Auto-generated serial object for nested OPC UA folder: "_tFolderName
 			set tClassDef.Super = "%SerialObject"
 			set tClassDef.PropertyClass = "OPCUA.DataSource.PropertyClass"
+
+			// Test hook: inject a bad property type into serial class number N
+			// (^||OPCUA.Tests("badProp", "serial") = N) to force its compile to fail.
+			if $Get(^||OPCUA.Tests("badProp", "serial")) = (pSerialClasses + 1) {
+				set tProp = ##class(%Dictionary.PropertyDefinition).%New()
+				set tProp.Name = "BadProperty"
+				set tProp.Type = "ThisClassDoesNotExist"
+				do tClassDef.Properties.Insert(tProp)
+			}
 
 			kill tUsedNames
 			for i=0:1:tColumns.%Size()-1 {
@@ -10189,18 +10282,24 @@ pipeline, and this is the single definition of "which pipelines use what".</Desc
 			Quit
 		}
 
-		// Iterate every production in the namespace via SQL
-		// A failed query (e.g. no SELECT privilege for this user) must stop the
-		// caller: read as "no productions", schema delete would skip its in-use check.
-		Try {
-			set tRS = ##class(OPCUA.Utils).ExecQuery("SELECT ID FROM Ens_Config.Production")
-		} Catch (eQuery) {
-			set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to query Ens_Config.Production", eQuery.AsStatus())
+		// Iterate every production in the namespace. Embedded SQL, which checks no
+		// SQL privilege, so an account with only the installer's OPCUA_API role can
+		// run it (dynamic SQL gave it SQLCODE -99). A failed query must still stop
+		// the caller: read as "no productions", schema delete would skip its
+		// in-use check.
+		&sql(DECLARE cUsageProd CURSOR FOR SELECT ID INTO :tProdClass FROM Ens_Config.Production)
+		&sql(OPEN cUsageProd)
+		if SQLCODE < 0 {
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to query Ens_Config.Production", $$$ERROR($$$SQLError, SQLCODE, $Get(%msg)))
+			Quit
 		}
-		Quit:$$$ISERR(tSC)
-
-		while tRS.%Next() {
-			set tProdClass = tRS.ID
+		for {
+			&sql(FETCH cUsageProd)
+			if SQLCODE = 100 Quit
+			if SQLCODE < 0 {
+				set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to query Ens_Config.Production", $$$ERROR($$$SQLError, SQLCODE, $Get(%msg)))
+				Quit
+			}
 			set tProd = ##class(Ens.Config.Production).%OpenId(tProdClass)
 			if '$IsObject(tProd) {
 				set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to open production '"_tProdClass_"'")
@@ -10217,8 +10316,10 @@ pipeline, and this is the single definition of "which pipelines use what".</Desc
 				}
 			}
 		}
+		&sql(CLOSE cUsageProd)
 	} Catch (e) {
 		set tSC = e.AsStatus()
+		&sql(CLOSE cUsageProd)
 	}
 	Quit tSC
 ]]></Implementation>
@@ -10298,39 +10399,57 @@ Accept the device list either as a newline-separated string (`devices` /
 </Method>
 
 <Method name="TableName">
-<Description>
+<Description><![CDATA[
 Derive the SQL table name for a class, honoring SqlTableName and SqlSchemaName.
-Returns the qualified name as "schema.table" (unquoted).</Description>
+Returns the qualified name as "schema.table" (unquoted), for display. SQL
+built from it must use <method>QuotedTableName</method>.]]></Description>
 <ClassMethod>1</ClassMethod>
 <FormalSpec>pClassName:%String</FormalSpec>
 <ReturnType>%String</ReturnType>
 <Implementation><![CDATA[
-	Set tCompiledClass = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
-	If '$IsObject(tCompiledClass) {
-		// Fallback: derive from package structure
-		Set tPackage = $Piece(pClassName, ".", 1, *-1)
-		Set tShort = $Piece(pClassName, ".", *)
-		Quit $Select(tPackage="":tShort, 1:$Replace(tPackage, ".", "_")_"."_tShort)
-	}
-
-	// Get SqlTableName (defaults to short class name)
-	Set tTableName = tCompiledClass.SqlTableName
-	If tTableName = "" {
-		Set tTableName = $Piece(pClassName, ".", *)
-	}
-
-	// Get SqlSchemaName (defaults to package with dots replaced by underscores)
-	Set tSchemaName = tCompiledClass.SqlSchemaName
-	If tSchemaName = "" {
-		Set tPackage = $Piece(pClassName, ".", 1, *-1)
-		If tPackage = "" {
-			Set tSchemaName = "SQLUser"
-		} Else {
-			Set tSchemaName = $Replace(tPackage, ".", "_")
-		}
-	}
-
+	do ..TableParts(pClassName, .tSchemaName, .tTableName)
 	Quit tSchemaName_"."_tTableName
+]]></Implementation>
+</Method>
+
+<Method name="QuotedTableName">
+<Description><![CDATA[
+The qualified table name as delimited identifiers, <tt>"schema"."table"</tt>,
+safe in SQL text even when a name is a reserved word (a schema called Group).]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pClassName:%String</FormalSpec>
+<ReturnType>%String</ReturnType>
+<Implementation><![CDATA[
+	do ..TableParts(pClassName, .tSchemaName, .tTableName)
+	Quit ..QuoteIdentifier(tSchemaName)_"."_..QuoteIdentifier(tTableName)
+]]></Implementation>
+</Method>
+
+<Method name="QuoteIdentifier">
+<ClassMethod>1</ClassMethod>
+<CodeMode>expression</CodeMode>
+<FormalSpec>pName:%String</FormalSpec>
+<Private>1</Private>
+<ReturnType>%String</ReturnType>
+<Implementation><![CDATA[""""_$Replace(pName, """", """""")_""""
+]]></Implementation>
+</Method>
+
+<Method name="TableParts">
+<Description>
+The SQL schema and table name of a class.</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pClassName:%String,*pSchemaName:%String,*pTableName:%String</FormalSpec>
+<Private>1</Private>
+<Implementation><![CDATA[
+	Set tPackage = $Piece(pClassName, ".", 1, *-1)
+	Set tCompiledClass = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
+	// SqlTableName defaults to the short class name, SqlSchemaName to the
+	// package with dots replaced by underscores.
+	Set pTableName = $Select($IsObject(tCompiledClass):tCompiledClass.SqlTableName, 1:"")
+	Set:pTableName="" pTableName = $Piece(pClassName, ".", *)
+	Set pSchemaName = $Select($IsObject(tCompiledClass):tCompiledClass.SqlSchemaName, 1:"")
+	Set:pSchemaName="" pSchemaName = $Select(tPackage="":"SQLUser", 1:$Replace(tPackage, ".", "_"))
 ]]></Implementation>
 </Method>
 </Class>
@@ -10351,8 +10470,8 @@ and logged. Adding a device is therefore a one-line setting edit — no
 regeneration, no recompile.]]></Description>
 <IncludeCode>OPCUA.Constants</IncludeCode>
 <Super>Ens.BusinessService</Super>
-<TimeChanged>67864,36259.924336526</TimeChanged>
-<TimeCreated>67864,28001.281737645</TimeCreated>
+<TimeChanged>67873,33288.029733993</TimeChanged>
+<TimeCreated>67873,33288.029733993</TimeCreated>
 
 <Parameter name="ADAPTER">
 <Default>OPCUA.Adapter.TCPPollingInboundAdapter</Default>
@@ -10415,8 +10534,8 @@ row per poll. Used by the Examples and the OPCUA.Tests harness.
 The wizard /deploy path uses TCPPollingRowSourceService instead.</Description>
 <IncludeCode>OPCUA.Constants</IncludeCode>
 <Super>Ens.BusinessService</Super>
-<TimeChanged>67864,28001.286049729</TimeChanged>
-<TimeCreated>67864,28001.286049729</TimeCreated>
+<TimeChanged>67873,33288.03597221</TimeChanged>
+<TimeCreated>67873,33288.03597221</TimeCreated>
 
 <Parameter name="ADAPTER">
 <Default>OPCUA.Adapter.TCPPollingInboundAdapter</Default>
@@ -10483,8 +10602,8 @@ coverage: a column with no matching node on a given device is stored as NULL
 and logged.]]></Description>
 <IncludeCode>OPCUA.Constants</IncludeCode>
 <Super>Ens.BusinessService</Super>
-<TimeChanged>67864,36259.946068333</TimeChanged>
-<TimeCreated>67864,28001.30188677</TimeCreated>
+<TimeChanged>67873,33288.038870695</TimeChanged>
+<TimeCreated>67873,33288.038870695</TimeCreated>
 
 <Parameter name="ADAPTER">
 <Default>OPCUA.Adapter.TCPSubscriptionInboundAdapter</Default>
@@ -10547,8 +10666,8 @@ rows on change notifications. Used by the Examples and the OPCUA.Tests
 harness. The wizard /deploy path uses TCPSubscriptionRowSourceService instead.</Description>
 <IncludeCode>OPCUA.Constants</IncludeCode>
 <Super>Ens.BusinessService</Super>
-<TimeChanged>67864,28001.297962187</TimeChanged>
-<TimeCreated>67864,28001.297962187</TimeCreated>
+<TimeChanged>67873,33288.039869773</TimeChanged>
+<TimeCreated>67873,33288.039869773</TimeCreated>
 
 <Parameter name="ADAPTER">
 <Default>OPCUA.Adapter.TCPSubscriptionInboundAdapter</Default>
@@ -10607,8 +10726,8 @@ When you make a request to OPC-UA for the value of a Node, it comes with its Sou
 ServerTimeStamp and Status. </Description>
 <PropertyClass>OPCUA.Types.PropertyClass</PropertyClass>
 <Super>%SerialObject</Super>
-<TimeChanged>67872,76428.063367852</TimeChanged>
-<TimeCreated>67864,28001.321798854</TimeCreated>
+<TimeChanged>67873,33288.141076986</TimeChanged>
+<TimeCreated>67873,33288.141076986</TimeCreated>
 
 <Property name="SourceTimeStamp">
 <Type>%TimeStamp</Type>
@@ -10645,8 +10764,8 @@ ServerTimeStamp and Status. </Description>
 
 <Class name="OPCUA.Types.ArrayDataValue.Boolean">
 <Super>OPCUA.Types.AbstractDataValue</Super>
-<TimeChanged>67864,28001.348230062</TimeChanged>
-<TimeCreated>67864,28001.348230062</TimeCreated>
+<TimeChanged>67873,33288.182129352</TimeChanged>
+<TimeCreated>67873,33288.182129352</TimeCreated>
 
 <Property name="Values">
 <Type>%Boolean</Type>
@@ -10675,8 +10794,8 @@ ServerTimeStamp and Status. </Description>
 
 <Class name="OPCUA.Types.ArrayDataValue.Double">
 <Super>OPCUA.Types.AbstractDataValue</Super>
-<TimeChanged>67864,28001.358091895</TimeChanged>
-<TimeCreated>67864,28001.358091895</TimeCreated>
+<TimeChanged>67873,33288.171641574</TimeChanged>
+<TimeCreated>67873,33288.171641574</TimeCreated>
 
 <Property name="Values">
 <Type>%Double</Type>
@@ -10705,8 +10824,8 @@ ServerTimeStamp and Status. </Description>
 
 <Class name="OPCUA.Types.ArrayDataValue.Float">
 <Super>OPCUA.Types.AbstractDataValue</Super>
-<TimeChanged>67864,28001.352275312</TimeChanged>
-<TimeCreated>67864,28001.352275312</TimeCreated>
+<TimeChanged>67873,33288.175776927</TimeChanged>
+<TimeCreated>67873,33288.175776927</TimeCreated>
 
 <Property name="Values">
 <Type>%Float</Type>
@@ -10735,8 +10854,8 @@ ServerTimeStamp and Status. </Description>
 
 <Class name="OPCUA.Types.ArrayDataValue.Integer">
 <Super>OPCUA.Types.AbstractDataValue</Super>
-<TimeChanged>67864,28001.373771979</TimeChanged>
-<TimeCreated>67864,28001.373771979</TimeCreated>
+<TimeChanged>67873,33288.179134451</TimeChanged>
+<TimeCreated>67873,33288.179134451</TimeCreated>
 
 <Property name="Values">
 <Type>%Integer</Type>
@@ -10765,8 +10884,8 @@ ServerTimeStamp and Status. </Description>
 
 <Class name="OPCUA.Types.ArrayDataValue.String">
 <Super>OPCUA.Types.AbstractDataValue</Super>
-<TimeChanged>67872,73848.243095757</TimeChanged>
-<TimeCreated>67864,28001.350008145</TimeCreated>
+<TimeChanged>67873,33288.177367086</TimeChanged>
+<TimeCreated>67873,33288.177367086</TimeCreated>
 
 <Property name="Values">
 <Type>%String</Type>
@@ -10796,8 +10915,8 @@ ServerTimeStamp and Status. </Description>
 
 <Class name="OPCUA.Types.ArrayDataValue.TimeStamp">
 <Super>OPCUA.Types.AbstractDataValue</Super>
-<TimeChanged>67864,28001.366746062</TimeChanged>
-<TimeCreated>67864,28001.366746062</TimeCreated>
+<TimeChanged>67873,33288.185652458</TimeChanged>
+<TimeCreated>67873,33288.185652458</TimeCreated>
 
 <Property name="Values">
 <Type>%TimeStamp</Type>
@@ -10826,8 +10945,8 @@ ServerTimeStamp and Status. </Description>
 
 <Class name="OPCUA.Types.BooleanDataValue">
 <Super>OPCUA.Types.AbstractDataValue</Super>
-<TimeChanged>67864,28001.334821187</TimeChanged>
-<TimeCreated>67864,28001.334821187</TimeCreated>
+<TimeChanged>67873,33288.164030865</TimeChanged>
+<TimeCreated>67873,33288.164030865</TimeCreated>
 
 <Property name="Value">
 <Type>%Boolean</Type>
@@ -10855,8 +10974,8 @@ ServerTimeStamp and Status. </Description>
 
 <Class name="OPCUA.Types.DoubleDataValue">
 <Super>OPCUA.Types.AbstractDataValue</Super>
-<TimeChanged>67864,28001.326065854</TimeChanged>
-<TimeCreated>67864,28001.326065854</TimeCreated>
+<TimeChanged>67873,33288.154145834</TimeChanged>
+<TimeCreated>67873,33288.154145834</TimeCreated>
 
 <Property name="Value">
 <Type>%Double</Type>
@@ -10885,8 +11004,8 @@ ServerTimeStamp and Status. </Description>
 
 <Class name="OPCUA.Types.FloatDataValue">
 <Super>OPCUA.Types.AbstractDataValue</Super>
-<TimeChanged>67864,28001.332709645</TimeChanged>
-<TimeCreated>67864,28001.332709645</TimeCreated>
+<TimeChanged>67873,33288.147837034</TimeChanged>
+<TimeCreated>67873,33288.147837034</TimeCreated>
 
 <Property name="Value">
 <Type>%Float</Type>
@@ -10915,8 +11034,8 @@ ServerTimeStamp and Status. </Description>
 
 <Class name="OPCUA.Types.IntegerDataValue">
 <Super>OPCUA.Types.AbstractDataValue</Super>
-<TimeChanged>67864,28001.333387979</TimeChanged>
-<TimeCreated>67864,28001.333387979</TimeCreated>
+<TimeChanged>67873,33288.154674248</TimeChanged>
+<TimeCreated>67873,33288.154674248</TimeCreated>
 
 <Property name="Value">
 <Type>%Integer</Type>
@@ -10945,8 +11064,8 @@ ServerTimeStamp and Status. </Description>
 
 <Class name="OPCUA.Types.LocalizedTextDataValue">
 <Super>OPCUA.Types.AbstractDataValue</Super>
-<TimeChanged>67872,73848.227509867</TimeChanged>
-<TimeCreated>67864,28001.332937729</TimeCreated>
+<TimeChanged>67873,33288.152023595</TimeChanged>
+<TimeCreated>67873,33288.152023595</TimeCreated>
 
 <Property name="Text">
 <Type>%String</Type>
@@ -10993,8 +11112,8 @@ that is actually a "list of lists". If you have two dimensions, each element of 
 Example for getting row 1, column 1: $ListGet($ListGet(obj.Values, 1), 1).
 If you have three dimensions, this will be $ListGet($ListGet($ListGet(obj.Values, 1) , 1), 1).</Description>
 <Super>OPCUA.Types.AbstractDataValue</Super>
-<TimeChanged>67864,28001.337850104</TimeChanged>
-<TimeCreated>67864,28001.337850104</TimeCreated>
+<TimeChanged>67873,33288.156528113</TimeChanged>
+<TimeCreated>67873,33288.156528113</TimeCreated>
 
 <Property name="Values">
 <Type>%List</Type>
@@ -11046,8 +11165,8 @@ may store these. Hand-authored DataSources under TCPPollingService store the
 native list unchanged and must keep using the OPCUA.Types classes.]]></Description>
 <PropertyClass>OPCUA.Types.PropertyClass</PropertyClass>
 <Super>%SerialObject</Super>
-<TimeChanged>67872,76428.159553353</TimeChanged>
-<TimeCreated>67864,28001.374821187</TimeCreated>
+<TimeChanged>67873,33288.183841843</TimeChanged>
+<TimeCreated>67873,33288.183841843</TimeCreated>
 
 <Property name="SourceTimeStamp">
 <Type>%TimeStamp</Type>
@@ -11079,8 +11198,8 @@ native list unchanged and must keep using the OPCUA.Types classes.]]></Descripti
 <class>OPCUA.Types.ArrayDataValue.Boolean</class> without a server timestamp. See
 <class>OPCUA.Types.NoServerTS.AbstractDataValue</class>.]]></Description>
 <Super>OPCUA.Types.NoServerTS.AbstractDataValue</Super>
-<TimeChanged>67864,28001.404140895</TimeChanged>
-<TimeCreated>67864,28001.404140895</TimeCreated>
+<TimeChanged>67873,33288.21116149</TimeChanged>
+<TimeCreated>67873,33288.21116149</TimeCreated>
 
 <Property name="Values">
 <Type>%Boolean</Type>
@@ -11109,8 +11228,8 @@ native list unchanged and must keep using the OPCUA.Types classes.]]></Descripti
 <class>OPCUA.Types.ArrayDataValue.Double</class> without a server timestamp. See
 <class>OPCUA.Types.NoServerTS.AbstractDataValue</class>.]]></Description>
 <Super>OPCUA.Types.NoServerTS.AbstractDataValue</Super>
-<TimeChanged>67864,28001.396352895</TimeChanged>
-<TimeCreated>67864,28001.396352895</TimeCreated>
+<TimeChanged>67873,33288.216226588</TimeChanged>
+<TimeCreated>67873,33288.216226588</TimeCreated>
 
 <Property name="Values">
 <Type>%Double</Type>
@@ -11139,8 +11258,8 @@ native list unchanged and must keep using the OPCUA.Types classes.]]></Descripti
 <class>OPCUA.Types.ArrayDataValue.Float</class> without a server timestamp. See
 <class>OPCUA.Types.NoServerTS.AbstractDataValue</class>.]]></Description>
 <Super>OPCUA.Types.NoServerTS.AbstractDataValue</Super>
-<TimeChanged>67864,28001.402290395</TimeChanged>
-<TimeCreated>67864,28001.402290395</TimeCreated>
+<TimeChanged>67873,33288.216199922</TimeChanged>
+<TimeCreated>67873,33288.216199922</TimeCreated>
 
 <Property name="Values">
 <Type>%Float</Type>
@@ -11169,8 +11288,8 @@ native list unchanged and must keep using the OPCUA.Types classes.]]></Descripti
 <class>OPCUA.Types.ArrayDataValue.Integer</class> without a server timestamp. See
 <class>OPCUA.Types.NoServerTS.AbstractDataValue</class>.]]></Description>
 <Super>OPCUA.Types.NoServerTS.AbstractDataValue</Super>
-<TimeChanged>67864,28001.402506479</TimeChanged>
-<TimeCreated>67864,28001.402506479</TimeCreated>
+<TimeChanged>67873,33288.215508675</TimeChanged>
+<TimeCreated>67873,33288.215508675</TimeCreated>
 
 <Property name="Values">
 <Type>%Integer</Type>
@@ -11199,8 +11318,8 @@ native list unchanged and must keep using the OPCUA.Types classes.]]></Descripti
 <class>OPCUA.Types.ArrayDataValue.String</class> without a server timestamp. See
 <class>OPCUA.Types.NoServerTS.AbstractDataValue</class>.]]></Description>
 <Super>OPCUA.Types.NoServerTS.AbstractDataValue</Super>
-<TimeChanged>67872,73848.32853188</TimeChanged>
-<TimeCreated>67864,28001.412547687</TimeCreated>
+<TimeChanged>67873,33288.213578185</TimeChanged>
+<TimeCreated>67873,33288.213578185</TimeCreated>
 
 <Property name="Values">
 <Type>%String</Type>
@@ -11230,8 +11349,8 @@ native list unchanged and must keep using the OPCUA.Types classes.]]></Descripti
 <class>OPCUA.Types.ArrayDataValue.TimeStamp</class> without a server timestamp. See
 <class>OPCUA.Types.NoServerTS.AbstractDataValue</class>.]]></Description>
 <Super>OPCUA.Types.NoServerTS.AbstractDataValue</Super>
-<TimeChanged>67864,28001.405479979</TimeChanged>
-<TimeCreated>67864,28001.405479979</TimeCreated>
+<TimeChanged>67873,33288.222350181</TimeChanged>
+<TimeCreated>67873,33288.222350181</TimeCreated>
 
 <Property name="Values">
 <Type>%TimeStamp</Type>
@@ -11260,8 +11379,8 @@ native list unchanged and must keep using the OPCUA.Types classes.]]></Descripti
 <class>OPCUA.Types.BooleanDataValue</class> without a server timestamp. See
 <class>OPCUA.Types.NoServerTS.AbstractDataValue</class>.]]></Description>
 <Super>OPCUA.Types.NoServerTS.AbstractDataValue</Super>
-<TimeChanged>67864,28001.378400145</TimeChanged>
-<TimeCreated>67864,28001.378400145</TimeCreated>
+<TimeChanged>67873,33288.199281386</TimeChanged>
+<TimeCreated>67873,33288.199281386</TimeCreated>
 
 <Property name="Value">
 <Type>%Boolean</Type>
@@ -11289,8 +11408,8 @@ native list unchanged and must keep using the OPCUA.Types classes.]]></Descripti
 <class>OPCUA.Types.DoubleDataValue</class> without a server timestamp. See
 <class>OPCUA.Types.NoServerTS.AbstractDataValue</class>.]]></Description>
 <Super>OPCUA.Types.NoServerTS.AbstractDataValue</Super>
-<TimeChanged>67864,28001.36441602</TimeChanged>
-<TimeCreated>67864,28001.36441602</TimeCreated>
+<TimeChanged>67873,33288.186190956</TimeChanged>
+<TimeCreated>67873,33288.186190956</TimeCreated>
 
 <Property name="Value">
 <Type>%Double</Type>
@@ -11319,8 +11438,8 @@ native list unchanged and must keep using the OPCUA.Types classes.]]></Descripti
 <class>OPCUA.Types.FloatDataValue</class> without a server timestamp. See
 <class>OPCUA.Types.NoServerTS.AbstractDataValue</class>.]]></Description>
 <Super>OPCUA.Types.NoServerTS.AbstractDataValue</Super>
-<TimeChanged>67864,28001.363850562</TimeChanged>
-<TimeCreated>67864,28001.363850562</TimeCreated>
+<TimeChanged>67873,33288.199610509</TimeChanged>
+<TimeCreated>67873,33288.199610509</TimeCreated>
 
 <Property name="Value">
 <Type>%Float</Type>
@@ -11349,8 +11468,8 @@ native list unchanged and must keep using the OPCUA.Types classes.]]></Descripti
 <class>OPCUA.Types.IntegerDataValue</class> without a server timestamp. See
 <class>OPCUA.Types.NoServerTS.AbstractDataValue</class>.]]></Description>
 <Super>OPCUA.Types.NoServerTS.AbstractDataValue</Super>
-<TimeChanged>67864,28001.37077877</TimeChanged>
-<TimeCreated>67864,28001.37077877</TimeCreated>
+<TimeChanged>67873,33288.191183887</TimeChanged>
+<TimeCreated>67873,33288.191183887</TimeCreated>
 
 <Property name="Value">
 <Type>%Integer</Type>
@@ -11379,8 +11498,8 @@ native list unchanged and must keep using the OPCUA.Types classes.]]></Descripti
 <class>OPCUA.Types.LocalizedTextDataValue</class> without a server timestamp. See
 <class>OPCUA.Types.NoServerTS.AbstractDataValue</class>.]]></Description>
 <Super>OPCUA.Types.NoServerTS.AbstractDataValue</Super>
-<TimeChanged>67872,73848.272077293</TimeChanged>
-<TimeCreated>67864,28001.384199687</TimeCreated>
+<TimeChanged>67873,33288.200038424</TimeChanged>
+<TimeCreated>67873,33288.200038424</TimeCreated>
 
 <Property name="Text">
 <Type>%String</Type>
@@ -11417,8 +11536,8 @@ native list unchanged and must keep using the OPCUA.Types classes.]]></Descripti
 <class>OPCUA.Types.Multidimensional</class> without a server timestamp. See
 <class>OPCUA.Types.NoServerTS.AbstractDataValue</class>.]]></Description>
 <Super>OPCUA.Types.NoServerTS.AbstractDataValue</Super>
-<TimeChanged>67864,28001.38921202</TimeChanged>
-<TimeCreated>67864,28001.38921202</TimeCreated>
+<TimeChanged>67873,33288.195970612</TimeChanged>
+<TimeCreated>67873,33288.195970612</TimeCreated>
 
 <Property name="Values">
 <Type>%List</Type>
@@ -11454,8 +11573,8 @@ native list unchanged and must keep using the OPCUA.Types classes.]]></Descripti
 <class>OPCUA.Types.NodeIdDataValue</class> without a server timestamp. See
 <class>OPCUA.Types.NoServerTS.AbstractDataValue</class>.]]></Description>
 <Super>OPCUA.Types.NoServerTS.AbstractDataValue</Super>
-<TimeChanged>67872,73848.278544945</TimeChanged>
-<TimeCreated>67864,28001.388036479</TimeCreated>
+<TimeChanged>67873,33288.198066101</TimeChanged>
+<TimeCreated>67873,33288.198066101</TimeCreated>
 
 <Property name="Namespace">
 <Type>%Integer</Type>
@@ -11498,8 +11617,8 @@ native list unchanged and must keep using the OPCUA.Types classes.]]></Descripti
 <class>OPCUA.Types.QualifiedNameDataValue</class> without a server timestamp. See
 <class>OPCUA.Types.NoServerTS.AbstractDataValue</class>.]]></Description>
 <Super>OPCUA.Types.NoServerTS.AbstractDataValue</Super>
-<TimeChanged>67872,73848.29094099</TimeChanged>
-<TimeCreated>67864,28001.403144687</TimeCreated>
+<TimeChanged>67873,33288.198324641</TimeChanged>
+<TimeCreated>67873,33288.198324641</TimeCreated>
 
 <Property name="Name">
 <Type>%String</Type>
@@ -11535,8 +11654,8 @@ native list unchanged and must keep using the OPCUA.Types classes.]]></Descripti
 <class>OPCUA.Types.StringDataValue</class> without a server timestamp. See
 <class>OPCUA.Types.NoServerTS.AbstractDataValue</class>.]]></Description>
 <Super>OPCUA.Types.NoServerTS.AbstractDataValue</Super>
-<TimeChanged>67872,73848.292029633</TimeChanged>
-<TimeCreated>67864,28001.392726645</TimeCreated>
+<TimeChanged>67873,33288.20894321</TimeChanged>
+<TimeCreated>67873,33288.20894321</TimeCreated>
 
 <Property name="Value">
 <Type>%String</Type>
@@ -11566,8 +11685,8 @@ native list unchanged and must keep using the OPCUA.Types classes.]]></Descripti
 <class>OPCUA.Types.TimeStampDataValue</class> without a server timestamp. See
 <class>OPCUA.Types.NoServerTS.AbstractDataValue</class>.]]></Description>
 <Super>OPCUA.Types.NoServerTS.AbstractDataValue</Super>
-<TimeChanged>67864,28001.403110562</TimeChanged>
-<TimeCreated>67864,28001.403110562</TimeCreated>
+<TimeChanged>67873,33288.214054683</TimeChanged>
+<TimeCreated>67873,33288.214054683</TimeCreated>
 
 <Property name="Value">
 <Type>%TimeStamp</Type>
@@ -11593,8 +11712,8 @@ native list unchanged and must keep using the OPCUA.Types classes.]]></Descripti
 
 <Class name="OPCUA.Types.NodeIdDataValue">
 <Super>OPCUA.Types.AbstractDataValue</Super>
-<TimeChanged>67872,73848.20598975</TimeChanged>
-<TimeCreated>67864,28001.335567354</TimeCreated>
+<TimeChanged>67873,33288.157374067</TimeChanged>
+<TimeCreated>67873,33288.157374067</TimeCreated>
 
 <Property name="Namespace">
 <Type>%Integer</Type>
@@ -11636,8 +11755,8 @@ native list unchanged and must keep using the OPCUA.Types classes.]]></Descripti
 
 
 <Class name="OPCUA.Types.PropertyClass">
-<TimeChanged>67864,28001.336325229</TimeChanged>
-<TimeCreated>67864,28001.336325229</TimeCreated>
+<TimeChanged>67873,33288.158102479</TimeChanged>
+<TimeCreated>67873,33288.158102479</TimeCreated>
 
 <UDLText name="T">
 <Content><![CDATA[
@@ -11668,8 +11787,8 @@ native list unchanged and must keep using the OPCUA.Types classes.]]></Descripti
 
 <Class name="OPCUA.Types.QualifiedNameDataValue">
 <Super>OPCUA.Types.AbstractDataValue</Super>
-<TimeChanged>67872,73848.246364855</TimeChanged>
-<TimeCreated>67864,28001.360525854</TimeCreated>
+<TimeChanged>67873,33288.165226275</TimeChanged>
+<TimeCreated>67873,33288.165226275</TimeCreated>
 
 <Property name="Name">
 <Type>%String</Type>
@@ -11705,8 +11824,8 @@ native list unchanged and must keep using the OPCUA.Types classes.]]></Descripti
 
 <Class name="OPCUA.Types.StringDataValue">
 <Super>OPCUA.Types.AbstractDataValue</Super>
-<TimeChanged>67872,73848.22067575</TimeChanged>
-<TimeCreated>67864,28001.352996687</TimeCreated>
+<TimeChanged>67873,33288.172541403</TimeChanged>
+<TimeCreated>67873,33288.172541403</TimeCreated>
 
 <Property name="Value">
 <Type>%String</Type>
@@ -11736,8 +11855,8 @@ native list unchanged and must keep using the OPCUA.Types classes.]]></Descripti
 
 <Class name="OPCUA.Types.TimeStampDataValue">
 <Super>OPCUA.Types.AbstractDataValue</Super>
-<TimeChanged>67864,28001.348345562</TimeChanged>
-<TimeCreated>67864,28001.348345562</TimeCreated>
+<TimeChanged>67873,33288.166983724</TimeChanged>
+<TimeCreated>67873,33288.166983724</TimeCreated>
 
 <Property name="Value">
 <Type>%TimeStamp</Type>
@@ -11769,8 +11888,8 @@ native list unchanged and must keep using the OPCUA.Types classes.]]></Descripti
 Miscellaneous utility functions used in conjunction with
 the OPC-UA connector.</Description>
 <IncludeCode>%callout,OPCUA.Constants,Ensemble</IncludeCode>
-<TimeChanged>67872,83467.810110687</TimeChanged>
-<TimeCreated>67864,28001.235167145</TimeCreated>
+<TimeChanged>67873,35206.382526943</TimeChanged>
+<TimeCreated>67873,33287.973055169</TimeCreated>
 
 <Method name="Initialize">
 <Description><![CDATA[
@@ -12026,12 +12145,19 @@ that contains the native code for the OPC-UA connector.]]></Description>
 Run dynamic SQL and return its result set, throwing if the statement failed.
 <tt>%ExecDirect</tt> reports a failure (a missing table, a missing SELECT
 privilege) in the result's <tt>%SQLCODE</tt> rather than by throwing, so a
-caller that only checks <tt>$IsObject</tt> reads a failed query as an empty one.]]></Description>
+caller that only checks <tt>$IsObject</tt> reads a failed query as an empty one.
+
+A missing privilege (SQLCODE -99) throws <method>OPCUA.REST.Error.Forbidden</method>,
+a readable 403, rather than an opaque 500: signing in again does not help, an
+administrator has to grant it.]]></Description>
 <ClassMethod>1</ClassMethod>
 <FormalSpec>pSQL:%String,pArgs...</FormalSpec>
 <ReturnType>%SQL.StatementResult</ReturnType>
 <Implementation><![CDATA[
 	set tRS = ##class(%SQL.Statement).%ExecDirect(, pSQL, pArgs...)
+	if tRS.%SQLCODE = -99 {
+		$$$ThrowStatus(##class(OPCUA.REST.Error).Forbidden("Your IRIS account ("_$Username_") lacks an SQL privilege this request needs: "_tRS.%Message_". Ask an administrator to grant it, or use an account with more privileges."))
+	}
 	if tRS.%SQLCODE < 0 $$$ThrowStatus($$$ERROR($$$SQLError, tRS.%SQLCODE, tRS.%Message))
 	Quit tRS
 ]]></Implementation>
