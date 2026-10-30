@@ -27,13 +27,13 @@ Method OnBeforeAllTests() As %Status
     Quit:$$$ISERR(tSC) tSC
     do ##class(Ens.Director).GetProductionStatus(.tRunning, .tState)
     set ..WasRunning = (tRunning = ..#ProductionClass) && (tState = 1)
-    do ..Cleanup()
-    Quit $$$OK
+    Quit ..Cleanup()
 }
 
+/// A cleanup that fails is reported as a failure of the suite.
 Method OnAfterAllTests() As %Status
 {
-    do ..Cleanup()
+    set tSC = ..Cleanup()
     do ##class(Ens.Director).GetProductionStatus(.tRunning, .tState)
     set tIsRunning = (tRunning = ..#ProductionClass) && (tState = 1)
     if ..WasRunning && 'tIsRunning {
@@ -41,7 +41,7 @@ Method OnAfterAllTests() As %Status
     } elseif '..WasRunning && tIsRunning {
         do ##class(Ens.Director).StopProduction(10, 1)
     }
-    Quit $$$OK
+    Quit tSC
 }
 
 Method TestDataValueRow()
@@ -130,9 +130,11 @@ ClassMethod RowCount() As %Integer
     Quit $Select(tRS.%SQLCODE'=0:0, tRS.%Next():tRS.%GetData(1), 1:0)
 }
 
-/// Remove the item (and its config row) and the schema with its rows.
-ClassMethod Cleanup()
+/// Remove the item (and its config row) and the schema with its rows. Returns
+/// the error if the item could not be removed.
+ClassMethod Cleanup() As %Status
 {
+    set tSC = $$$OK
     try {
         set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
         if $IsObject(tProd) {
@@ -149,7 +151,7 @@ ClassMethod Cleanup()
             }
         }
     } catch e {
-        write "Cleanup of ", ..#ItemName, " failed: ", e.DisplayString(), !
+        set tSC = $$$ERROR($$$GeneralError, "Cleanup of "_..#ItemName_" failed: "_e.DisplayString())
     }
     set tItemName = ..#ItemName
     &sql(DELETE FROM Ens_Util.Log WHERE ConfigName = :tItemName)
@@ -158,6 +160,7 @@ ClassMethod Cleanup()
     }
     do:##class(%Dictionary.ClassDefinition).%ExistsId(..#SchemaClass) $System.OBJ.Delete(..#SchemaClass, "-d")
     kill ^OPCUA.DataSource(..#SchemaClass)
+    Quit tSC
 }
 
 }

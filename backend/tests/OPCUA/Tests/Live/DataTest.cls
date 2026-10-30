@@ -10,8 +10,8 @@ Include (OPCUA.Constants, %occInclude, Ensemble)
 /// That server (<parameter>ServerURL</parameter>) is the only one carrying these
 /// nodes and values. It is not part of the compose setup, and from the docker
 /// stack its endpoint accepts TCP but fails the OPC UA handshake
-/// (BadConnectionClosed). When it cannot be connected to, every test reports
-/// <b>skipped</b>, never passed. The suite was written for an APPINT namespace,
+/// (BadConnectionClosed). When it cannot be reached, every test reports
+/// <b>skipped</b>, never passed. Any other connect failure fails them. The suite was written for an APPINT namespace,
 /// which the compose setup does not have either. It runs in OPCUA.
 ///
 /// Gathering starts <class>OPCUA.Tests.Production</class>. That means stopping the
@@ -49,8 +49,14 @@ Method OnBeforeAllTests() As %Status
         Quit $$$OK
     }
     set tSC = ..Reachable(..#ServerURL)
-    if $$$ISERR(tSC) {
+    if ##class(OPCUA.Tests.ServerReach).IsUnreachable(tSC) {
         set ..SkipReason = "public OPC UA server "_..#ServerURL_" unreachable: "_$System.Status.GetOneErrorText(tSC)
+        Quit $$$OK
+    }
+    // Any other connect failure (the library not loading, say) is a broken
+    // setup: it fails every test rather than skipping.
+    if $$$ISERR(tSC) {
+        set ..GatherError = "could not connect to "_..#ServerURL_": "_$System.Status.GetErrorText(tSC)
         Quit $$$OK
     }
     set tSC = ..Gather(.tId)
@@ -233,11 +239,18 @@ ClassMethod Reachable(pURL As %String) As %Status
 
 /// Run the DataTest item until it has stored a row, then put the productions
 /// back: the item disabled, and the pipeline production running again if it was.
+/// A suspended or troubled pipeline production cannot be put back as found, so
+/// gathering refuses (a failure, not a skip) and leaves it alone.
 ClassMethod Gather(Output pId As %String) As %Status
 {
     set pId = ""
     set tSC = ##class(Ens.Director).GetProductionStatus(.tRunning, .tState)
     Quit:$$$ISERR(tSC) tSC
+    // Only a running pipeline production can be stopped and put back as found.
+    // Suspended or troubled cannot be recreated, so it is left alone.
+    if (tRunning = ..#PipelineProduction) && $Case(tState, 3:1, 4:1, :0) {
+        Quit $$$ERROR($$$GeneralError, "Production '"_tRunning_"' is "_$Case(tState, 3:"suspended", :"troubled")_"; DataTest will not stop a production it cannot put back")
+    }
     set tWasPipeline = (tRunning = ..#PipelineProduction) && (tState = 1)
     if (tRunning '= "") && (tRunning '= ..#PipelineProduction) && (tRunning '= ..#Production) && $Case(tState, 1:1, 3:1, 4:1, :0) {
         Quit $$$ERROR($$$GeneralError, "Production '"_tRunning_"' is running; DataTest does not stop productions it does not own")
@@ -245,10 +258,8 @@ ClassMethod Gather(Output pId As %String) As %Status
     set tSC = $$$OK
     try {
         do ##class(OPCUA.Tests.DataTestDS).%KillExtent()
-        if (tRunning '= "") && $Case(tState, 1:1, 3:1, 4:1, :0) {
-            $$$ThrowOnError(##class(Ens.Director).StopProduction(10, 1))
-        }
-        $$$ThrowOnError(##class(Ens.Director).StartProduction(..#Production))
+        if tWasPipeline $$$ThrowOnError(##class(Ens.Director).StopProduction(10, 1))
+        if '((tRunning = ..#Production) && (tState = 1)) $$$ThrowOnError(##class(Ens.Director).StartProduction(..#Production))
         $$$ThrowOnError(##class(Ens.Director).EnableConfigItem(..#Item, 1))
         set tStart = $ZHorolog, tId = ""
         for {
@@ -268,7 +279,10 @@ ClassMethod Gather(Output pId As %String) As %Status
     do ##class(Ens.Director).EnableConfigItem(..#Item, 0)
     do ##class(Ens.Director).GetProductionStatus(.tNow, .tNowState)
     do:tNow=..#Production ##class(Ens.Director).StopProduction(10, 1)
-    do:tWasPipeline ##class(Ens.Director).StartProduction(..#PipelineProduction)
+    if tWasPipeline {
+        set tSCBack = ##class(Ens.Director).StartProduction(..#PipelineProduction)
+        if $$$ISERR(tSCBack) set tSC = $$$ADDSC(tSC, tSCBack)
+    }
     Quit tSC
 }
 

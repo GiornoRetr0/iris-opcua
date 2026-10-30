@@ -9,7 +9,7 @@ Include (OPCUA.Constants, %occInclude)
 /// scalar, array and matrix on certified-server, including the values a guess gets
 /// wrong (a Boolean, Float or Double that reads 0), and store a row of them end to
 /// end. When certified-server cannot be reached they report <b>skipped</b>, never
-/// passed. Its URL is <tt>^||OPCUA.Tests("secureUrl")</tt>, default
+/// passed; any other connect failure (certificate, credentials, library) fails. Its URL is <tt>^||OPCUA.Tests("secureUrl")</tt>, default
 /// <tt>opc.tcp://certified-server</tt>.
 Class OPCUA.Tests.Live.TypeInferenceTest Extends %UnitTest.TestCase
 {
@@ -35,9 +35,9 @@ Parameter TestPackage = "OPCUA.Tests.Tmp";
 Method TestPlc()
 {
     set pURL = ..URL()
-    set tClient = ..Connect(pURL, 0)
+    set tClient = ..Connect(pURL, 0, .tConnSC)
     if '$IsObject(tClient) {
-        do $$$AssertEquals(0, 1, "connect to "_pURL)
+        do $$$AssertFailure("connect to "_pURL_": "_$System.Status.GetErrorText(tConnSC))
         quit
     }
     set tGen = "OPCUA.DataSource.Generator"
@@ -49,10 +49,9 @@ Method TestPlc()
 Method TestCertified()
 {
     set pURL = ..SecureURL()
-    set tClient = ..Connect(pURL, 1, .tErr)
+    set tClient = ..Connect(pURL, 1, .tConnSC)
     if '$IsObject(tClient) {
-        // Not a pass: nothing was checked.
-        do $$$AssertSkipped("certified-server unreachable ("_pURL_"): "_tErr)
+        do ..NotConnected(pURL, tConnSC)
         quit
     }
     set tGen = "OPCUA.DataSource.Generator"
@@ -88,10 +87,9 @@ Method TestCertified()
 Method TestStorage()
 {
     set pURL = ..SecureURL()
-    set tClient = ..Connect(pURL, 1, .tErr)
+    set tClient = ..Connect(pURL, 1, .tConnSC)
     if '$IsObject(tClient) {
-        // Not a pass: nothing was checked.
-        do $$$AssertSkipped("certified-server unreachable ("_pURL_"): "_tErr)
+        do ..NotConnected(pURL, tConnSC)
         quit
     }
     set tClass = ..#TestPackage_".TypeStorage"
@@ -180,17 +178,30 @@ ClassMethod DropSchema(pClassName As %String) [ Private ]
     kill ^OPCUA.DataSource(pClassName)
 }
 
-/// A connected client, or "" (and the reason in <var>pErr</var>) if the
-/// connection could not be made.
-ClassMethod Connect(pURL As %String, pSecure As %Boolean, Output pErr As %String) As OPCUA.Client [ Private ]
+/// No secure session: skipped only if certified-server was not reached (nothing
+/// was checked). Anything else (bad certificate, rejected credentials, the
+/// library not loading) is a broken setup, and fails.
+Method NotConnected(pURL As %String, pSC As %Status)
 {
-    set tClient = "", pErr = ""
+    if ##class(OPCUA.Tests.ServerReach).IsUnreachable(pSC) {
+        do $$$AssertSkipped("certified-server unreachable ("_pURL_"): "_$System.Status.GetErrorText(pSC))
+    } else {
+        do $$$AssertFailure("could not connect to "_pURL_": "_$System.Status.GetErrorText(pSC))
+    }
+}
+
+/// A connected client, or "" (and why in <var>pSC</var>) if the connection could
+/// not be made. <tt>^||OPCUA.Tests("certDir")</tt> overrides the certificate
+/// directory (test-only, to show a bad certificate fails rather than skips).
+ClassMethod Connect(pURL As %String, pSecure As %Boolean, Output pSC As %Status) As OPCUA.Client [ Private ]
+{
+    set tClient = "", pSC = $$$OK
     Try {
-        do ##class(OPCUA.Utils).Initialize()
+        $$$ThrowOnError(##class(OPCUA.Utils).Initialize())
         set tClient = ##class(OPCUA.Client).%New()
         $$$ThrowOnError(tClient.Initialize())
         if pSecure {
-            set tCerts = "/usr/irissys/uac/certs/"
+            set tCerts = $Get(^||OPCUA.Tests("certDir"), "/usr/irissys/uac/certs/")
             $$$ThrowOnError(tClient.SetupClient(, $$$OpcuaMessageSecurityModeSignAndEncrypt, "urn:secuac", tCerts_"secuac.crt.der", tCerts_"secuac.key.der", tCerts_"trustdir", tCerts_"crldir"))
             $$$ThrowOnError(tClient.Connect(pURL, "user1", "password"))
         } else {
@@ -198,7 +209,7 @@ ClassMethod Connect(pURL As %String, pSecure As %Boolean, Output pErr As %String
             $$$ThrowOnError(tClient.Connect(pURL))
         }
     } Catch (e) {
-        set tClient = "", pErr = e.DisplayString()
+        set tClient = "", pSC = e.AsStatus()
     }
     quit tClient
 }

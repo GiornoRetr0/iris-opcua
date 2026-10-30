@@ -9,7 +9,13 @@ Include (OPCUA.Constants, %occInclude, Ensemble)
 /// (<method>WaitFor</method>) instead of sleeping a fixed time.
 ///
 /// What it exercises, in the order a Portal user would:
-///   1. a hand-authored schema class appears in the DataSource
+///   1. a hand-authored schema class appears in the DataSourceClass dropdown
+///   2. adding a config item + typing device nodepaths yields a running pipeline
+///   3. adding a device is a one-line setting edit with no recompile
+///   4. a device missing a column stores NULL and logs a warning naming both
+///   5. an unresolved column never stops the pipeline
+///   6. POST /deploy creates the pipeline stopped and collects nothing until started
+///   7. enabling never stops another production
 Class OPCUA.Tests.Live.PortalPipelineTest Extends %UnitTest.TestCase
 {
 
@@ -17,7 +23,7 @@ Parameter SchemaClass = "OPCUA.Tests.TmpPortalSchema";
 
 Parameter ItemName = "ZZPortalPipelineTest";
 
-/// A second schema + item, used only by TestDeployDoesNotAutostart. Separate from
+/// A second schema + item, used only by Test5DeployDoesNotAutostart. Separate from
 /// the pair above because that pipeline is deliberately left collecting by tests
 /// 2-4, and "no rows yet" can only be asserted on a table nothing else writes to.
 Parameter DeploySchemaClass = "OPCUA.Tests.TmpDeploySchema";
@@ -388,7 +394,7 @@ ClassMethod EnsureProduction() As %Status [ Private ]
     Quit tSC
 }
 
-/// An empty production for <method>TestOtherProductionNotStopped</method>.
+/// An empty production for <method>Test6OtherProductionNotStopped</method>.
 ClassMethod BuildOtherProduction() As %Status [ Private ]
 {
     #dim tSC As %Status = $$$OK
