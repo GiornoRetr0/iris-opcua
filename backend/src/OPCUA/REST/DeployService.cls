@@ -253,11 +253,16 @@ ClassMethod AddServiceItem(pBody As %DynamicObject, pDSClassName As %String, pDS
 		if tSecMode '= 3 set tSecMode = 1
 		if tSecMode = 3 {
 			do ..AddSetting(tItem, "Adapter", "SecurityMode", 3)
-			do ..AddSettingIfNotEmpty(tItem, "Adapter", pBody, "clientURI", "ClientURI")
-			do ..AddSettingIfNotEmpty(tItem, "Adapter", pBody, "certPath", "PublicCertificate")
-			do ..AddSettingIfNotEmpty(tItem, "Adapter", pBody, "keyPath", "PrivateKey")
-			do ..AddSettingIfNotEmpty(tItem, "Adapter", pBody, "trustDir", "TrustListDir")
-			do ..AddSettingIfNotEmpty(tItem, "Adapter", pBody, "crlDir", "RevocationListDir")
+			// Managed (no certificate or key path): the mode alone. The identity and
+			// the server's pin are resolved at connect time, so nothing here may name
+			// a file or a URI that would turn the pipeline into a manual one.
+			if '##class(OPCUA.Security.Connection).IsManaged(3, pBody.%Get("certPath"), pBody.%Get("keyPath")) {
+				do ..AddSettingIfNotEmpty(tItem, "Adapter", pBody, "clientURI", "ClientURI")
+				do ..AddSettingIfNotEmpty(tItem, "Adapter", pBody, "certPath", "PublicCertificate")
+				do ..AddSettingIfNotEmpty(tItem, "Adapter", pBody, "keyPath", "PrivateKey")
+				do ..AddSettingIfNotEmpty(tItem, "Adapter", pBody, "trustDir", "TrustListDir")
+				do ..AddSettingIfNotEmpty(tItem, "Adapter", pBody, "crlDir", "RevocationListDir")
+			}
 		}
 
 		// Credentials: an existing entry by ID, or a username (and password)

@@ -94,6 +94,16 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/credentials" Method="GET" Call="CredentialsList" />
   <Route Url="/credentials" Method="POST" Call="CredentialsCreate" />
   <Route Url="/credentials/:id" Method="PUT" Call="CredentialsUpdate" />
+  <Route Url="/security/identity" Method="GET" Call="SecurityIdentity" />
+  <Route Url="/security/identity" Method="POST" Call="SecurityIdentityCreate" />
+  <Route Url="/security/identity/import" Method="POST" Call="SecurityIdentityImport" />
+  <Route Url="/security/identity/files" Method="POST" Call="SecurityIdentityFiles" />
+  <Route Url="/security/identity/certificate" Method="GET" Call="SecurityCertificate" />
+  <Route Url="/security/servers" Method="GET" Call="SecurityServers" />
+  <Route Url="/security/servers/inspect" Method="POST" Call="SecurityServerInspect" />
+  <Route Url="/security/servers/trust" Method="POST" Call="SecurityServerTrust" />
+  <Route Url="/security/servers/issuer" Method="POST" Call="SecurityServerIssuer" />
+  <Route Url="/security/servers/:key" Method="DELETE" Call="SecurityServerRemove" />
 </Routes>
 }
 
@@ -357,6 +367,148 @@ ClassMethod CredentialsUpdate(pId As %String) As %Status
 	Quit ..Respond(tSC, $Get(tResult))
 }
 
+/// The IRIS client identity (needs %Admin_Secure:USE).
+ClassMethod SecurityIdentity() As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ##class(OPCUA.REST.SecurityService).Identity(.tResult)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit ..Respond(tSC, $Get(tResult))
+}
+
+/// Create the IRIS client identity.
+ClassMethod SecurityIdentityCreate() As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+		set tSC = ##class(OPCUA.REST.SecurityService).CreateIdentity(tBody, .tResult)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit ..Respond(tSC, $Get(tResult))
+}
+
+/// Import a certificate and key, or a PKCS#12 file, as the IRIS client identity.
+ClassMethod SecurityIdentityImport() As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+		set tSC = ##class(OPCUA.REST.SecurityService).ImportIdentity(tBody, .tResult)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit ..Respond(tSC, $Get(tResult))
+}
+
+/// Reference existing certificate and key files as the IRIS client identity.
+ClassMethod SecurityIdentityFiles() As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+		set tSC = ##class(OPCUA.REST.SecurityService).UseFiles(tBody, .tResult)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit ..Respond(tSC, $Get(tResult))
+}
+
+/// Download the public client certificate (DER or PEM) as a file: raw bytes with a
+/// Content-Disposition header on success, the usual JSON envelope on error.
+ClassMethod SecurityCertificate() As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+		set tSC = ##class(OPCUA.REST.SecurityService).Certificate(tBody.%Get("format"), .tData, .tName, .tType)
+		Quit:$$$ISERR(tSC)
+		set %response.ContentType = tType
+		set %response.CharSet = ""
+		do %response.SetHeader("Content-Disposition", "attachment; filename="""_tName_"""")
+		write tData
+		Quit
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit:$$$ISOK(tSC) $$$OK
+	Quit ..Respond(tSC)
+}
+
+/// The trusted OPC UA servers.
+ClassMethod SecurityServers() As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ##class(OPCUA.REST.SecurityService).Servers(.tResult)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit ..Respond(tSC, $Get(tResult))
+}
+
+/// Fetch and describe the certificate a server presents.
+ClassMethod SecurityServerInspect() As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+		set tSC = ##class(OPCUA.REST.SecurityService).Inspect(tBody, .tResult)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit ..Respond(tSC, $Get(tResult))
+}
+
+/// Trust the server certificate the user reviewed.
+ClassMethod SecurityServerTrust() As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+		set tSC = ##class(OPCUA.REST.SecurityService).Trust(tBody, .tResult)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit ..Respond(tSC, $Get(tResult))
+}
+
+/// Add the CA certificate and revocation list of a CA-signed server.
+ClassMethod SecurityServerIssuer() As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+		set tSC = ##class(OPCUA.REST.SecurityService).Issuer(tBody, .tResult)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit ..Respond(tSC, $Get(tResult))
+}
+
+/// Stop trusting a server and delete its files.
+ClassMethod SecurityServerRemove(pKey As %String) As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ##class(OPCUA.REST.SecurityService).RemoveServer($ZConvert(pKey, "I", "URL"), .tResult)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit ..Respond(tSC, $Get(tResult))
+}
+
 /// Build a %DynamicObject from either JSON body or query parameters.
 /// Tries body first; if empty, reads query params into a JSON object.
 ClassMethod GetRequestParams(Output pBody As %DynamicObject) As %Status [ Private ]
@@ -453,9 +605,17 @@ ClassMethod LogInternal(pText As %String) [ Private ]
 	do ##class(Ens.Util.Log).LogError($ClassName(), "Respond", $Extract(tText, 1, 32000))
 }
 
+/// Whether a request field of this name holds a secret: a password, or the private
+/// key or PKCS#12 bytes of an identity import.
+ClassMethod IsSecretName(pName As %String) As %Boolean [ Private ]
+{
+	set tName = $ZConvert(pName, "L")
+	Quit (tName [ "password") || (tName = "key") || (tName = "pkcs12")
+}
+
 /// The non-empty values of every request field whose name contains "password",
 /// in the JSON body (at any depth) or the query string, as <var>pSecrets</var>(value).
-ClassMethod RequestSecrets(Output pSecrets) [ Private ]
+ClassMethod RequestSecrets(Output pSecrets) [ Internal ]
 {
 	kill pSecrets
 	Quit:'$IsObject($Get(%request))
@@ -464,7 +624,7 @@ ClassMethod RequestSecrets(Output pSecrets) [ Private ]
 		set tName = $Order(%request.Data(tName))
 		Quit:tName=""
 		set tValue = $Get(%request.Data(tName, 1))
-		set:($ZConvert(tName, "L") [ "password")&&(tValue'="") pSecrets(tValue) = ""
+		set:..IsSecretName(tName)&&(tValue'="") pSecrets(tValue) = ""
 	}
 	set tContent = %request.Content
 	Quit:tContent=""
@@ -480,7 +640,7 @@ ClassMethod CollectSecrets(pNode, ByRef pSecrets) [ Private ]
 	while tIter.%GetNext(.tKey, .tValue) {
 		if $IsObject(tValue) {
 			do ..CollectSecrets(tValue, .pSecrets)
-		} elseif ($ZConvert(tKey, "L") [ "password") && (tValue '= "") {
+		} elseif ..IsSecretName(tKey) && (tValue '= "") {
 			set pSecrets(tValue) = ""
 		}
 	}
@@ -505,6 +665,7 @@ ClassMethod SendError(pHttp As %Integer, pMessage As %String, pRef As %String = 
 		401: ..#HTTP401UNAUTHORIZED,
 		403: ..#HTTP403FORBIDDEN,
 		404: ..#HTTP404NOTFOUND,
+		502: "502 Bad Gateway",
 		409: ..#HTTP409CONFLICT,
 		: ..#HTTP500INTERNALSERVERERROR)
 	set tResponse = {}
