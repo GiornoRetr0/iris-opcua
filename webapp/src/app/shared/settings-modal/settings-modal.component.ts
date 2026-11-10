@@ -6,7 +6,8 @@ import { firstValueFrom } from 'rxjs';
 import { ApiService, apiErrorMessage, InlineLogin, NOT_SIGNED_IN } from '../../core/services/api.service';
 import { AuthService } from '../../core/services/auth.service';
 import { SecurityTabComponent } from './security-tab/security-tab.component';
-import { CredentialsEntry, ServerProfile } from '../../core/models/opcua.models';
+import { ServerSecurityComponent } from './server-security/server-security.component';
+import { ConnectionTestResult, CredentialsEntry, isManaged, ServerProfile } from '../../core/models/opcua.models';
 
 /**
  * A credentials entry being created or changed for one server, saved to IRIS when
@@ -26,7 +27,7 @@ const NEW_CREDENTIALS = ' new';
 @Component({
   selector: 'app-settings-modal',
   standalone: true,
-  imports: [CommonModule, FormsModule, SecurityTabComponent],
+  imports: [CommonModule, FormsModule, SecurityTabComponent, ServerSecurityComponent],
   template: `
     <!-- Modal Overlay -->
     <div class="fixed inset-0 z-[100] flex items-center justify-center bg-[#2e3132]/40 backdrop-blur-sm p-4"
@@ -188,8 +189,8 @@ const NEW_CREDENTIALS = ' new';
                     </select>
                     <p class="text-[11px] text-on-surface-muted mt-1">
                       @if (editingServer()!.securityMode === 3) {
-                        Policy <code class="font-mono">Basic256Sha256</code>. Needs a client
-                        certificate, key and trust list below.
+                        Policy <code class="font-mono">Basic256Sha256</code>. Sign &amp; Encrypt uses this
+                        IRIS instance's client identity.
                       } @else {
                         No message security — traffic is unencrypted and unsigned.
                       }
@@ -271,41 +272,10 @@ const NEW_CREDENTIALS = ' new';
                 </div>
               </section>
 
-              <!-- Certificates (if Sign & Encrypt) -->
+              <!-- Sign & Encrypt readiness (managed), or the manual certificate files -->
               @if (editingServer()!.securityMode === 3) {
-                <section>
-                  <header class="mb-4 flex items-center gap-2">
-                    <span class="w-1 h-5 bg-tertiary rounded-full"></span>
-                    <h3 class="text-xs font-bold uppercase tracking-widest text-on-surface-variant">Certificate Configuration</h3>
-                  </header>
-                  <div class="grid grid-cols-1 gap-6">
-                    <div>
-                      <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Client URI (must match certificate)</label>
-                      <input type="text" [(ngModel)]="editingServer()!.clientURI" placeholder="urn:secuac"
-                             class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
-                    </div>
-                    <div>
-                      <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Client Certificate (DER path on IRIS server)</label>
-                      <input type="text" [(ngModel)]="editingServer()!.certPath" placeholder="/usr/irissys/uac/certs/secuac.crt.der"
-                             class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
-                    </div>
-                    <div>
-                      <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Private Key (DER path on IRIS server)</label>
-                      <input type="text" [(ngModel)]="editingServer()!.keyPath" placeholder="/usr/irissys/uac/certs/secuac.key.der"
-                             class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
-                    </div>
-                    <div>
-                      <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Trust List Directory</label>
-                      <input type="text" [(ngModel)]="editingServer()!.trustDir" placeholder="/usr/irissys/uac/certs/trustdir/"
-                             class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
-                    </div>
-                    <div>
-                      <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Revocation List Directory</label>
-                      <input type="text" [(ngModel)]="editingServer()!.crlDir" placeholder="/usr/irissys/uac/certs/crldir/"
-                             class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
-                    </div>
-                  </div>
-                </section>
+                <app-server-security [server]="editingServer()!" [testResult]="lastTest()"
+                                     (setupIdentity)="openSecurity(editingServer()!.id)" />
               }
 
               @if (activeTab() === 'servers' && !editingServer()) {
@@ -507,6 +477,8 @@ export class SettingsModalComponent implements OnInit {
     else this.activeTab.set('servers');
   }
   testing = signal(false);
+  /** The last test result for the server being edited; cleared when another is selected. */
+  lastTest = signal<ConnectionTestResult | null>(null);
   testStatus = signal('');
   /** Rendered at the Save button — the control the user just pressed. */
   saveError = signal('');
@@ -665,6 +637,7 @@ export class SettingsModalComponent implements OnInit {
    * tab out from under someone editing the gateway would be the surprise.
    */
   selectServer(server: ServerProfile, switchTab = true): void {
+    if (this.selectedServerId() !== server.id) this.lastTest.set(null);
     this.selectedServerId.set(server.id);
     // Find mutable reference from our servers list
     const found = this.servers().find(s => s.id === server.id);
@@ -725,13 +698,14 @@ export class SettingsModalComponent implements OnInit {
     this.api.test(target, login).subscribe({
       next: (result) => {
         this.testing.set(false);
+        this.lastTest.set(isManaged(target) ? result : null);
         if (result.connected) {
           this.testFailed.set(false);
-          this.testStatus.set(`Connected (${result.responseTimeMs}ms)`);
+          this.testStatus.set(isManaged(target) ? 'Connected · Sign & Encrypt' : `Connected (${result.responseTimeMs}ms)`);
           this.serverStatuses.update(s => ({ ...s, [server.id]: 'online' }));
         } else {
           this.testFailed.set(true);
-          this.testStatus.set(result.error || 'Connection failed');
+          this.testStatus.set(result.security?.diagnosis?.message || result.error || 'Connection failed');
           this.serverStatuses.update(s => ({ ...s, [server.id]: 'offline' }));
         }
       },
@@ -860,14 +834,13 @@ export class SettingsModalComponent implements OnInit {
     setTimeout(() => this.closed.emit(), 500);
   }
 
-  onSecurityModeChange(mode: number): void {
-    const server = this.editingServer();
-    if (!server || mode !== 3) return;
-    if (!server.clientURI) server.clientURI = 'urn:secuac';
-    if (!server.certPath) server.certPath = '/usr/irissys/uac/certs/secuac.crt.der';
-    if (!server.keyPath) server.keyPath = '/usr/irissys/uac/certs/secuac.key.der';
-    if (!server.trustDir) server.trustDir = '/usr/irissys/uac/certs/trustdir/';
-    if (!server.crlDir) server.crlDir = '/usr/irissys/uac/certs/crldir/';
+  /**
+   * A new Sign & Encrypt profile is managed: no certificate paths are filled in, so
+   * IRIS uses its own client identity. The old per-profile defaults are gone on purpose.
+   */
+  onSecurityModeChange(_mode: number): void {
+    this.lastTest.set(null);
+    this.testStatus.set('');
   }
 
   onOverlayClick(event: MouseEvent): void {

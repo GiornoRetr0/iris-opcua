@@ -72,7 +72,7 @@ import { CommonModule } from '@angular/common';
 3. Give it a display name and a URL
    e.g. <span class="text-green-400">opc.tcp://your-server:4840</span>
 4. Choose Security Mode (None or Sign &amp; Encrypt)
-   Sign &amp; Encrypt reveals the certificate fields below it
+   Sign &amp; Encrypt shows a readiness checklist below it
 5. Under <span class="text-blue-400">Credentials</span>, keep Anonymous, pick an IRIS
    credentials entry, or choose <span class="text-blue-400">New credentials…</span>
 6. Click <span class="text-blue-400">Test Connection</span> to verify
@@ -90,6 +90,34 @@ import { CommonModule } from '@angular/common';
                 pipeline you deploy for a server uses the same entry. The
                 <strong class="font-semibold">IRIS API Gateway</strong> tab holds the REST endpoint
                 this console talks to — separate from the OPC UA servers it collects from.
+              </p>
+            </div>
+
+            <!-- Sign & Encrypt -->
+            <h3 id="sign-encrypt" class="text-lg font-bold text-on-surface mb-4">Setting up Sign &amp; Encrypt</h3>
+            <ol class="list-decimal pl-6 mb-4 space-y-2 text-sm text-on-surface-variant leading-relaxed">
+              <li><strong class="font-semibold text-on-surface">Create the IRIS client identity.</strong>
+                Open the <strong class="font-semibold">OPC UA Security</strong> tab and create a certificate,
+                or use an existing one. It belongs to this IRIS instance and every Sign &amp; Encrypt
+                connection shares it. Its private key stays on IRIS.</li>
+              <li><strong class="font-semibold text-on-surface">Review and trust the server.</strong>
+                In the server's settings choose <strong class="font-semibold">Review certificate</strong>,
+                compare the fingerprint with the one the server's administrator gives you, then
+                <strong class="font-semibold">Trust this server</strong>. If the server's certificate
+                changes later, you must approve the replacement; IRIS never trusts a server silently.</li>
+              <li><strong class="font-semibold text-on-surface">Ask the server's administrator to approve IRIS's certificate.</strong>
+                Use <strong class="font-semibold">Download IRIS certificate</strong> and hand it over.
+                Often this means moving it from the server's rejected to its trusted certificates.</li>
+              <li><strong class="font-semibold text-on-surface">Test the connection.</strong>
+                The result says whether the server has approved IRIS yet.</li>
+            </ol>
+            <div class="flex items-start gap-3 mb-8 rounded-xl border border-outline-variant/20 bg-surface-container-low px-4 py-3">
+              <span class="material-symbols-outlined text-on-surface-variant text-xl shrink-0">info</span>
+              <p class="text-sm text-on-surface-variant leading-relaxed">
+                IRIS cannot make a server trust it. Step 3 happens on the server, by its administrator,
+                and until it is done the connection is refused. The console never falls back to an
+                unsecured connection. Profiles that already list certificate files keep working
+                unchanged under <strong class="font-semibold">Advanced</strong>.
               </p>
             </div>
 
@@ -124,12 +152,12 @@ import { CommonModule } from '@angular/common';
                     </td>
                   </tr>
                   <tr class="border-b border-outline-variant/10">
-                    <td class="py-4 font-mono text-primary font-semibold">Certificates</td>
+                    <td class="py-4 font-mono text-primary font-semibold">Sign &amp; Encrypt</td>
                     <td class="py-4"><span class="px-2 py-0.5 bg-surface-container rounded text-[10px] font-bold">IF SECURE</span></td>
                     <td class="py-4 text-on-surface-variant">
-                      Client certificate, private key, trust list, CRL directory and client URI.
-                      Shown only for Sign &amp; Encrypt; the URI must match the certificate's
-                      subjectAltName or the handshake fails
+                      IRIS uses one client identity for all servers; there are no certificate paths
+                      to type. Follow the steps in
+                      <a href="#sign-encrypt" class="text-primary font-semibold">Setting up Sign &amp; Encrypt</a>
                     </td>
                   </tr>
                   <tr class="border-b border-outline-variant/10">

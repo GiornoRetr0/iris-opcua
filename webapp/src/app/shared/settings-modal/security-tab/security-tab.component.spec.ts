@@ -227,4 +227,41 @@ describe('SecurityTabComponent', () => {
     expect(c.heldUpload()).toBe('');
     expect(el().innerHTML).not.toContain('s3cret');
   });
+
+  it('clears the file inputs in place after an import, without re-creating them', async () => {
+    await create({ configured: false, ready: false, errors: [], warnings: [] });
+    button('Use existing certificate')!.click();
+    fixture.detectChanges();
+    api.importIdentity.and.returnValue(throwError(() => new HttpErrorResponse({ status: 400, error: { status: 'error', error: 'Key does not match' } })));
+    const c = fixture.componentInstance;
+    const inputs = Array.from(el().querySelectorAll('input[type=file]')) as HTMLInputElement[];
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array([1])], 'c.der'));
+    inputs[0].files = dt.files;
+    expect(inputs[0].value).not.toBe('');
+    await pickPair(c);
+    c.submitImport();
+    fixture.detectChanges();
+    const after = Array.from(el().querySelectorAll('input[type=file]')) as HTMLInputElement[];
+    expect(after[0]).toBe(inputs[0]);
+    expect(inputs[0].value).toBe('');
+  });
+
+  it('scrubs the picked key and password when the replace confirmation is dismissed', async () => {
+    await create(configured());
+    openReplace();
+    button('Use existing certificate')!.click();
+    fixture.detectChanges();
+    const c = fixture.componentInstance;
+    await pickPair(c);
+    c.pfxPassword.set('s3cret');
+    c.submitImport();
+    fixture.detectChanges();
+    expect(c.heldUpload()).toContain('ABCD');
+    const cancel = Array.from(el().querySelector('app-confirm-dialog')!.querySelectorAll('button')).find((b) => /cancel/i.test(b.textContent!)) as HTMLButtonElement;
+    cancel.click();
+    fixture.detectChanges();
+    expect(api.importIdentity).not.toHaveBeenCalled();
+    expect(c.heldUpload()).toBe('');
+  });
 });

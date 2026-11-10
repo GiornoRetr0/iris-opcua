@@ -1,4 +1,4 @@
-import { Component, computed, inject, input, OnInit, output, signal } from '@angular/core';
+import { Component, computed, ElementRef, inject, input, OnInit, output, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
@@ -6,6 +6,7 @@ import { ApiService, apiErrorMessage } from '../../../core/services/api.service'
 import { ConfigService } from '../../../core/services/config.service';
 import { IdentityStatus, TrustedServer } from '../../../core/models/opcua.models';
 import { bytesToHex } from '../../../core/util/hex';
+import { saveBlob } from '../../../core/util/download';
 import { ConfirmDialogComponent } from '../../confirm-dialog/confirm-dialog.component';
 
 type Slot = 'cert' | 'key' | 'pfx';
@@ -185,8 +186,6 @@ const labelCls = 'block text-[10px] font-bold text-on-surface-variant uppercase 
             This sends the private key over an unencrypted connection. Prefer “Use files already on IRIS” under Advanced.
           </p>
         }
-        <!-- Re-created after each import so the browser drops the chosen files. -->
-        @for (k of [formKey()]; track k) {
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label [class]="labelCls" for="sec-cert">Certificate (.der)</label>
@@ -206,7 +205,6 @@ const labelCls = 'block text-[10px] font-bold text-on-surface-variant uppercase 
                      [ngModel]="pfxPassword()" (ngModelChange)="pfxPassword.set($event)">
             </div>
           </div>
-        }
         <button type="button" (click)="submitImport()" [disabled]="!canImport() || busy()"
                 class="px-4 py-2 bg-primary text-on-primary text-sm font-semibold rounded-lg disabled:opacity-50">Validate and use</button>
       </div>
@@ -218,13 +216,14 @@ const labelCls = 'block text-[10px] font-bold text-on-surface-variant uppercase 
         [detail]="replaceDetail()"
         confirmLabel="Replace"
         (confirmed)="confirmReplace()"
-        (cancelled)="pending.set(null)" />
+        (cancelled)="dismissReplace()" />
     }
   `,
 })
 export class SecurityTabComponent implements OnInit {
   private api = inject(ApiService);
   private config = inject(ConfigService);
+  private host = inject<ElementRef<HTMLElement>>(ElementRef);
 
   /** Name of the server profile to go back to, when Security was opened from it. */
   returnTo = input('');
@@ -248,7 +247,6 @@ export class SecurityTabComponent implements OnInit {
   certPath = signal('');
   keyPath = signal('');
   pfxPassword = signal('');
-  formKey = signal(0);
   /** The Replace dialog's action, or null while it is closed. */
   pending = signal<(() => void) | null>(null);
 
@@ -389,14 +387,26 @@ export class SecurityTabComponent implements OnInit {
     });
   }
 
-  askReplace(action: () => void): void {
+  /** What to do if the confirmation is dismissed, e.g. drop an upload held for it. */
+  private onDismiss: (() => void) | null = null;
+
+  askReplace(action: () => void, onDismiss: (() => void) | null = null): void {
+    this.onDismiss = onDismiss;
     this.pending.set(action);
   }
 
   confirmReplace(): void {
     const action = this.pending();
     this.pending.set(null);
+    this.onDismiss = null;
     action?.();
+  }
+
+  dismissReplace(): void {
+    this.pending.set(null);
+    const undo = this.onDismiss;
+    this.onDismiss = null;
+    undo?.();
   }
 
   onFile(slot: Slot, ev: Event): Promise<void> {
@@ -415,11 +425,12 @@ export class SecurityTabComponent implements OnInit {
   private scrub(): void {
     this.picked.set({ cert: '', key: '', pfx: '' });
     this.pfxPassword.set('');
-    this.formKey.update((k) => k + 1);
+    // Cleared in place: a file input cannot be assigned a value, but '' empties it.
+    this.host.nativeElement.querySelectorAll<HTMLInputElement>('input[type=file]').forEach((i) => (i.value = ''));
   }
 
   submitImport(): void {
-    if (this.status()?.configured) this.askReplace(() => void this.importPair());
+    if (this.status()?.configured) this.askReplace(() => void this.importPair(), () => this.scrub());
     else void this.importPair();
   }
 
@@ -456,12 +467,7 @@ export class SecurityTabComponent implements OnInit {
     this.error.set('');
     this.api.downloadClientCertificate(format).subscribe({
       next: (blob) => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `iris-opcua-client.${format}`;
-        a.click();
-        URL.revokeObjectURL(url);
+        saveBlob(blob, `iris-opcua-client.${format}`);
       },
       error: (err) => this.error.set(apiErrorMessage(err, 'Download failed')),
     });
