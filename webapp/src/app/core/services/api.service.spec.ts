@@ -326,3 +326,28 @@ describe('ApiService managed security', () => {
     expect(del.request.url).toBe('/api/security/servers/opc.tcp%3A%2F%2Fs%3A4840');
   });
 });
+
+describe('ApiService.downloadClientCertificate errors', () => {
+  it('surfaces the envelope message of a failed blob download', (done) => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: ConfigService, useValue: { get: () => ({ apiBaseUrl: 'http://x/api' }) } },
+        authStub(),
+      ],
+    });
+    const http = TestBed.inject(HttpTestingController);
+    TestBed.inject(ApiService).downloadClientCertificate('pem').subscribe({
+      error: (err) => {
+        expect(apiErrorMessage(err)).toBe('Needs %Admin_Secure');
+        expect(err.status).toBe(403);
+        done();
+      },
+    });
+    http.expectOne((r) => r.url.includes('/security/identity/certificate')).flush(
+      new Blob([JSON.stringify({ status: 'error', error: 'Needs %Admin_Secure' })], { type: 'application/json' }),
+      { status: 403, statusText: 'Forbidden' }
+    );
+  });
+});

@@ -1,10 +1,11 @@
-import { Component, inject, signal, output, input, OnInit } from '@angular/core';
+import { Component, computed, inject, signal, output, input, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ConfigService } from '../../core/services/config.service';
 import { firstValueFrom } from 'rxjs';
 import { ApiService, apiErrorMessage, InlineLogin, NOT_SIGNED_IN } from '../../core/services/api.service';
 import { AuthService } from '../../core/services/auth.service';
+import { SecurityTabComponent } from './security-tab/security-tab.component';
 import { CredentialsEntry, ServerProfile } from '../../core/models/opcua.models';
 
 /**
@@ -25,7 +26,7 @@ const NEW_CREDENTIALS = ' new';
 @Component({
   selector: 'app-settings-modal',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, SecurityTabComponent],
   template: `
     <!-- Modal Overlay -->
     <div class="fixed inset-0 z-[100] flex items-center justify-center bg-[#2e3132]/40 backdrop-blur-sm p-4"
@@ -58,6 +59,12 @@ const NEW_CREDENTIALS = ' new';
                  [class]="activeTab() === 'servers' ? 'bg-primary/10 text-primary font-semibold' : 'text-on-surface-variant hover:bg-surface-variant/50'">
               <span class="material-symbols-outlined text-xl">dns</span>
               <span class="text-sm">OPC UA Servers</span>
+            </div>
+            <div (click)="activeTab.set('security')" (keydown.enter)="activeTab.set('security')" role="button" tabindex="0"
+                 class="flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors"
+                 [class]="activeTab() === 'security' ? 'bg-primary/10 text-primary font-semibold' : 'text-on-surface-variant hover:bg-surface-variant/50'">
+              <span class="material-symbols-outlined text-xl">verified_user</span>
+              <span class="text-sm">OPC UA Security</span>
             </div>
             <div (click)="activeTab.set('gateway')"
                  class="flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors"
@@ -138,10 +145,10 @@ const NEW_CREDENTIALS = ' new';
           <div class="px-8 py-6 border-b border-outline-variant/10 flex justify-between items-center bg-surface-container-lowest sticky top-0 z-10">
             <div>
               <h1 class="text-xl font-semibold text-on-surface">
-                {{ activeTab() === 'servers' ? (editingServer() ? editingServer()!.name || 'New Server' : 'OPC UA Servers') : 'IRIS API Gateway' }}
+                {{ activeTab() === 'servers' ? (editingServer() ? editingServer()!.name || 'New Server' : 'OPC UA Servers') : activeTab() === 'security' ? 'OPC UA Security' : 'IRIS API Gateway' }}
               </h1>
               <p class="text-sm text-on-surface-variant">
-                {{ activeTab() === 'servers' ? 'Configure OPC UA server connections' : 'Configure IRIS API endpoint' }}
+                {{ activeTab() === 'servers' ? 'Configure OPC UA server connections' : activeTab() === 'security' ? 'The certificate IRIS presents to OPC UA servers' : 'Configure IRIS API endpoint' }}
               </p>
             </div>
             <button class="text-on-surface-variant hover:bg-surface-variant p-2 rounded-full transition-colors"
@@ -321,6 +328,11 @@ const NEW_CREDENTIALS = ' new';
               </div>
             }
 
+            <!-- Security tab -->
+            @if (activeTab() === 'security') {
+              <app-security-tab [returnTo]="returnToName()" (returned)="returnToServer()" />
+            }
+
             <!-- Gateway tab -->
             @if (activeTab() === 'gateway') {
               <section>
@@ -471,13 +483,29 @@ export class SettingsModalComponent implements OnInit {
   private api = inject(ApiService);
 
   closed = output<void>();
-  initialTab = input<'servers' | 'gateway'>('servers');
+  initialTab = input<'servers' | 'security' | 'gateway'>('servers');
   /** Why Settings opened by itself, e.g. "Sign-in failed" after a 401. */
   notice = input('');
 
   readonly hosted = this.configService.hosted;
 
-  activeTab = signal<'servers' | 'gateway'>('servers');
+  activeTab = signal<'servers' | 'security' | 'gateway'>('servers');
+  /** Server whose form sent the user to the Security tab, for the "Return to" link. */
+  returnTo = signal<string | null>(null);
+  returnToName = computed(() => this.servers().find((x) => x.id === this.returnTo())?.name ?? '');
+
+  /** Opens the Security tab on behalf of a server form. */
+  openSecurity(serverId: string): void {
+    this.returnTo.set(serverId);
+    this.activeTab.set('security');
+  }
+
+  returnToServer(): void {
+    const server = this.servers().find((x) => x.id === this.returnTo());
+    this.returnTo.set(null);
+    if (server) this.selectServer(server);
+    else this.activeTab.set('servers');
+  }
   testing = signal(false);
   testStatus = signal('');
   /** Rendered at the Save button — the control the user just pressed. */

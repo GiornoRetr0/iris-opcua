@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
-import { Observable, map, timeout, catchError, throwError } from 'rxjs';
+import { Observable, map, timeout, catchError, throwError, from } from 'rxjs';
 import { ConfigService } from './config.service';
 import { AuthService } from './auth.service';
 import {
@@ -284,7 +284,25 @@ export class ApiService {
   downloadClientCertificate(format: 'der' | 'pem'): Observable<Blob> {
     return this.http
       .get(`${this.baseUrl}/security/identity/certificate`, { params: { format }, responseType: 'blob' })
-      .pipe(timeout(15000), catchError((err) => this.fail(err)));
+      .pipe(
+        timeout(15000),
+        // A blob request leaves an error body as a Blob: read it back into the usual
+        // envelope so apiErrorMessage shows the server's own message.
+        catchError((err) => from(this.readBlobError(err))),
+        catchError((err) => this.fail(err))
+      );
+  }
+
+  private async readBlobError(err: any): Promise<never> {
+    if (err instanceof HttpErrorResponse && err.error instanceof Blob) {
+      let body: unknown = null;
+      try {
+        const text = await err.error.text();
+        try { body = JSON.parse(text); } catch { body = text; }
+      } catch { /* unreadable body: keep none */ }
+      throw new HttpErrorResponse({ status: err.status, statusText: err.statusText, url: err.url ?? undefined, headers: err.headers, error: body });
+    }
+    throw err;
   }
 
   listTrustedServers(): Observable<TrustedServer[]> {
