@@ -8,7 +8,9 @@ Include %occInclude
 /// <tt>message</tt> and step-specific fields, and never throws. Arguments arrive as
 /// SQL parameters and are validated here; nothing is ever evaluated as code.
 /// Inspection procedures change nothing. Mutating procedures refuse to run without
-/// the installer privileges, and never modify a resource this class did not create.
+/// the installer privileges, and never modify a resource this class did not create. The one
+/// exception is a native file the user confirmed replacing (<method>CommitFile</method>), which is
+/// kept as a backup rather than deleted.
 ///
 /// Console files are written only into the directory <method>PrepareUi</method> claimed, and
 /// pruning only ever deletes inside it.
@@ -149,8 +151,13 @@ ClassMethod StageChunk(pName As %String, pB64 As %String(MAXLEN=""), pFirst As %
 }
 
 /// Verify the staged file against <var>pSha</var> and move it into place.
-/// An identical existing file is reused; a different existing file is never overwritten.
-ClassMethod CommitFile(pName As %String, pSha As %String) As %String(MAXLEN="") [ SqlProc ]
+/// An identical existing file is reused. A different existing file is replaced only when
+/// <var>pReplaceSha</var> is its exact SHA-256 (the copy the user confirmed replacing, so a file that
+/// changed since is still refused), and never for a crypto library. The old file is renamed to
+/// <tt>name.&lt;sha12&gt;.old</tt> beside it rather than deleted: renaming works even while IRIS has the
+/// library loaded (on Windows too), and the backup restores the previous version by hand.
+/// Processes that already loaded the old library keep using it until they restart.
+ClassMethod CommitFile(pName As %String, pSha As %String, pReplaceSha As %String = "") As %String(MAXLEN="") [ SqlProc ]
 {
 	Set r = ..Result("commit")
 	Try {
@@ -166,16 +173,35 @@ ClassMethod CommitFile(pName As %String, pSha As %String) As %String(MAXLEN="") 
 			Set r.message = "Upload of "_pName_" is corrupt (SHA-256 "_got_", expected "_pSha_"). Retry the installation."
 			Quit
 		}
+		Set backup = ""
 		If ##class(%File).Exists(final) {
-			Do ##class(%File).Delete(staged)
-			If ..FileSha(final) = pSha { Set r.action = "reuse" Do r.%Set("ok", 1, "boolean") Quit }
-			Set r.action = "conflict"
-			Set r.message = final_" already exists with different content. It was not replaced. "_$Select(..IsCrypto(pName):"Crypto libraries are never replaced.", 1:"Replace it during a maintenance window, then retry.")
+			Set old = ..FileSha(final)
+			If old = pSha { Do ##class(%File).Delete(staged) Set r.action = "reuse" Do r.%Set("ok", 1, "boolean") Quit }
+			Set pReplaceSha = $ZConvert(pReplaceSha, "L")
+			If (pReplaceSha = "") || (pReplaceSha '= old) || ..IsCrypto(pName) {
+				Do ##class(%File).Delete(staged)
+				Set r.action = "conflict"
+				Set r.message = final_" already exists with different content (SHA-256 "_old_"). It was not replaced. "_$Select(..IsCrypto(pName):"Crypto libraries are never replaced.", pReplaceSha'="":"It changed after you confirmed replacing it; check the files again.", 1:"Replace it during a maintenance window, then retry.")
+				Quit
+			}
+			Set backup = ..BackupPath(final, old)
+			If '##class(%File).Rename(final, backup) {
+				Do ##class(%File).Delete(staged)
+				Set r.message = "Could not move the existing "_final_" aside to "_backup_", so it was not replaced. Stop IRIS, rename or remove it by hand, start IRIS, then retry."
+				Quit
+			}
+		}
+		If '##class(%File).Rename(staged, final) {
+			Set r.message = "Could not move "_staged_" to "_final_"."
+			If backup '= "" {
+				If ##class(%File).Rename(backup, final) { Set r.message = r.message_" The previous file was put back." }
+				Else { Set r.message = r.message_" The previous file is at "_backup_"; rename it back to "_final_" before starting IRIS again." }
+			}
 			Quit
 		}
-		If '##class(%File).Rename(staged, final) { Set r.message = "Could not move "_staged_" to "_final_"." Quit }
 		Set ^IRISConfig.ClientInstaller("file", pName) = pSha
-		Set r.action = "installed"
+		Set r.action = $Select(backup '= "":"replaced", 1:"installed")
+		Set:backup'="" r.backup = backup
 		Do r.%Set("ok", 1, "boolean")
 	} Catch e { Do ..Fail(r, e) }
 	Quit r.%ToJSON()
@@ -278,7 +304,7 @@ ClassMethod CreateApp(pPath As %String, pNS As %String) As %String(MAXLEN="") [ 
 		Set p("AutheEnabled") = 32
 		Set p("Resource") = res
 		$$$ThrowOnError(##class(Security.Applications).Create(pPath, .p))
-		Set ^IRISConfig.ClientInstaller("app", $ZConvert(pPath, "U")) = pNS
+		Do ..Claim("app", pPath, pNS)
 		Set r.action = "created", r.resource = res
 		Do r.%Set("ok", 1, "boolean")
 	} Catch e { Do ..Fail(r, e) }
@@ -314,7 +340,7 @@ ClassMethod PrepareUi(pPath As %String, pNS As %String) As %String(MAXLEN="") [ 
 			Set r.message = "Directory "_dir_" already holds files this installer did not put there. It was not touched; choose another console path."
 			Quit
 		}
-		Set ^IRISConfig.ClientInstaller("ui", $ZConvert(pPath, "U")) = dir
+		Do ..Claim("ui", pPath, dir)
 		If '##class(%File).DirectoryExists(dir) && '##class(%File).CreateDirectoryChain(dir) { Set r.message = "Could not create "_dir_". IRIS needs write access to its csp directory." Quit }
 		Do r.%Set("ok", 1, "boolean")
 	} Catch e { Do ..Fail(r, e) }
@@ -420,7 +446,7 @@ ClassMethod CreateUiApp(pPath As %String, pNS As %String) As %String(MAXLEN="") 
 		Set p("ServeFilesTimeout") = 0
 		Set p("IsNameSpaceDefault") = 0
 		$$$ThrowOnError(##class(Security.Applications).Create(pPath, .p))
-		Set ^IRISConfig.ClientInstaller("app", $ZConvert(pPath, "U")) = pNS
+		Do ..Claim("app", pPath, pNS)
 		Set r.action = "created"
 		Do r.%Set("ok", 1, "boolean")
 	} Catch e { Do ..Fail(r, e) }
@@ -547,6 +573,18 @@ ClassMethod StagingPath(pName As %String) As %String [ Internal, Private ]
 	Quit $System.Util.BinaryDirectory()_".opcua-setup-"_pName_".part"
 }
 
+/// Where <method>CommitFile</method> moves a replaced file: beside it, named by its hash, so
+/// replacing the same version twice reuses the name. A leftover that cannot be deleted (still
+/// loaded by a process that has not restarted) gets a numbered name instead.
+ClassMethod BackupPath(pFinal As %String, pSha As %String) As %String [ Internal, Private ]
+{
+	Set base = pFinal_"."_$Extract(pSha, 1, 12), path = base_".old", n = 1
+	While ##class(%File).Exists(path) && '##class(%File).Delete(path) {
+		Set n = n + 1, path = base_"-"_n_".old"
+	}
+	Quit path
+}
+
 ClassMethod FileSha(pPath As %String) As %String [ Internal, Private ]
 {
 	Set s = ##class(%Stream.FileBinary).%New()
@@ -645,7 +683,7 @@ ClassMethod DescribeApp(pPath As %String, pNS As %String) As %DynamicObject [ In
 	Do d.%Set("enabled", +$Get(p("Enabled")), "boolean")
 	Do d.%Set("passwordAuth", $ZBoolean(+$Get(p("AutheEnabled")), 32, 1) = 32, "boolean")
 	Do d.%Set("unauthenticated", $ZBoolean(+$Get(p("AutheEnabled")), 64, 1) = 64, "boolean")
-	Do d.%Set("owned", $Data(^IRISConfig.ClientInstaller("app", $ZConvert(pPath, "U"))) > 0, "boolean")
+	Do d.%Set("owned", ..Claimed("app", pPath) '= "", "boolean")
 	If ($ZConvert(d.namespace, "U") '= pNS) || (d.dispatchClass '= ..#DispatchClass) {
 		Set d.state = "conflict"
 		Set d.reason = "Web application "_pPath_" already exists for "_d.namespace_$Select(d.dispatchClass'="":" ("_d.dispatchClass_")", 1:"")_". It was not changed; choose another path."
@@ -661,7 +699,7 @@ ClassMethod DescribeUi(pPath As %String, pNS As %String) As %DynamicObject [ Int
 {
 	Set dir = ..UiDir(pPath)
 	Set d = {"path":(pPath), "directory":(dir), "state":"missing", "reason":""}
-	Do d.%Set("owned", $Get(^IRISConfig.ClientInstaller("ui", $ZConvert(pPath, "U"))) = dir, "boolean")
+	Do d.%Set("owned", ..Claimed("ui", pPath) = dir, "boolean")
 	If '##class(Security.Applications).Exists(pPath) {
 		If 'd.owned && ##class(%File).DirectoryExists(dir) && '..DirEmpty(dir) {
 			Set d.state = "conflict", d.reason = "Directory "_dir_" already holds other files. It was not touched; choose another console path."
@@ -680,11 +718,41 @@ ClassMethod DescribeUi(pPath As %String, pNS As %String) As %DynamicObject [ Int
 	Quit d
 }
 
+/// What this installer recorded for web application <var>pPath</var> under <var>pKind</var>
+/// ("app": its namespace, "ui": its console directory), or "". Web application names are
+/// case-insensitive, so records are keyed by the upper-cased path; installers up to 0.2.0 keyed
+/// them by the path as typed, so such a record is found in any case. Changes nothing.
+ClassMethod Claimed(pKind As %String, pPath As %String) As %String [ Internal, Private ]
+{
+	Set key = $ZConvert(pPath, "U")
+	If $Data(^IRISConfig.ClientInstaller(pKind, key))#2 Quit ^IRISConfig.ClientInstaller(pKind, key)
+	Set k = ""
+	For {
+		Set k = $Order(^IRISConfig.ClientInstaller(pKind, k))
+		Quit:k=""
+		If $ZConvert(k, "U") = key Return ^IRISConfig.ClientInstaller(pKind, k)
+	}
+	Quit ""
+}
+
+/// Record <var>pValue</var> for <var>pPath</var> under the upper-cased key, dropping any record of
+/// the same path in another case (see <method>Claimed</method>).
+ClassMethod Claim(pKind As %String, pPath As %String, pValue As %String) [ Internal, Private ]
+{
+	Set key = $ZConvert(pPath, "U"), k = ""
+	For {
+		Set k = $Order(^IRISConfig.ClientInstaller(pKind, k))
+		Quit:k=""
+		Kill:(k '= key)&&($ZConvert(k, "U") = key) ^IRISConfig.ClientInstaller(pKind, k)
+	}
+	Set ^IRISConfig.ClientInstaller(pKind, key) = pValue
+}
+
 /// Staging and committing console files needs a directory <method>PrepareUi</method> claimed.
 ClassMethod UiReady(pPath As %String, r As %DynamicObject) As %Boolean [ Internal, Private ]
 {
 	If '..ValidAppPath(pPath) { Set r.message = "Invalid web application path '"_pPath_"'." Quit 0 }
-	If $Get(^IRISConfig.ClientInstaller("ui", $ZConvert(pPath, "U"))) '= ..UiDir(pPath) { Set r.message = "The console directory for "_pPath_" was not prepared by this installer." Quit 0 }
+	If ..Claimed("ui", pPath) '= ..UiDir(pPath) { Set r.message = "The console directory for "_pPath_" was not prepared by this installer." Quit 0 }
 	Quit 1
 }
 

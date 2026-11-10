@@ -592,7 +592,7 @@ fn session_menu(app: &mut App, s: Session) -> Next {
         match ui::menu(&f, &entries, "1").as_str() {
             "1" => {
                 let next = match ov.health {
-                    Health::Healthy(v) => handoff(app, &s, v),
+                    Health::Healthy(v) => handoff(app, &s, v, false),
                     _ => setup(app, &s, &ov.info),
                 };
                 if let Some(n) = next {
@@ -994,13 +994,18 @@ fn setup(app: &mut App, s: &Session, info: &Info) -> Option<Next> {
                 }
             }
         };
+        match confirm_replace(app, s, &plan) {
+            Review::Install => {}
+            Review::Back => continue,
+            Review::Quit => return Some(Next::Quit),
+        }
         match review(app, s, &plan) {
             Review::Install => {}
             Review::Back => continue,
             Review::Quit => return Some(Next::Quit),
         }
         match apply(app, s, &plan) {
-            Applied::Done(v) => return handoff(app, s, v),
+            Applied::Done(v) => return handoff(app, s, v, replaces(&plan)),
             Applied::Retry => continue,
             Applied::Menu => return None,
             Applied::Quit => return Some(Next::Quit),
@@ -1146,14 +1151,65 @@ enum Review {
     Quit,
 }
 
+/// Whether the plan replaces an existing native file, which running processes only pick up
+/// after a restart.
+fn replaces(plan: &Plan) -> bool {
+    plan.files
+        .iter()
+        .any(|f| matches!(f.1, FileAction::Replace { .. }))
+}
+
+/// Native files already on the server with other content: replaced only once the user says so.
+/// Install keeps the old copy beside the new one, so the answer is reversible by hand.
+fn confirm_replace(app: &App, s: &Session, plan: &Plan) -> Review {
+    if !replaces(plan) {
+        return Review::Install;
+    }
+    let conn = &app.store.connections[s.idx];
+    let mut f = Frame::new("Replace the native library?").context(&ctx(conn));
+    let mut foreign = false;
+    for (a, action, dest) in &plan.files {
+        let FileAction::Replace { existing, owned } = action else {
+            continue;
+        };
+        f.status(
+            Status::Action,
+            &format!("{} differs from the one in this installer", a.name),
+        );
+        f.detail(&format!(
+            "  {dest}\n  on the server   SHA-256 {existing}\n  this installer  SHA-256 {}",
+            a.sha256
+        ));
+        if *owned {
+            f.detail("An earlier version of this tool installed it.");
+        } else {
+            foreign = true;
+            f.detail("This tool did not install it: it may be a manual copy or belong to another installation.");
+        }
+        f.blank();
+    }
+    f.text("Replacing moves each existing file aside as <name>.<hash>.old in the same directory, then puts the new one in place. The library is shared by every namespace on this IRIS instance.");
+    f.text("Processes that already loaded the old library keep using it until they restart: restart IRIS, or at least the productions that use OPC UA, once installation finishes.");
+    let entries = [
+        item("Y", "Replace", "keep the old copy as a backup"),
+        item("B", "Back", "change nothing"),
+        quit_key(),
+    ];
+    // Replacing a file this tool did not write is never the default.
+    match ui::menu(&f, &entries, if foreign { "B" } else { "Y" }).as_str() {
+        "Y" => Review::Install,
+        "B" => Review::Back,
+        _ => {
+            ui::show(&f);
+            Review::Quit
+        }
+    }
+}
+
 fn review(app: &App, s: &Session, plan: &Plan) -> Review {
     let conn = &app.store.connections[s.idx];
     let mut f = Frame::new("Review the changes").context(&ctx(conn));
-    let uploads = plan
-        .files
-        .iter()
-        .filter(|f| f.1 == FileAction::Upload)
-        .count();
+    let uploads = plan.files.iter().filter(|f| f.1.uploads()).count();
     let native = if uploads > 0 {
         "upload through IRIS"
     } else {
@@ -1199,6 +1255,7 @@ fn review(app: &App, s: &Session, plan: &Plan) -> Review {
             FileAction::Upload => "upload",
             FileAction::Reuse => "identical, reuse",
             FileAction::KeepExisting => "keep the existing copy",
+            FileAction::Replace { .. } => "replace (old copy kept as backup)",
         };
         f.dim(&format!("{:<20} {what} → {dest}", a.name));
     }
@@ -1323,8 +1380,12 @@ fn apply(app: &mut App, s: &Session, plan: &Plan) -> Applied {
             0 => {
                 let mut notes = Vec::new();
                 for (a, action, _) in &plan.files {
-                    if *action == FileAction::Upload {
-                        notes.push(format!("{} {}", a.name, inst.install_file(a)?));
+                    let replace = match action {
+                        FileAction::Replace { existing, .. } => Some(existing.as_str()),
+                        _ => None,
+                    };
+                    if action.uploads() {
+                        notes.push(format!("{} {}", a.name, inst.install_file(a, replace)?));
                     }
                 }
                 Ok(if notes.is_empty() {
@@ -1411,7 +1472,8 @@ fn set_progress(app: &mut App, s: &Session, p: &str) {
 
 // ---------------------------------------------------------------- handoff
 
-fn handoff(app: &mut App, s: &Session, v: Verification) -> Option<Next> {
+/// `restart`: a native library was replaced, so running processes still have the old one.
+fn handoff(app: &mut App, s: &Session, v: Verification, restart: bool) -> Option<Next> {
     let mut v = v;
     let inst = Installer {
         client: &s.client,
@@ -1442,6 +1504,9 @@ fn handoff(app: &mut App, s: &Session, v: Verification) -> Option<Next> {
         checks_into(&mut f, &v);
         ping_into(&mut f, &conn, &ping);
         console_into(&mut f, &conn, console);
+        if restart {
+            f.status(Status::Action, "Restart IRIS, or the productions that use OPC UA, to load the replaced native library");
+        }
         f.blank();
         f.heading("Open the OPC UA Console:");
         f.blank();

@@ -67,7 +67,8 @@ The last row is only automatic for accounts with the `%All` role. IRIS does not 
 
 - **Native libraries:** `irisopcua.so`, `libopen62541.so.0`, and `libcrypto.so.1.1` go into the IRIS `bin` directory.
   - They are uploaded to a staging file, checked against their SHA-256, and then moved into place.
-  - An identical existing file is reused. A different existing file is never overwritten, and the install stops.
+  - An identical existing file is reused. A different one is replaced only after you confirm it on its own screen, which says whether an earlier version of this tool installed it (the default answer is Replace) or not (the default is Back). The old file is renamed to `<name>.<hash>.old` beside the new one, and the server replaces only the exact file you confirmed.
+  - Processes that already loaded the old library keep it until they restart, so the final screen asks you to restart IRIS, or the productions that use OPC UA.
   - An existing crypto library is always kept.
   - If IRIS cannot write its `bin` directory, nothing is changed. The tool prints the exact files, their hashes, and their destinations for a server administrator to copy by hand, then verifies them on Retry.
 - **Namespace:** the namespace (default `OPCUA`) and its database are created in the manager directory, with interoperability enabled.
@@ -107,10 +108,10 @@ A remembered password is only used for the URL, user, and IRIS instance (instanc
 ## Limitations
 
 - **Server platforms:** Linux x86-64 and ARM64, and Windows x86-64. macOS and other IRIS servers are detected and refused. The CLI itself builds for Linux, macOS, and Windows, and any of them can install into any supported server.
-- **Windows servers:** `IrisOPCUA.dll` cannot be replaced while IRIS has it loaded, so an upgrade that the installer reports as a conflict must be done with the instance stopped.
+- **Windows servers:** a loaded `IrisOPCUA.dll` cannot be overwritten or deleted, but it can be renamed, which is how a replacement moves it aside. If even the rename fails, nothing is replaced and the installer asks you to stop IRIS and move the file by hand.
 - **TLS:** only certificates from public CAs (the bundled Mozilla roots) are trusted. An IRIS web server whose certificate comes from an internal CA fails with a TLS error.
 - **Atelier API:** it must be enabled and routed by the web server. Its 401 cannot tell a wrong password from an account without `%Development`.
-- **Upgrades:** a native library that differs from the supplied one is never replaced automatically. A healthy installation offers no reinstall, so a newer installer's classes or console are applied only once something fails its check.
+- **Upgrades:** a native library that differs from the supplied one is replaced only after you confirm it. A healthy installation offers no reinstall, so a newer installer's classes or console are applied only once something fails its check.
 - **Console address:** IRIS serves no default page for a directory, so the console opens at `…/ui/index.html`; `…/ui/` alone returns 404.
 
 Tested against InterSystems IRIS Community 2025.3 (Linux ARM64 container); see `docs/design/terminal-installer-plan.md` §10 for the evidence and what remains unverified.
