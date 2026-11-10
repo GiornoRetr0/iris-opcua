@@ -90,7 +90,8 @@ ClassMethod Generate(URL As %String, StartNodeNS As %Integer, StartNodeId, Class
 			write "No variable nodes found. No file generated.", !
 		}
 
-		// Disconnect
+		// Disconnect. Status ignored: the file is already written, and a failed
+		// disconnect of a terminal tool's session changes nothing for the user.
 		write "Disconnecting...", !
 		do tClient.Disconnect()
 		write "Done.", !
@@ -100,7 +101,9 @@ ClassMethod Generate(URL As %String, StartNodeNS As %Integer, StartNodeId, Class
 		// Try to disconnect on error
 		Try {
 			if $IsObject($Get(tClient)) do tClient.Disconnect()
-		} Catch (e2) {}
+		} Catch (e2) {
+			// Best-effort cleanup: the original error in tSC must win.
+		}
 	}
 
 	Quit tSC
@@ -329,6 +332,7 @@ ClassMethod ReadAttributesOnce(pClient As OPCUA.Client, pNodeNS As %Integer, pNo
 		set tOK = 0
 	}
 	if tHandle '= "" {
+		// Best-effort cleanup of a one-shot probe: its result is already decided.
 		Try { do pClient.ReadBulkClear(tHandle) } Catch (eClear) {}
 	}
 	Quit tOK

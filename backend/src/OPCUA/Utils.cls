@@ -17,7 +17,10 @@ ClassMethod Initialize() As %Status
 
         set tOpcuaStatusCode = 0 // Status = "Good"
 
-        If '$Data(%ZUtilsIrisOpcuaLibraryId) throw ##class(%Exception.StatusException).CreateFromStatus(0)
+        If '$Data(%ZUtilsIrisOpcuaLibraryId) {
+            Set tSC = $$$ERROR($$$GeneralError, "IrisOPCUA library is not loaded")
+            Quit
+        }
 
 		//set tRetval=$ZF(-6,$$$IrisOPCUALibrary,$$$zfGetStatusCodeNameB,"",$LB(tOpcuaStatusCode))
 		set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfGetStatusCodeNameB,"",$LB(tOpcuaStatusCode))
@@ -36,7 +39,7 @@ ClassMethod Initialize() As %Status
         //set tPathname = ^OPCUA.Library.Pathname
         set tSC = ##class(OPCUA.Utils).GetLibPathname(.tPathname)
 		$$$ThrowOnError(tSC)
-        
+
         $$$TRACE("Attempting to load IrisOPCUA with pathname '"_tPathname_"'")
 
         //do $ZF(-4,5,$$$IrisOPCUALibrary,tPathname)
@@ -47,11 +50,15 @@ ClassMethod Initialize() As %Status
         $$$LOGERROR("Error thrown during IrisOPCUA handle assignment : "_$SYSTEM.Status.GetErrorText(tSC))
     }
 
-    set tSC = $$$OK
+    // Keep the first error - don't reset tSC to $$$OK after a failure
+    If $$$ISERR(tSC) Quit tSC
 
     try {
 
-        If '$Data(%ZUtilsIrisOpcuaLibraryId) throw ##class(%Exception.StatusException).CreateFromStatus(0)
+        If '$Data(%ZUtilsIrisOpcuaLibraryId) {
+            Set tSC = $$$ERROR($$$GeneralError, "IrisOPCUA library is not loaded: "_tPathname)
+            Quit
+        }
 
 		//set tRetval=$ZF(-6,$$$IrisOPCUALibrary,$$$zfGetStatusCodeNameB,"",$LB(0))
 		set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfGetStatusCodeNameB,"",$LB(0))
@@ -98,8 +105,11 @@ ClassMethod Install(pPathname As %String) As %Status
 ClassMethod GetLibPathname(Output pPathname As %String) As %Status
 {
     #dim tSC as %Status = $$$OK
-    
+
     try {
+
+        // Test seam: allow tests to override the library path
+        if ($GET(^||OPCUA.LibPathOverride) '= "") set pPathname = ^||OPCUA.LibPathOverride Quit
 
         if ($GET(^OPCUA.Library.Pathname) '= "") set pPathname = ^OPCUA.Library.Pathname Quit
 
@@ -149,7 +159,9 @@ ClassMethod GetUStr(pStr As %String) As %String
 
         } else {
 
-            do ##class(OPCUA.Utils).Initialize() // just in case
+            // Ignored: a library that is not loaded fails the $ZF below, and this
+            // decoder returns fragments rather than errors by design.
+            do ##class(OPCUA.Utils).Initialize()
             set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfGetUStr,"",$LB(pStr,1))
 
             #; Errors are not returned, fragments instead.
@@ -211,6 +223,24 @@ ClassMethod GetVersion(Output pOut As %List) As %Status
 	}
 
 	Quit tSC
+}
+
+/// Run dynamic SQL and return its result set, throwing if the statement failed.
+/// <tt>%ExecDirect</tt> reports a failure (a missing table, a missing SELECT
+/// privilege) in the result's <tt>%SQLCODE</tt> rather than by throwing, so a
+/// caller that only checks <tt>$IsObject</tt> reads a failed query as an empty one.
+///
+/// A missing privilege (SQLCODE -99) throws <method>OPCUA.REST.Error.Forbidden</method>,
+/// a readable 403, rather than an opaque 500: signing in again does not help, an
+/// administrator has to grant it.
+ClassMethod ExecQuery(pSQL As %String, pArgs...) As %SQL.StatementResult
+{
+	set tRS = ##class(%SQL.Statement).%ExecDirect(, pSQL, pArgs...)
+	if tRS.%SQLCODE = -99 {
+		$$$ThrowStatus(##class(OPCUA.REST.Error).Forbidden("Your IRIS account ("_$Username_") lacks an SQL privilege this request needs: "_tRS.%Message_". Ask an administrator to grant it, or use an account with more privileges."))
+	}
+	if tRS.%SQLCODE < 0 $$$ThrowStatus($$$ERROR($$$SQLError, tRS.%SQLCODE, tRS.%Message))
+	Quit tRS
 }
 
 }

@@ -47,6 +47,7 @@ ClassMethod CreateProjection(cls As %String, ByRef params) As %Status
 /// Called recursively
 ClassMethod ProcessObj(oObj As %CompiledClass, pOPCUADefaultNamespace As %String, pDefaultNodeName As %String, pPropertyPath As %String, Output lConfigSpec) As %Status
 {
+    Set tSC = $$$OK
     Set lConfigSpec=""
 
     Set oStorageDataEntries = oObj.Storages.GetAt(1).Data.GetAt(1).Values
@@ -87,7 +88,9 @@ ClassMethod ProcessObj(oObj As %CompiledClass, pOPCUADefaultNamespace As %String
 
         If tOPCUANamespace=""
         {
-            Set tSC = $$$ERROR(5001, "OPCUANAMESPACE parameter is not defined for property "_oProp.Name_" from class "_cls_" and there is no OPCUADEFAULTNAMESPACE parameter defined in class "_cls)
+            // oObj, not cls: cls only exists in CreateProjection. The parameter really
+            // is spelled OPCUDEFAULTANAMESPACE (see OPCUA.DataSource.Definition).
+            Set tSC = $$$ERROR(5001, "OPCUANAMESPACE parameter is not defined for property "_oProp.Name_" from class "_oObj.Name_" and there is no OPCUDEFAULTANAMESPACE parameter defined in class "_oObj.Name)
             Quit
         }
 

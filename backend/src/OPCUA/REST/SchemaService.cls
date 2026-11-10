@@ -52,7 +52,7 @@ ClassMethod Create(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		if tDataSourceName = "" set tDataSourceName = $Piece(tClassName, ".", *)
 
 		if ##class(%Dictionary.ClassDefinition).%ExistsId(tClassName) {
-			set tSC = $$$ERROR($$$GeneralError, "Class '"_tClassName_"' already exists. Choose a different name.")
+			set tSC = ##class(OPCUA.REST.Error).Conflict("Class '"_tClassName_"' already exists. Choose a different name.")
 			Quit
 		}
 
@@ -98,7 +98,8 @@ ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %S
 	#dim tSC As %Status = $$$OK
 	set pResult = []
 	Try {
-		do ..MapSchemaUsage(.tUsage)
+		set tSC = ..MapSchemaUsage(.tUsage)
+		Quit:$$$ISERR(tSC)
 
 		set tRS = ##class(%ResultSet).%New("%Dictionary.ClassDefinition:SubclassOf")
 		set tSC = tRS.Execute("OPCUA.DataSource.DeviceSchema")
@@ -110,8 +111,10 @@ ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %S
 			// Skip abstract classes — they cannot back a pipeline.
 			continue:$$$comClassKeyGet(tClass,$$$cCLASSabstract)
 
+			// One unreadable schema must not hide the rest: it is listed with
+			// its columnsError.
 			set tItem = ..DescribeSchema(tClass, 0)
-			set tItem.usedBy = ..UsageArray($Get(tUsage(tClass), ""))
+			set tItem.usedBy = ..UsageArray(.tUsage, tClass)
 			do pResult.%Push(tItem)
 		}
 	} Catch (e) {
@@ -130,9 +133,15 @@ ClassMethod Get(pBody As %DynamicObject, Output pResult As %DynamicObject) As %S
 		set tSC = ..RequireSchema(pBody, .tClassName)
 		Quit:$$$ISERR(tSC)
 
-		do ..MapSchemaUsage(.tUsage)
-		set pResult = ..DescribeSchema(tClassName, 1)
-		set pResult.usedBy = ..UsageArray($Get(tUsage(tClassName), ""))
+		set tSC = ..MapSchemaUsage(.tUsage)
+		Quit:$$$ISERR(tSC)
+
+		set pResult = ..DescribeSchema(tClassName, 1, .tSC)
+		if $$$ISERR(tSC) {
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Cannot read the columns of schema '"_tClassName_"'", tSC)
+			Quit
+		}
+		set pResult.usedBy = ..UsageArray(.tUsage, tClassName)
 	} Catch (e) {
 		set tSC = e.AsStatus()
 	}
@@ -150,15 +159,42 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		set tSC = ..RequireSchema(pBody, .tClassName)
 		Quit:$$$ISERR(tSC)
 
-		do ..MapSchemaUsage(.tUsage)
-		set tUsedBy = $Get(tUsage(tClassName), "")
-		if tUsedBy '= "" {
-			set tSC = $$$ERROR($$$GeneralError, "Schema '"_tClassName_"' is still used by pipeline(s): "_$Replace(tUsedBy, $Char(1), ", ")_". Delete those pipelines first.")
+		set tSC = ..MapSchemaUsage(.tUsage)
+		Quit:$$$ISERR(tSC)
+
+		// Check if schema is in use in any production
+		set tUsageList = ""
+		set tProdClass = ""
+		for {
+			set tProdClass = $Order(tUsage(tClassName, tProdClass))
+			quit:tProdClass=""
+
+			set tItemName = ""
+			for {
+				set tItemName = $Order(tUsage(tClassName, tProdClass, tItemName))
+				quit:tItemName=""
+
+				set tEntry = tItemName_" ("_tProdClass_")"
+				set tUsageList = tUsageList_$Select(tUsageList="":"", 1:", ")_tEntry
+			}
+		}
+
+		if tUsageList '= "" {
+			set tSC = ##class(OPCUA.REST.Error).Conflict("Schema '"_tClassName_"' is still used by: "_tUsageList)
 			Quit
 		}
 
-		do ##class(OPCUA.REST.PipelineService).DeleteSerialSubclasses(tClassName)
-		do $System.OBJ.Delete(tClassName, "-d")
+		// Remove the rows first: deleting the class leaves its data global, whose
+		// name comes from the class name, so a new schema with the same name would
+		// inherit them under a different column layout. %KillExtent, not the "e"
+		// delete flag: that deletes row by row, and refuses if any row won't open.
+		set tSC = $classmethod(tClassName, "%KillExtent")
+		Quit:$$$ISERR(tSC)
+
+		set tSC = ##class(OPCUA.REST.PipelineService).DeleteSerialSubclasses(tClassName)
+		Quit:$$$ISERR(tSC)
+		set tSC = $System.OBJ.Delete(tClassName, "-d")
+		Quit:$$$ISERR(tSC)
 		kill ^OPCUA.DataSource(tClassName)
 
 		set pResult.deleted = 1
@@ -193,7 +229,7 @@ ClassMethod Validate(pBody As %DynamicObject, Output pResult As %DynamicObject) 
 		set tSC = ##class(OPCUA.DataSource.Resolver).ParseDeviceNodePaths(tSetting, .tDevices, .tParseErrors)
 		if $$$ISERR(tSC) {
 			// Surface the per-line reasons, which are far more useful than the summary.
-			set tMsg = $System.Status.GetOneErrorText(tSC)
+			set tMsg = ##class(OPCUA.REST.Error).Text(tSC)
 			for i=1:1:$LL(tParseErrors) { set tMsg = tMsg_"; "_$LI(tParseErrors, i) }
 			set tSC = $$$ERROR($$$GeneralError, tMsg)
 			Quit
@@ -353,6 +389,7 @@ ClassMethod GenerateSchemaClass(pClassName As %String, pDataSourceName As %Strin
 	#dim tSC As %Status = $$$OK
 	kill pSerialClasses
 	set pSerialClasses = 0
+	kill tCreatedClasses
 	Try {
 		// Separate flat columns from nested ones and build the folder tree.
 		kill tFolderColumns
@@ -375,8 +412,10 @@ ClassMethod GenerateSchemaClass(pClassName As %String, pDataSourceName As %Strin
 
 		// Serial classes must exist before the main class references them.
 		if tHasNesting {
-			set tSC = ..GenerateSerialClasses(pClassName, pDefaultNS, .tFolderColumns, .pSerialClasses, pIncludeServerTS)
-			Quit:$$$ISERR(tSC)
+			// Throw, not Quit: the Catch below removes the serial classes this
+			// call already created. A Quit would leave the Try without it.
+			set tSC = ..GenerateSerialClasses(pClassName, pDefaultNS, .tFolderColumns, .pSerialClasses, pIncludeServerTS, .tCreatedClasses)
+			$$$ThrowOnError(tSC)
 		}
 
 		set tClassDef = ##class(%Dictionary.ClassDefinition).%New(pClassName)
@@ -396,6 +435,13 @@ ClassMethod GenerateSchemaClass(pClassName As %String, pDataSourceName As %Strin
 		do tProp.Parameters.SetAt(500, "MAXLEN")
 		do tClassDef.Properties.Insert(tProp)
 
+		// Test hook: inject a bad property type to force compile failure
+		if $Get(^||OPCUA.Tests("badProp")) {
+			set tProp = ##class(%Dictionary.PropertyDefinition).%New()
+			set tProp.Name = "BadProperty"
+			set tProp.Type = "ThisClassDoesNotExist"
+			do tClassDef.Properties.Insert(tProp)
+		}
 
 		// Column properties
 		kill tEmittedFolders, tUsedNames
@@ -440,29 +486,52 @@ ClassMethod GenerateSchemaClass(pClassName As %String, pDataSourceName As %Strin
 
 		set tSC = tClassDef.%Save()
 		$$$ThrowOnError(tSC)
+		set tCreatedClasses($Increment(tCreatedClasses)) = pClassName
 		set tSC = $System.OBJ.Compile(pClassName, "ck-d")
 		$$$ThrowOnError(tSC)
 
 	} Catch (e) {
 		set tSC = e.AsStatus()
+		// Clean up any classes created by this call
+		set i = ""
+		for {
+			set i = $Order(tCreatedClasses(i))
+			quit:i=""
+			set tClassName = tCreatedClasses(i)
+			if ##class(%Dictionary.ClassDefinition).%ExistsId(tClassName) {
+				// Test seam: force a delete failure for a specific class
+				if $Get(^||OPCUA.Tests("deleteFailClass")) = tClassName {
+					set tDelSC = $$$ERROR($$$GeneralError, "Test-forced delete failure")
+				} else {
+					set tDelSC = $System.OBJ.Delete(tClassName, "-d")
+				}
+				if $$$ISERR(tDelSC) {
+					set tSC = $$$ADDSC(tSC, $$$ERROR($$$GeneralError, "Failed to delete class '"_tClassName_"' during rollback"))
+				}
+			}
+		}
 	}
 	Quit tSC
 }
 
 /// Generate and compile %SerialObject classes for nested folder columns.
-ClassMethod GenerateSerialClasses(pMainClassName As %String, pDefaultNS As %Integer, ByRef pFolderColumns, Output pSerialClasses, pIncludeServerTS As %Boolean = 1) As %Status
+///
+/// On any error, returns it with every class created so far recorded in
+/// pCreatedClasses, which tracks the classes created across both this method and
+/// the caller (GenerateSchemaClass). The caller's Catch deletes exactly those.
+ClassMethod GenerateSerialClasses(pMainClassName As %String, pDefaultNS As %Integer, ByRef pFolderColumns, Output pSerialClasses, pIncludeServerTS As %Boolean = 1, ByRef pCreatedClasses) As %Status
 {
 	#dim tSC As %Status = $$$OK
 	Try {
 		set pSerialClasses = 0
 
+		// Check all target serial class names upfront
 		set tFolderName = ""
 		for {
 			set tFolderName = $Order(pFolderColumns(tFolderName))
 			if tFolderName = "" Quit
 
 			set tSerialClassName = ..SerialClassName(pMainClassName, tFolderName)
-			set tColumns = pFolderColumns(tFolderName)
 
 			// Sanitising is lossy, so two folder names can collapse onto one class
 			// name ("A_B" and "AB"). Silently generating the second over the first
@@ -473,10 +542,36 @@ ClassMethod GenerateSerialClasses(pMainClassName As %String, pDefaultNS As %Inte
 			}
 			set tTakenNames(tSerialClassName) = tFolderName
 
+			// Check if class already exists
+			if ##class(%Dictionary.ClassDefinition).%ExistsId(tSerialClassName) {
+				set tSC = ##class(OPCUA.REST.Error).Conflict("Class '"_tSerialClassName_"' already exists. Choose different folder names or a different schema name.")
+				Quit
+			}
+		}
+		Quit:$$$ISERR(tSC)
+
+		// Now create and compile the serial classes
+		set tFolderName = ""
+		for {
+			set tFolderName = $Order(pFolderColumns(tFolderName))
+			if tFolderName = "" Quit
+
+			set tSerialClassName = ..SerialClassName(pMainClassName, tFolderName)
+			set tColumns = pFolderColumns(tFolderName)
+
 			set tClassDef = ##class(%Dictionary.ClassDefinition).%New(tSerialClassName)
 			set tClassDef.Description = "Auto-generated serial object for nested OPC UA folder: "_tFolderName
 			set tClassDef.Super = "%SerialObject"
 			set tClassDef.PropertyClass = "OPCUA.DataSource.PropertyClass"
+
+			// Test hook: inject a bad property type into serial class number N
+			// (^||OPCUA.Tests("badProp", "serial") = N) to force its compile to fail.
+			if $Get(^||OPCUA.Tests("badProp", "serial")) = (pSerialClasses + 1) {
+				set tProp = ##class(%Dictionary.PropertyDefinition).%New()
+				set tProp.Name = "BadProperty"
+				set tProp.Type = "ThisClassDoesNotExist"
+				do tClassDef.Properties.Insert(tProp)
+			}
 
 			kill tUsedNames
 			for i=0:1:tColumns.%Size()-1 {
@@ -494,6 +589,7 @@ ClassMethod GenerateSerialClasses(pMainClassName As %String, pDefaultNS As %Inte
 
 			set tSC = tClassDef.%Save()
 			$$$ThrowOnError(tSC)
+			set pCreatedClasses($Increment(pCreatedClasses)) = tSerialClassName
 			set tSC = $System.OBJ.Compile(tSerialClassName, "ck-d")
 			$$$ThrowOnError(tSC)
 
@@ -596,23 +692,29 @@ ClassMethod AddParameter(pClassDef As %Dictionary.ClassDefinition, pName As %Str
 
 /// Resolve the target class name from `className`, or from `name` plus an
 /// optional `packagePath` (defaulting to OPCUA.DS).
+///
+/// The result must be a valid class name, so a bad name is a 400 saying so here,
+/// rather than a %Dictionary datatype error later.
 ClassMethod ResolveClassName(pBody As %DynamicObject, Output pClassName As %String) As %Status [ Private ]
 {
 	set pClassName = pBody.%Get("className")
-	if pClassName '= "" Quit $$$OK
-
-	set tName = pBody.%Get("name")
-	if tName = "" {
-		Quit $$$ERROR($$$GeneralError, "Missing schema name (supply 'className', or 'name' with optional 'packagePath')")
+	if pClassName = "" {
+		set tName = pBody.%Get("name")
+		if tName = "" {
+			Quit $$$ERROR($$$GeneralError, "Missing schema name (supply 'className', or 'name' with optional 'packagePath')")
+		}
+		if tName [ "." {
+			// A dotted name is already fully qualified.
+			set pClassName = tName
+		} else {
+			set tPackage = pBody.%Get("packagePath")
+			if tPackage = "" set tPackage = ..#DefaultPackage
+			set pClassName = tPackage_"."_tName
+		}
 	}
-	// A dotted name is already fully qualified.
-	if tName [ "." {
-		set pClassName = tName
-		Quit $$$OK
+	if '##class(%Dictionary.Classname).IsValid(pClassName) {
+		Quit ##class(OPCUA.REST.Error).BadRequest("'"_pClassName_"' is not a valid schema name. Use letters and digits only, starting with a letter (no spaces, hyphens or underscores), with dots only between package parts.")
 	}
-	set tPackage = pBody.%Get("packagePath")
-	if tPackage = "" set tPackage = ..#DefaultPackage
-	set pClassName = tPackage_"."_tName
 	Quit $$$OK
 }
 
@@ -623,7 +725,7 @@ ClassMethod RequireSchema(pBody As %DynamicObject, Output pClassName As %String)
 	Quit:$$$ISERR(tSC) tSC
 
 	if '##class(%Dictionary.ClassDefinition).%ExistsId(pClassName) {
-		Quit $$$ERROR($$$GeneralError, "Schema '"_pClassName_"' does not exist")
+		Quit ##class(OPCUA.REST.Error).NotFound("Schema '"_pClassName_"' does not exist")
 	}
 	if '..IsSchema(pClassName) {
 		Quit $$$ERROR($$$GeneralError, "Class '"_pClassName_"' is not an OPCUA.DataSource.DeviceSchema subclass")
@@ -648,8 +750,13 @@ ClassMethod IsSchema(pClassName As %String) As %Boolean
 /// Describe one schema: identity, table, and (optionally) its columns.
 /// Columns are reported in storage order, which is the order the runtime
 /// services and the resolver's coverage masks use.
-ClassMethod DescribeSchema(pClassName As %String, pWithColumns As %Boolean = 0) As %DynamicObject
+///
+/// <var>pSC</var> is the error when the columns cannot be read (e.g. the class's
+/// compiled spec in <tt>^OPCUA.DataSource</tt> is missing); the item then has
+/// <tt>columnCount</tt> 0 and a <tt>columnsError</tt> saying why.
+ClassMethod DescribeSchema(pClassName As %String, pWithColumns As %Boolean = 0, Output pSC As %Status) As %DynamicObject
 {
+	set pSC = $$$OK
 	set tItem = {}
 	set tItem.schemaClass = pClassName
 	set tItem.name = $Piece(pClassName, ".", *)
@@ -684,45 +791,105 @@ ClassMethod DescribeSchema(pClassName As %String, pWithColumns As %Boolean = 0) 
 				set tItem.columns = tArr
 			}
 		} else {
-			set tItem.columnCount = 0
+			set pSC = tSC
 		}
-	} Catch (e) {}
+	} Catch (e) {
+		set pSC = e.AsStatus()
+	}
+	if $$$ISERR(pSC) {
+		set tItem.columnCount = 0
+		set tItem.columnsError = ##class(OPCUA.REST.Error).Text(pSC)
+	}
 
 	Quit tItem
 }
 
-/// Map schemaClass → $Char(1)-delimited list of config items referencing it.
+/// Map usage across ALL productions in the namespace.
+///
+/// Output: pUsage(schemaClass, production, itemName) = "". Any failure (e.g. cannot
+/// open a production) is returned as a %Status error, so callers can refuse actions
+/// that depend on complete usage information.
 ///
 /// Not private: PipelineService reports remaining usage after deleting a
 /// pipeline, and this is the single definition of "which pipelines use what".
-ClassMethod MapSchemaUsage(Output pUsage)
+ClassMethod MapSchemaUsage(Output pUsage) As %Status
 {
+	#dim tSC As %Status = $$$OK
 	kill pUsage
 	Try {
-		set tProdClass = ##class(OPCUA.REST.DeployService).#ProductionClass
-		if '##class(%Dictionary.ClassDefinition).%ExistsId(tProdClass) Quit
-		set tProd = ##class(Ens.Config.Production).%OpenId(tProdClass)
-		if '$IsObject(tProd) Quit
+		// Test seam: force a failure to test error handling
+		if $Get(^||OPCUA.Tests("failUsage")) {
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Forced usage check failure")
+			Quit
+		}
 
-		for i=1:1:tProd.Items.Count() {
-			set tItem = tProd.Items.GetAt(i)
-			for j=1:1:tItem.Settings.Count() {
-				set tS = tItem.Settings.GetAt(j)
-				continue:tS.Name'="DataSourceClass"
-				continue:tS.Value=""
-				set pUsage(tS.Value) = $Get(pUsage(tS.Value), "")_$Select($Get(pUsage(tS.Value))="":"", 1:$Char(1))_tItem.Name
+		// Iterate every production in the namespace. Embedded SQL, which checks no
+		// SQL privilege, so an account with only the installer's OPCUA_API role can
+		// run it (dynamic SQL gave it SQLCODE -99). A failed query must still stop
+		// the caller: read as "no productions", schema delete would skip its
+		// in-use check.
+		&sql(DECLARE cUsageProd CURSOR FOR SELECT ID INTO :tProdClass FROM Ens_Config.Production)
+		&sql(OPEN cUsageProd)
+		if SQLCODE < 0 {
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to query Ens_Config.Production", $$$ERROR($$$SQLError, SQLCODE, $Get(%msg)))
+			Quit
+		}
+		for {
+			&sql(FETCH cUsageProd)
+			if SQLCODE = 100 Quit
+			if SQLCODE < 0 {
+				set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to query Ens_Config.Production", $$$ERROR($$$SQLError, SQLCODE, $Get(%msg)))
+				Quit
+			}
+			set tProd = ##class(Ens.Config.Production).%OpenId(tProdClass)
+			if '$IsObject(tProd) {
+				set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to open production '"_tProdClass_"'")
+				Quit
+			}
+
+			for i=1:1:tProd.Items.Count() {
+				set tItem = tProd.Items.GetAt(i)
+				for j=1:1:tItem.Settings.Count() {
+					set tS = tItem.Settings.GetAt(j)
+					continue:tS.Name'="DataSourceClass"
+					continue:tS.Value=""
+					set pUsage(tS.Value, tProdClass, tItem.Name) = ""
+				}
 			}
 		}
-	} Catch (e) {}
+		&sql(CLOSE cUsageProd)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+		&sql(CLOSE cUsageProd)
+	}
+	Quit tSC
 }
 
-/// Turn a $Char(1)-delimited usage list into a JSON array.
-ClassMethod UsageArray(pList As %String) As %DynamicArray
+/// Turn the three-subscript usage map into a JSON array of objects.
+///
+/// Input: pUsage(schemaClass, production, itemName) = ""
+/// Output: [{name: itemName, production: prodClass, managed: true|false}, ...]
+/// where managed = true if production is OPCUA.Pipeline.Production.
+ClassMethod UsageArray(ByRef pUsage, pSchemaClass As %String) As %DynamicArray
 {
 	set tArr = []
-	Quit:pList="" tArr
-	for i=1:1:$Length(pList, $Char(1)) {
-		do tArr.%Push($Piece(pList, $Char(1), i))
+	set tProdClass = ""
+	for {
+		set tProdClass = $Order(pUsage(pSchemaClass, tProdClass))
+		quit:tProdClass=""
+
+		set tItemName = ""
+		for {
+			set tItemName = $Order(pUsage(pSchemaClass, tProdClass, tItemName))
+			quit:tItemName=""
+
+			set tObj = {}
+			set tObj.name = tItemName
+			set tObj.production = tProdClass
+			set tManaged = (tProdClass = ##class(OPCUA.REST.DeployService).#ProductionClass)
+			do tObj.%Set("managed", tManaged, "boolean")
+			do tArr.%Push(tObj)
+		}
 	}
 	Quit tArr
 }
@@ -760,12 +927,39 @@ ClassMethod ExtractDeviceSetting(pBody As %DynamicObject, Output pSetting As %St
 	Quit $$$OK
 }
 
-/// Derive the SQL table name for a class.
+/// Derive the SQL table name for a class, honoring SqlTableName and SqlSchemaName.
+/// Returns the qualified name as "schema.table" (unquoted), for display. SQL
+/// built from it must use <method>QuotedTableName</method>.
 ClassMethod TableName(pClassName As %String) As %String
 {
-	set tPackage = $Piece(pClassName, ".", 1, *-1)
-	set tShort = $Piece(pClassName, ".", *)
-	Quit $Select(tPackage="":tShort, 1:$Replace(tPackage, ".", "_")_"."_tShort)
+	do ..TableParts(pClassName, .tSchemaName, .tTableName)
+	Quit tSchemaName_"."_tTableName
+}
+
+/// The qualified table name as delimited identifiers, <tt>"schema"."table"</tt>,
+/// safe in SQL text even when a name is a reserved word (a schema called Group).
+ClassMethod QuotedTableName(pClassName As %String) As %String
+{
+	do ..TableParts(pClassName, .tSchemaName, .tTableName)
+	Quit ..QuoteIdentifier(tSchemaName)_"."_..QuoteIdentifier(tTableName)
+}
+
+ClassMethod QuoteIdentifier(pName As %String) As %String [ CodeMode = expression, Private ]
+{
+""""_$Replace(pName, """", """""")_""""
+}
+
+/// The SQL schema and table name of a class.
+ClassMethod TableParts(pClassName As %String, Output pSchemaName As %String, Output pTableName As %String) [ Private ]
+{
+	Set tPackage = $Piece(pClassName, ".", 1, *-1)
+	Set tCompiledClass = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
+	// SqlTableName defaults to the short class name, SqlSchemaName to the
+	// package with dots replaced by underscores.
+	Set pTableName = $Select($IsObject(tCompiledClass):tCompiledClass.SqlTableName, 1:"")
+	Set:pTableName="" pTableName = $Piece(pClassName, ".", *)
+	Set pSchemaName = $Select($IsObject(tCompiledClass):tCompiledClass.SqlSchemaName, 1:"")
+	Set:pSchemaName="" pSchemaName = $Select(tPackage="":"SQLUser", 1:$Replace(tPackage, ".", "_"))
 }
 
 }

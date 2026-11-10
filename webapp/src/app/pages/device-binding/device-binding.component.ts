@@ -2,7 +2,7 @@ import { Component, inject, signal, computed, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute } from '@angular/router';
-import { ApiService } from '../../core/services/api.service';
+import { ApiService, apiErrorMessage } from '../../core/services/api.service';
 import { ConfigService } from '../../core/services/config.service';
 import { OpcuaTreeComponent } from '../../shared/opcua-tree/opcua-tree.component';
 import { FieldHintComponent } from '../../shared/field-hint/field-hint.component';
@@ -809,7 +809,7 @@ export class DeviceBindingComponent implements OnInit {
         this.loadSchema(cls);
       },
       error: (err) => {
-        this.error.set(this.message(err));
+        this.error.set(apiErrorMessage(err));
         this.loadingSchema.set(false);
       },
     });
@@ -830,7 +830,7 @@ export class DeviceBindingComponent implements OnInit {
         this.checkPending();
       },
       error: (err) => {
-        this.error.set(this.message(err));
+        this.error.set(apiErrorMessage(err));
         this.loadingSchema.set(false);
       },
     });
@@ -1045,7 +1045,7 @@ export class DeviceBindingComponent implements OnInit {
             this.router.navigate(['/pipelines']);
           },
           error: (err) => {
-            this.error.set(this.message(err));
+            this.error.set(apiErrorMessage(err));
             this.deploying.set(false);
           },
         });
@@ -1074,7 +1074,7 @@ export class DeviceBindingComponent implements OnInit {
         this.router.navigate(['/pipelines']);
       },
       error: (err) => {
-        this.error.set(this.message(err));
+        this.error.set(apiErrorMessage(err));
         this.deploying.set(false);
       },
     });
@@ -1093,9 +1093,5 @@ export class DeviceBindingComponent implements OnInit {
       .split(/\r?\n/)
       .map((l) => l.trim())
       .filter((l) => l !== '' && !l.startsWith('#'));
-  }
-
-  private message(err: any): string {
-    return err?.error?.error || err?.message || 'Request failed';
   }
 }

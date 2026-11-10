@@ -10,7 +10,7 @@ Class OPCUA.Adapter.Common Extends Ens.InboundAdapter
 /// Ens.ContextSearch.SubclassOf takes the superclass in a parameter named
 /// "class" (not "super"), and already excludes abstract classes, so the abstract
 /// DeviceSchema base never appears in the list.
-Parameter SETTINGS = "URL:Connection,ConnectionRetryTimeout:Connection,AlwaysConnect:Connection,DataSourceClass:Data:selector?context={Ens.ContextSearch/SubclassOf?class=OPCUA.DataSource.DeviceSchema},DeviceNodePaths:Data,Username:User,Password:User,SecurityMode:Security,ClientURI:Security,PublicCertificate:Security,PrivateKey:Security,TrustListDir:Security,RevocationListDir:Security,LogFileTag:Logging";
+Parameter SETTINGS = "URL:Connection,ConnectionRetryTimeout:Connection,AlwaysConnect:Connection,DataSourceClass:Data:selector?context={Ens.ContextSearch/SubclassOf?class=OPCUA.DataSource.DeviceSchema},DeviceNodePaths:Data,Credentials:Connection:credentialsSelector,SecurityMode:Security,ClientURI:Security,PublicCertificate:Security,PrivateKey:Security,TrustListDir:Security,RevocationListDir:Security,LogFileTag:Logging";
 
 // *** PROPERTIES INFLUENCED BY SETTINGS ***
 
@@ -29,8 +29,10 @@ Property ConnectionRetryTimeout As %Integer [ InitialExpression = 600 ];
 /// to connect to the target OPC UA server, regardless of any
 /// previous connection failures. If checked, a warning will
 /// be periodically issued after the duration specified 
-/// in ConnectionRetryTimeout
-Property AlwaysConnect As %Boolean [ InitialExpression = 0 ];
+/// in ConnectionRetryTimeout. On by default: unchecked, an outage
+/// longer than ConnectionRetryTimeout stops collection until the
+/// item is restarted, even once the server is back.
+Property AlwaysConnect As %Boolean [ InitialExpression = 1 ];
 
 /// The name of the DataSource class specifying the
 /// data types and nodes from which to obtain data
@@ -53,12 +55,6 @@ Property DataSourceClass As %String;
 /// no regeneration and no recompile. Only used by the row-source services; the
 /// declarative Examples/Tests path ignores it.
 Property DeviceNodePaths As %String(MAXLEN = 32000);
-
-/// The username with which to log on to the OPC UA server.
-Property Username As %String;
-
-/// The password with which to log on to the OPC UA server.
-Property Password As %String;
 
 Property SecurityMode As %String(DISPLAYLIST = ",None,Sign & Encrypt", VALUELIST = ",1,3") [ InitialExpression = "1", Required ];
 
@@ -137,7 +133,7 @@ Method OnInit() As %Status
 		set tSC = ..Client.Initialize()
 		Quit:$$$ISERR(tSC)
 
-		set tSC = ..Client.SetLogFile(..LogFileTag)
+		do ..ApplyLogFile()
 		set tSC = ..Client.SetupClient("",..SecurityMode,..ClientURI,..PublicCertificate,..PrivateKey,..TrustListDir,..RevocationListDir)
 		Quit:$$$ISERR(tSC)
 
@@ -153,6 +149,38 @@ Method OnInit() As %Status
 	Quit tSC  // Quit $$$OK
 }
 
+/// Point the native library's log at <property>LogFileTag</property>. A failure
+/// is logged as a warning, not returned: the library log is a diagnostic aid, so
+/// it should not stop the service collecting data. Before, the status was
+/// overwritten by the next call and the failure went unseen.
+Method ApplyLogFile() [ Private ]
+{
+	set tSC = ..Client.SetLogFile(..LogFileTag)
+	if $$$ISERR(tSC) {
+		$$$LOGWARNING("Could not set the OPC UA library log file '"_..LogFileTag_"': "_$System.Status.GetErrorText(tSC))
+	}
+}
+
+/// The library's IsConnected flag for <var>pClient</var>, and its client reset
+/// flag in <var>pResetFlag</var>. Both are 0 when the state cannot be read: the
+/// enquiry leaves its outputs unset on failure, and a -1 placeholder left there
+/// counts as connected, so the polling adapter would never reconnect.
+ClassMethod ConnectedState(pClient As OPCUA.Client, Output pResetFlag As %Integer) As %Integer
+{
+	set tConnected = 0, pResetFlag = 0
+	Try {
+		set tSC = pClient.GetClientState("", .tConnected, "", "", .tReset)
+		if $$$ISERR(tSC) {
+			set tConnected = 0
+		} else {
+			set pResetFlag = +$Get(tReset)
+		}
+	} Catch (e) {
+		set tConnected = 0
+	}
+	Quit +tConnected
+}
+
 Method Connect() As %Status [ Private ]
 {
 	#dim tSC as %Status = $$$OK
@@ -161,7 +189,7 @@ Method Connect() As %Status [ Private ]
 
 		if ..ResetClientFlag '= 0 {
 
-			set tSC = ..Client.SetLogFile(..LogFileTag)
+			do ..ApplyLogFile()
 			set tSC = ..Client.SetupClient("",..SecurityMode,..ClientURI,..PublicCertificate,..PrivateKey,..TrustListDir,..RevocationListDir)
 
 			if $$$ISERR(tSC) {
@@ -175,7 +203,23 @@ Method Connect() As %Status [ Private ]
 			}
 		}
 
-		set tSC = ..Client.Connect(..URL,..Username,..Password)
+		// Username and password come from the Credentials setting, an
+		// Ens.Config.Credentials ID, never from plain-text settings. Ens resolves
+		// the ID case-insensitively, and unset or "none" gives an empty entry: an
+		// anonymous session. An ID that names no entry leaves no object, and is an
+		// error rather than a silent anonymous connect. Setting Credentials again
+		// reloads the entry, so a password changed in the Portal applies at the
+		// next connect.
+		set tUser = "", tPassword = ""
+		if ..Credentials '= "" {
+			set ..Credentials = ..Credentials
+			if '$IsObject(..%CredentialsObj) {
+				set tSC = $$$ERROR($$$GeneralError, "Credentials entry '"_..Credentials_"' does not exist")
+				Quit
+			}
+			set tUser = ..%CredentialsObj.Username, tPassword = ..%CredentialsObj.Password
+		}
+		set tSC = ..Client.Connect(..URL, tUser, tPassword)
 		//Quit:$$$ISERR(tSC)
 
 	} catch (e) {

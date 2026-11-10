@@ -31,7 +31,7 @@ ClassMethod Test(pBody As %DynamicObject, Output pResult As %DynamicObject) As %
 
 		if $$$ISERR(tSC) {
 			set pResult.connected = 0
-			set pResult.error = $System.Status.GetErrorText(tSC)
+			set pResult.error = ##class(OPCUA.REST.Error).Text(tSC)
 			// Reset status — we report the error in the JSON body
 			set tSC = $$$OK
 		} else {

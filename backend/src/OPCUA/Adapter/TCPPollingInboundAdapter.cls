@@ -110,6 +110,7 @@ Method Connect() As %Status
 	// retry Connect, and so retry resolution — which is also what lets a device
 	// that only becomes browsable later start reporting on its own.
 	if $$$ISERR(tSC) && (..QueryHandle '> 0) {
+		// Status ignored: the setup error in tSC is the one to report.
 		do ..Disconnect()
 		set ..IsConnected = 0
 	}
@@ -152,13 +153,7 @@ Method OnTask() As %Status
 
 	if $$$ISERR(tSC) {
 	
-		try {
-			#dim tTmp as %Integer = -1
-			do ..Client.GetClientState("",.tTmp)
-			set ..IsConnected = tTmp
-		} catch (e) {
-			set ..IsConnected = 0
-		}
+		set ..IsConnected = ..ConnectedState(..Client)
 
 		if ..LastReportedError '= tSC {
 
@@ -180,9 +175,9 @@ Method OnTask() As %Status
 
 		$$$SetHostMonitor(..BusinessHost.%ConfigName,$$$eMonitorStatus,"Error")
 
-		if ##class(%SYSTEM.SQL).DATEDIFF("s",..ConnectionRetryEndTime,$ZTimestamp) > 0 && (..AlwaysConnect=0){
+		if ##class(%SYSTEM.SQL).DATEDIFF("s",..ConnectionRetryEndTime,$ZTimestamp) > 0 {
 			if ..AlwaysConnect {
-				$$$LOGWARNING("Client has not been able to establish the conection within the last "_..ConnectionRetryTimeout_" seconds")
+				$$$LOGWARNING("Client has not been able to establish the connection within the last "_..ConnectionRetryTimeout_" seconds")
 				set ..ConnectionRetryEndTime = ##class(%SYSTEM.SQL).DATEADD("s",..ConnectionRetryTimeout,$ZTimestamp)
 			} else {
 				$$$LOGERROR("Connection retry period concluded. Unable to establish connection.")
@@ -214,7 +209,9 @@ Method OnTearDown() As %Status
 {
 	try {
 		do ..Client.ReadBulkClear(..QueryHandle)	// Perhaps unnecessary
-	} catch (e) {}
+	} catch (e) {
+		// Best-effort teardown: the session is closing anyway, and ##super() must still run.
+	}
 
 	return ##super()
 }

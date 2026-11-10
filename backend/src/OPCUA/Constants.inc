@@ -181,8 +181,9 @@ ROUTINE OPCUA.Constants [Type=INC]
 #;#define MQTTNoCAConfigured                       27004
 #;#define MQTTIllegalQOS                           27005
 #;#define MQTTSendTimedOut                         27006
-#define OPCUACLIENT                              29000
-#define OPCUAParameterMustBe                     29001
+#; Not usable: on IRIS 2025.3, 29000 and 29001 are other system errors. Use $$$GeneralError.
+#;#define OPCUACLIENT                              29000
+#;#define OPCUAParameterMustBe                     29001
 
 
 

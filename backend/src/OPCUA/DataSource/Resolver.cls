@@ -82,7 +82,10 @@ ClassMethod ParseNodePath(pPath As %String, Output pNS As %Integer, Output pId, 
 	set pId = ""
 	set pIdType = $$$OpcuaNodeIdTypeString
 
-	set tRest = pPath
+	// Surrounding whitespace is not part of the nodepath. The webapp's
+	// parseNodeId() trims first too, and the two must agree.
+	set tPath = $ZStrip(pPath, "<>W")
+	set tRest = tPath
 
 	// Leading "ns=<n>;"
 	if $ZConvert($Extract(tRest, 1, 3), "L") = "ns=" {
@@ -132,7 +135,7 @@ ClassMethod ParseNodePath(pPath As %String, Output pNS As %Integer, Output pId, 
 
 	// Browse-path form (e.g. /Plant/AC1) is not supported yet — see PRD Q1,
 	// which ships the NodeId form first.
-	if $Extract(pPath) = "/" {
+	if $Extract(tPath) = "/" {
 		Quit $$$ERROR($$$GeneralError, "browse-path form is not supported yet — use ns=<n>;s=<name> or ns=<n>;i=<number>")
 	}
 
@@ -546,12 +549,14 @@ ClassMethod BrowseIntoMap(pClient As OPCUA.Client, pNS As %Integer, pId, pIdType
 
 /// Build the lookup key for a node name.
 ///
-/// A BrowseName arrives from the server as "<namespaceIndex>:<name>" in some
-/// stacks and bare in others, so strip any numeric namespace prefix. Matching is
-/// case-sensitive, as OPC UA BrowseNames are.
+/// The key is the name itself: matching is exact and case-sensitive, as OPC UA
+/// BrowseNames are. Do not strip a "<namespaceIndex>:" prefix. The native library
+/// delivers a BrowseName as $LB(name, nsIndex), so no prefix ever arrives, and
+/// stripping one turned a digits-only name ("42") into an empty subscript and
+/// "10:30 Shift" into "30 Shift".
 ClassMethod NameKey(pName As %String) As %String [ CodeMode = expression ]
 {
-$Select($Piece(pName, ":", 1) ? 1.N: $Piece(pName, ":", 2, *), 1: pName)
+pName
 }
 
 }

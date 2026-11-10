@@ -1,7 +1,7 @@
 import { Component, inject, signal, computed, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { Router } from '@angular/router';
-import { ApiService } from '../../core/services/api.service';
+import { Router, RouterLink } from '@angular/router';
+import { ApiService, apiErrorMessage } from '../../core/services/api.service';
 import { Schema } from '../../core/models/opcua.models';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dialog.component';
 
@@ -15,7 +15,7 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
 @Component({
   selector: 'app-schema-library',
   standalone: true,
-  imports: [CommonModule, ConfirmDialogComponent],
+  imports: [CommonModule, ConfirmDialogComponent, RouterLink],
   template: `
     <div class="p-8 max-w-7xl mx-auto">
       <!-- Page header -->
@@ -131,10 +131,17 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
                     <h3 class="text-lg font-semibold text-primary truncate"
                         [title]="schema.schemaClass">{{ schema.name }}</h3>
                     <div class="flex items-center gap-3 mt-2 flex-wrap">
-                      <span class="inline-flex items-center gap-1 text-xs text-on-surface-variant">
-                        <span class="material-symbols-outlined text-sm">view_column</span>
-                        {{ schema.columnCount }} column{{ schema.columnCount === 1 ? '' : 's' }}
-                      </span>
+                      @if (schema.columnsError) {
+                        <span class="inline-flex items-center gap-1 text-xs text-error" [title]="schema.columnsError">
+                          <span class="material-symbols-outlined text-sm">error</span>
+                          Columns unreadable
+                        </span>
+                      } @else {
+                        <span class="inline-flex items-center gap-1 text-xs text-on-surface-variant">
+                          <span class="material-symbols-outlined text-sm">view_column</span>
+                          {{ schema.columnCount }} column{{ schema.columnCount === 1 ? '' : 's' }}
+                        </span>
+                      }
                       <span class="inline-flex items-center gap-1 text-xs text-on-surface-variant">
                         <span class="material-symbols-outlined text-sm">table</span>
                         <span class="font-mono">{{ schema.tableName }}</span>
@@ -169,7 +176,7 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
                   <button (click)="remove(schema)"
                           [disabled]="schema.usedBy.length > 0"
                           [title]="schema.usedBy.length
-                            ? 'In use by: ' + schema.usedBy.join(', ')
+                            ? 'In use by: ' + formatUsageList(schema)
                             : 'Delete this schema'"
                           class="p-2 rounded-lg transition-colors"
                           [class]="schema.usedBy.length
@@ -183,8 +190,16 @@ import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dial
               @if (schema.usedBy.length) {
                 <div class="mt-4 pt-4 border-t border-outline-variant/10 flex items-center gap-2 flex-wrap">
                   <span class="text-[0.6rem] font-bold text-on-surface-variant uppercase tracking-widest">Used by</span>
-                  @for (name of schema.usedBy; track name) {
-                    <span class="px-2 py-1 rounded-md bg-surface-container text-xs font-medium text-primary">{{ name }}</span>
+                  @for (usage of schema.usedBy; track usage.name + usage.production) {
+                    @if (usage.managed) {
+                      <a [routerLink]="['/pipelines/edit', usage.name]"
+                         class="px-2 py-1 rounded-md bg-surface-container text-xs font-medium text-primary hover:bg-primary-fixed/20 cursor-pointer">{{ usage.name }}</a>
+                    } @else {
+                      <span class="px-2 py-1 rounded-md bg-surface-container-highest text-xs font-medium text-on-surface-variant"
+                            [title]="'In production ' + usage.production + ', managed in the Management Portal'">
+                        {{ usage.name }} (in {{ usage.production }})
+                      </span>
+                    }
                   }
                 </div>
               }
@@ -266,7 +281,7 @@ export class SchemaLibraryComponent implements OnInit {
         this.loading.set(false);
       },
       error: (err) => {
-        this.error.set(this.message(err));
+        this.error.set(apiErrorMessage(err));
         this.schemas.set([]);
         this.loading.set(false);
       },
@@ -288,7 +303,7 @@ export class SchemaLibraryComponent implements OnInit {
         this.detailLoading.set(false);
       },
       error: (err) => {
-        this.error.set(this.message(err));
+        this.error.set(apiErrorMessage(err));
         this.detailLoading.set(false);
         this.expanded.set('');
       },
@@ -306,6 +321,13 @@ export class SchemaLibraryComponent implements OnInit {
 
   /** Which schema the confirmation dialog is about, or null when it is closed. */
   pendingDelete = signal<Schema | null>(null);
+
+  /** Format usedBy list for the delete button tooltip */
+  formatUsageList(schema: Schema): string {
+    return schema.usedBy
+      .map(u => u.name + (u.managed ? '' : ' (in ' + u.production + ', managed in the Management Portal)'))
+      .join('; ');
+  }
 
   remove(schema: Schema): void {
     if (schema.usedBy.length) return;
@@ -329,11 +351,7 @@ export class SchemaLibraryComponent implements OnInit {
     this.pendingDelete.set(null);
     this.api.deleteSchema(schema.schemaClass).subscribe({
       next: () => this.load(),
-      error: (err) => this.error.set(this.message(err)),
+      error: (err) => this.error.set(apiErrorMessage(err)),
     });
-  }
-
-  private message(err: any): string {
-    return err?.error?.error || err?.message || 'Request failed';
   }
 }

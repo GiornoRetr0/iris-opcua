@@ -1,7 +1,7 @@
 Class OPCUA.Types.QualifiedNameDataValue Extends OPCUA.Types.AbstractDataValue
 {
 
-Property Name As %String;
+Property Name As %String(MAXLEN = "");
 
 Property Namespace As %Integer;
 

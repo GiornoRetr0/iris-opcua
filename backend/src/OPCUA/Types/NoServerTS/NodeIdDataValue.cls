@@ -5,7 +5,7 @@ Class OPCUA.Types.NoServerTS.NodeIdDataValue Extends OPCUA.Types.NoServerTS.Abst
 
 Property Namespace As %Integer;
 
-Property Identifier;
+Property Identifier As %String(MAXLEN = "");
 
 Property IdentifierType As %Integer;
 

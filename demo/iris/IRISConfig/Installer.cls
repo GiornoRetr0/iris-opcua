@@ -41,12 +41,22 @@ ClassMethod Install() As %Status
 		ZN "OPCUA"
 
 		// Load include files first (LoadDir skips .inc files)
-		Do $System.OBJ.Load("/opt/irisapp/src/OPCUA/Constants.inc", "k")
-		// Load all classes then compile
-		Do $System.OBJ.LoadDir("/opt/irisapp/src/", "k", , 1)
-		Do $System.OBJ.CompileAll("ck")
+		Set tSC = $System.OBJ.Load("/opt/irisapp/src/OPCUA/Constants.inc", "ck")
+		$$$ThrowOnError(tSC)
 
-		// Configure connector (non-fatal if .so missing), credentials, and web app
+		// Load all classes then compile
+		Set tSC = $System.OBJ.LoadDir("/opt/irisapp/src/", "ck", .tErrors, 1)
+		$$$ThrowOnError(tSC)
+		If $Get(tErrors) > 0 {
+			Set tSC = $$$ERROR($$$GeneralError, "LoadDir reported " _ tErrors _ " error(s)")
+			$$$ThrowOnError(tSC)
+		}
+
+		Set tSC = $System.OBJ.CompileAll("ck")
+		$$$ThrowOnError(tSC)
+
+		// Configure connector, credentials, and web app. The connector's status is
+		// ignored on purpose: a missing .so must not fail the image build.
 		Do ..LoadConnectorAndDemos("OPCUA")
 
 		Set tSC = ..CreateCredentials("OPCUA")
@@ -68,8 +78,10 @@ ClassMethod Install() As %Status
 	Quit tSC
 }
 
-/// This method will create an Interoperability credential meant to be used on Interoperability Productions.
-/// It will use the standard SuperUser/sys password for demos.
+/// Create the demo's Interoperability credentials: IrisOpcUaDemo (the standard
+/// SuperUser/sys demo login) and CertifiedServerDemo, the certified-server's
+/// user1/password, which the SecureExample service names in its Credentials
+/// setting rather than holding the password in the production class.
 ClassMethod CreateCredentials(pNamespace As %String) As %Status
 {
 	Set tSC = $$$OK
@@ -79,6 +91,8 @@ ClassMethod CreateCredentials(pNamespace As %String) As %Status
 		ZN pNamespace
 
 		Set tSC = ##class(Ens.Config.Credentials).SetCredential("IrisOpcUaDemo", "SuperUser", "sys", 1)
+		Quit:$System.Status.IsError(tSC)
+		Set tSC = ##class(Ens.Config.Credentials).SetCredential("CertifiedServerDemo", "user1", "password", 1)
 		Quit:$System.Status.IsError(tSC)
 	}
 	Catch (oException)
@@ -124,6 +138,7 @@ ClassMethod CreateWebApp(pNamespace As %String) As %Status
 	Catch (oException)
 	{
 		// Restore namespace on error
+		// Best effort: the original error must win over a failed namespace restore.
 		Try { ZN tNS } Catch (e2) {}
 		Set tSC = oException.AsStatus()
 	}
@@ -155,6 +170,7 @@ ClassMethod DisablePasswordExpiration() As %Status
 	}
 	Catch (oException)
 	{
+		// Best effort: the original error must win over a failed namespace restore.
 		Try { ZN tNS } Catch (e2) {}
 		Set tSC = oException.AsStatus()
 	}

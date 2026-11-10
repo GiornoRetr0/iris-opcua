@@ -323,9 +323,37 @@ or on error:
 ```json
 {
   "status": "error",
-  "error": "Human-readable error message"
+  "error": "Human-readable error message",
+  "ref": "20261030T095246-1409-3"
 }
 ```
+
+Errors carry a real HTTP status (`OPCUA.REST.Error.HttpCode`, sent by `Handler.Respond`):
+
+| Status | Meaning |
+|--------|---------|
+| 400 | The request is wrong: missing or invalid input, a plain `$$$GeneralError`, a datatype validation failure |
+| 401 | Sign-in failed (`Handler.Login`; no Basic challenge, so no browser pop-up) |
+| 403 | The IRIS account lacks a privilege: `%Ens_Credentials` for credentials, or an SQL privilege (SQLCODE -99) |
+| 404 | The named schema or pipeline does not exist |
+| 409 | Conflict with current state: schema in use, name or credentials ID taken, another production running, edit lock busy, stale save |
+| 500 | Anything else |
+
+A 4xx `error` is our own message, without the "ERROR #5001: " prefix. A 500 never
+carries internal detail: it says "Internal error. Reference <ref>" (or, for a change
+that was saved but whose follow-up failed, its own "... saved, but ..." message plus the
+reference), and only a 500 has the `ref` field. The full error is in the
+**Interoperability event log** (Interoperability > View > Event Log, source
+`OPCUA.REST.Handler`) under that reference, with any password from the request masked.
+It is deliberately not the application error log: `LOG^%ETN` saves every stack frame's
+variables, request passwords among them. A reference is `yyyymmddThhmmss-<job>-<n>`,
+with no space, unique per process.
+
+**Sign-in heuristic.** Under the default security setup a wrong password never reaches
+our `Login`: CSP runs it as CSPSystem, which cannot read the code database, and IRIS
+answers a bare text/html 404 itself. A real 404 from our API always carries the
+envelope, so the console (`isSignInFailure` in `api.service.ts`) treats a 401, or a 404
+without the envelope, as "Sign-in failed" and opens Settings.
 
 ### ClientManager: per-request connections
 
@@ -370,7 +398,7 @@ Two details carry the correctness:
 
 It's best-effort and opt-out (`probeChildren: 0`). When the probe is skipped or fails, `CategoryHasChildren()`'s guess stands — deliberately optimistic, since an arrow that opens to nothing is a smaller failure than a subtree the user cannot open at all.
 
-`nodeClass` is optional, not required. The C++ layer exports it at browse reference position `[6]` (`UACExport::UA2CL_ReferenceDescription`), but prebuilt binaries older than that export send an empty value — so an empty `nodeClass` falls back to the pure TypeDefinition inference, which is what shipped before. `OPCUA.Tests.ResolverTest` asserts both that a live server populates it and that the derived categories are the ones the webapp expects, so a stale `.so` shows up as a test failure rather than as a subtly wrong tree.
+`nodeClass` is optional, not required. The C++ layer exports it at browse reference position `[6]` (`UACExport::UA2CL_ReferenceDescription`), but prebuilt binaries older than that export send an empty value — so an empty `nodeClass` falls back to the pure TypeDefinition inference, which is what shipped before. `OPCUA.Tests.Live.ResolverTest` asserts both that a live server populates it and that the derived categories are the ones the webapp expects, so a stale `.so` shows up as a test failure rather than as a subtly wrong tree.
 
 The webapp uses this to render the expandable trees: the node explorer, the schema builder's column picker, and the device picker on the binding screen.
 
@@ -395,6 +423,7 @@ That is why adding a second pipeline over an existing schema costs one config it
 4. **Add a service item** (`AddServiceItem()`):
    - Create an `Ens.Config.Item`, set its class to `OPCUA.Service.TCPPollingRowSourceService` or `OPCUA.Service.TCPSubscriptionRowSourceService` (chosen by `mode`)
    - Configure settings: `DataSourceClass`, **`DeviceNodePaths`**, `URL`, poll/subscription intervals, security parameters
+   - Credentials: never a password setting. `credentials` in the body names an existing `Ens.Config.Credentials` entry (400 if missing). A `username` (+ `password`) is saved as a new entry, `DeployService.CredentialsId(name)` (`OPCUA-<name>`, sanitised), which deploy records in `^OPCUA.OwnedCredentials` and refuses with 409 if it already exists. The one exception is our own leftover from a pipeline deleted in the Portal: when the marker names this same pipeline and no item in any production references the entry, deploy replaces it. The 409 message says how to remove a leftover in the Portal. The item's `Credentials` setting names the entry. Deleting the pipeline deletes the entry only if deploy created it for that pipeline. IDs match case-insensitively, as in Ens. Credentials need `%Ens_Credentials` (SuperUser has it); without it the API answers 403
    - Add it with **`Enabled = 0`**, save the production, call `SaveToClass()`
 
 5. **Stop.** The production is deliberately **not** started, and the item is created switched off.
@@ -445,8 +474,8 @@ This is the base class that both adapters extend. It manages:
 - **Connection settings:** URL, security mode, certificates, credentials, timeouts
 - **Reconnection logic:** If the connection drops:
   - Check if we've exceeded `ConnectionRetryTimeout` (default 600 seconds)
-  - If `AlwaysConnect=1`, keep retrying with warnings
-  - If `AlwaysConnect=0`, give up and stop the adapter
+  - If `AlwaysConnect=1` (the default), keep retrying, with a warning each `ConnectionRetryTimeout`
+  - If `AlwaysConnect=0`, give up and stop the adapter; collection stays stopped until the item is restarted
   - If `ResetClientFlag` is set, destroy the old client object entirely and create a fresh one
 
 ### Configuring a pipeline from the Management Portal
@@ -651,9 +680,8 @@ depending on whether the server was reachable, and the two have different fixes.
 
 This is a **deploy-time gate only**, and deliberately not enforced on connect. A
 device that drops offline mid-session must keep storing NULL and warning, not take
-the pipeline down — enforcing it at runtime would recreate `StrictSchemaMatch`,
-which was removed for exactly that reason. The cost is that a device cannot be bound
-before it exists; adding it afterwards is a rebind, which is one settings edit.
+the pipeline down. The cost is that a device cannot be bound before it exists;
+adding it afterwards is a rebind, which is one settings edit.
 
 ### v2 Service startup (OnInit / Connect)
 
@@ -755,12 +783,44 @@ Deleting a schema is `SchemaService.Delete()`, which refuses while any pipeline 
    connection settings (read back by `DescribeItem()`, including the security
    settings — a secured pipeline's coverage check would otherwise fail to connect
    and reject every device)
-3. Writes the `DeviceNodePaths` setting
-4. Calls `UpdateProduction()` — the service re-resolves on its next connect
+3. Writes the `DeviceNodePaths` setting, and the categories when the body names
+   them, in one locked open and save (`ProductionEdit.UpdateItem()`)
+4. Calls `UpdateProduction()` when the pipeline production is running. The service
+   re-resolves on its next connect. `restarted` is 1 only when that update returned
+   OK. A stopped production gives `restarted: 0` and a `restartNote`. A suspended or
+   troubled one, or a failed update, makes the call fail with "Device list saved,
+   but the running pipeline could not be restarted: …". The save is not rolled back.
 
 That is the whole of editing a pipeline. Because devices are resolved by name at connect time, changing the list is a **settings update**: no regeneration, no recompile, no metadata to migrate.
 
 Changing a schema's **columns** is deliberately not possible here, and currently not possible anywhere — the regenerating edit path was removed along with the combined create-and-deploy wizard that drove it. Recreating the schema is the supported route, which does drop the table and its data. An `ALTER`-style schema edit is the obvious thing to build if that becomes painful.
+
+### Concurrent production edits
+
+Every console change to `OPCUA.Pipeline.Production` (deploy, toggle, delete,
+rebind) goes through `OPCUA.REST.ProductionEdit`:
+- `Begin` takes the lock `^OPCUA.ProductionEdit` (10 s timeout). A busy lock fails
+  with "Another change to the pipelines is in progress; try again."
+- `Begin` then rereads the production with `%Reload`, because `%OpenId` hands back
+  an object the process already holds, unchanged. It also records the production
+  class's `%Dictionary.ClassDefinition.TimeChanged`, which every `SaveToClass`
+  moves, the Portal's included.
+- `Commit` refuses if that stamp moved, with "The pipeline production was changed
+  by someone else (for example in the Management Portal); reload and try again."
+  Otherwise it runs `%Save` and `SaveToClass` once.
+
+Without this, a save from a stale copy is silent. The stale copy's `SaveToClass`
+writes old item settings into the class XData, while `Ens.Config` storage keeps the
+newer ones. The next compile of the production class (`LoadFromClass`) then drops
+the newer change.
+
+The Portal does not take our lock, and its own save checks no timestamp. Two gaps
+are therefore known, and documented IRIS APIs can't close them:
+1. A Portal save that lands in the millisecond window between `Commit`'s stamp
+   check and its `SaveToClass` is still overwritten in the class.
+2. A Portal page loaded before a console edit and saved after it overwrites the
+   console's change. That is the Portal's own code, so it can't be closed from
+   our side.
 
 ### The webapp flow
 
@@ -811,6 +871,22 @@ Mutual TLS -- both client and server verify each other's certificates. Requires:
 These are passed through `Client.SetupClient()` before connecting. The C++ library handles the actual TLS handshake.
 
 For Docker, `demo/certgen/generate.sh` generates all necessary certificates using OpenSSL.
+
+### Who can use the console
+
+The OPC UA Console is meant for SuperUser-level developer accounts. An account with
+only the installer's `OPCUA_API_<NS>` role (`OPCUA_API:U` plus RW on the namespace
+database) can list, create and delete schemas, and deploy, rebind, delete and list
+pipelines for anonymous servers (`OPCUA.Tests.Live.ApiRoleTest`). That works because
+the console's own queries need no SQL privilege: `ProductionEdit.Stamp` reads
+`TimeChanged` straight from the class dictionary, and the usage and serial-class checks
+are embedded SQL. Dynamic SQL that does need a privilege (`Utils.ExecQuery`, SQLCODE
+-99) answers 403 naming the account; the dashboard's row count is the one such query,
+and shows as unknown. The role cannot use credentials: reading or writing an
+`Ens.Config.Credentials` entry needs `%Ens_Credentials`, so deploy and rebind of a
+pipeline whose server needs a username get a 403. Use a SuperUser-level account for
+those pipelines, or have an administrator deploy them. Toggle, which starts or updates
+the production, is not yet verified for the role.
 
 ---
 
@@ -988,3 +1064,4 @@ InboundAdapter InboundAdapter   Svc   Svc   Svc    Svc
 | How pipelines are managed | `OPCUA/REST/PipelineService.cls` |
 | How the Docker image is set up | `demo/iris/IRISConfig/Installer.cls` |
 | How certificates work | `demo/certgen/certgen.bash`, security settings in `OPCUA/Adapter/Common.cls` |
+| How the tests are run | `backend/tests/OPCUA/Tests/Runner.cls`: `Offline()` runs `OPCUA.Tests.Unit` (no server, no native library), `Live()` runs `OPCUA.Tests.Live` (docker `plc`, `certified-server`); load first with `demo/iris/dev-load.sh` |

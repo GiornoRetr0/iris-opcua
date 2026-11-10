@@ -3,7 +3,7 @@
 Class OPCUA.Types.NoServerTS.ArrayDataValue.String Extends OPCUA.Types.NoServerTS.AbstractDataValue
 {
 
-Property Values As list Of %String;
+Property Values As list Of %String(MAXLEN = "");
 
 Storage Default
 {

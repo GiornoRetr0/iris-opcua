@@ -88,10 +88,10 @@ ClassMethod OPCUA2UNIX(Output pUNIX As %Integer, ByRef pOPCUA As %Integer) As %S
 	try {
 
 		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfDateConvOPCUA2UNIX,"",$LB(pOPCUA))
-    
+
         If $List(tRetval,1)'=0 Set tSC=##class(OPCUA.Client).DecodeError(tRetval) Quit
 
-		set pUNIX = $List(tRetVal,2)
+		set pUNIX = $List(tRetval,2)
 
 	} catch (e) {
 		set tSC = e.AsStatus()
@@ -107,10 +107,10 @@ ClassMethod UNIX2OPCUA(Output pOPCUA As %Integer, ByRef pUNIX As %Integer) As %S
 	try {
 
 		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfDateConvUNIX2OPCUA,"",$LB(pUNIX))
-    
+
         If $List(tRetval,1)'=0 Set tSC=##class(OPCUA.Client).DecodeError(tRetval) Quit
 
-		set pOPCUA = $List(tRetVal,2)
+		set pOPCUA = $List(tRetval,2)
 
 	} catch (e) {
 		set tSC = e.AsStatus()

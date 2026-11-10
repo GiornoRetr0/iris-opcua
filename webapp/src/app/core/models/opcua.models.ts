@@ -89,7 +89,8 @@ export interface Pipeline {
   health?: PipelineHealth;
   lastActivity?: string;
   error?: string;
-  rowCount?: number;
+  /** null when the count could not be taken (shown as a dash, not 0). */
+  rowCount?: number | null;
   interval?: number;
   callInterval?: number;
   serverUrl?: string;
@@ -183,10 +184,21 @@ export interface Schema {
   dataSourceName?: string;
   defaultNamespace?: number;
   columnCount: number;
+  /** Why the columns could not be read; columnCount is then 0. */
+  columnsError?: string;
   /** Populated by GET /schemas/:name only */
   columns?: SchemaColumn[];
-  /** Names of the pipelines currently bound to this schema */
-  usedBy: string[];
+  /** Pipelines currently bound to this schema, across all productions */
+  usedBy: SchemaUsage[];
+}
+
+export interface SchemaUsage {
+  /** Service item name */
+  name: string;
+  /** Production class name */
+  production: string;
+  /** True if production is OPCUA.Pipeline.Production (managed by console) */
+  managed: boolean;
 }
 
 export interface SchemaColumn {

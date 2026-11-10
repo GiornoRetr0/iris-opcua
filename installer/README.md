@@ -77,7 +77,7 @@ The last row is only automatic for accounts with the `%All` role. IRIS does not 
 - **REST application** (default `/csp/opcua/api`):
   - It uses password authentication and dispatches to `OPCUA.REST.Handler`.
   - It requires the resource `OPCUA_API`.
-  - The role `OPCUA_API_<NAMESPACE>` grants `OPCUA_API:USE` plus RW on the namespace database. It is created but assigned to nobody: **grant it to the accounts that use the console.**
+  - The role `OPCUA_API_<NAMESPACE>` grants `OPCUA_API:USE` plus RW on the namespace database. It is created but assigned to nobody. It lets an account sign in and manage schemas and anonymous pipelines (list, create, deploy, rebind, delete). It does **not** cover credentials: deploying or rebinding a pipeline whose OPC UA server needs a username reads or writes an `Ens.Config.Credentials` entry, which needs `%Ens_Credentials`, so the API answers 403. Toggling (starting) pipelines with only this role is not yet verified, and the dashboard's row counts show as unknown (they need SELECT on each schema table). The console is meant for SuperUser-level developer accounts; grant this role on its own only to accounts that work with anonymous servers.
   - An existing application with the same path is reused only if it serves the same namespace with the same dispatch class. Its settings are never changed.
 - **OPC UA Console** (beside the REST path: `/csp/opcua/api` → `/csp/opcua/ui`, open at `/csp/opcua/ui/index.html`):
   - The Angular build goes into `<install>/csp/opcua/ui/`, mirroring the web path. Each file is staged and checked against its SHA-256; nothing replaces the current console until every file verifies, and `index.html` moves last. Files the new build no longer has are deleted, only inside that directory.

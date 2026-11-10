@@ -1,7 +1,7 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
-import { ApiService } from '../../core/services/api.service';
+import { ApiService, apiErrorMessage } from '../../core/services/api.service';
 import { Schema } from '../../core/models/opcua.models';
 
 /**
@@ -94,10 +94,17 @@ import { Schema } from '../../core/models/opcua.models';
                   <h3 class="text-lg font-semibold text-primary truncate"
                       [title]="schema.schemaClass">{{ schema.name }}</h3>
                   <div class="flex items-center gap-3 mt-2 flex-wrap">
-                    <span class="inline-flex items-center gap-1 text-xs text-on-surface-variant">
-                      <span class="material-symbols-outlined text-sm">view_column</span>
-                      {{ schema.columnCount }} column{{ schema.columnCount === 1 ? '' : 's' }}
-                    </span>
+                    @if (schema.columnsError) {
+                      <span class="inline-flex items-center gap-1 text-xs text-error" [title]="schema.columnsError">
+                        <span class="material-symbols-outlined text-sm">error</span>
+                        Columns unreadable
+                      </span>
+                    } @else {
+                      <span class="inline-flex items-center gap-1 text-xs text-on-surface-variant">
+                        <span class="material-symbols-outlined text-sm">view_column</span>
+                        {{ schema.columnCount }} column{{ schema.columnCount === 1 ? '' : 's' }}
+                      </span>
+                    }
                     <span class="inline-flex items-center gap-1 text-xs text-on-surface-variant">
                       <span class="material-symbols-outlined text-sm">table</span>
                       <span class="font-mono">{{ schema.tableName }}</span>
@@ -148,7 +155,7 @@ export class ServiceSchemaPickerComponent implements OnInit {
         this.loading.set(false);
       },
       error: (err) => {
-        this.error.set(this.message(err));
+        this.error.set(apiErrorMessage(err, 'Could not load schemas'));
         this.schemas.set([]);
         this.loading.set(false);
       },
@@ -166,9 +173,5 @@ export class ServiceSchemaPickerComponent implements OnInit {
 
   back(): void {
     this.router.navigate(['/pipelines']);
-  }
-
-  private message(err: any): string {
-    return err?.error?.error || err?.message || 'Could not load schemas';
   }
 }

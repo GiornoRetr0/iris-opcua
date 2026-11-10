@@ -16,9 +16,50 @@ Parameter UseSession = 0;
 /// Content type for all responses.
 Parameter CONTENTTYPE = "application/json";
 
-/// Allow all logins (authentication handled by CSP web application config).
+/// Called by CSP when the request's IRIS sign-in failed (audit #16): answer 401
+/// with the usual JSON envelope.
+///
+/// This follows <method>%CSP.REST.Login</method> (CORS, and OPTIONS preflight
+/// allowed without sign-in) except that it sends no <tt>WWW-Authenticate</tt>
+/// header: a Basic challenge makes the browser open its own login dialog over the
+/// console, which has its own sign-in.
+///
+/// <b>Under the default setup this does not run.</b> CSP calls it in the pre-login
+/// context (user CSPSystem, no roles), which cannot read the namespace's code
+/// database (<tt>%DB_OPCUA</tt> has no public permission). Loading this class then
+/// fails with &lt;PROTECT&gt;, and CSP answers a bare text/html 404 itself. That is
+/// IRIS's response, not ours; the console recognises it as a failed sign-in (see
+/// <tt>apiErrorMessage</tt> in the webapp). We deliberately do not grant that context
+/// read access (audit #16). The override stays because it is correct wherever the
+/// security context lets it run, and harmless otherwise.
 ClassMethod Login(skipRights As %Boolean = 1) As %Status
 {
+	#dim tSC As %Status = $$$OK
+	Try {
+		set %response.OutputSessionToken = 0
+		if %response.Language = "" set %response.Language = "en"
+		set %response.ContentType = ..#CONTENTTYPE
+		set:%request.Method'="OPTIONS" %response.Status = ..#HTTP401UNAUTHORIZED
+
+		set tMatchURL = $Extract(%request.URL, $Length(%request.Application), *)
+		set tRoute = ..DispatchMap(tMatchURL, %request.Method, .tVerbs, .tArgs)
+		set tClass = $ListGet(tRoute, 3, $ClassName())
+		set tSC = $ClassMethod(tClass, "ProcessCorsRequest", $ListGet(tRoute, 5, ""), $ListGet(tRoute, 4, ""))
+		Quit:$$$ISERR(tSC)
+
+		if %request.Method = "OPTIONS" {
+			set tSC = ..OnHandleOptionsRequest(tMatchURL)
+		}
+	} Catch (e) {
+		set %response.Status = ..#HTTP401UNAUTHORIZED
+		set tSC = $$$OK
+	}
+	// Login runs instead of Page, so the headers are not written yet.
+	do %response.WriteHTTPHeader()
+	if %request.Method '= "OPTIONS" {
+		write {"status": "error", "error": "Sign-in failed"}.%ToJSON()
+	}
+	// As in the base method: an error status here would lose the 401.
 	Quit $$$OK
 }
 
@@ -59,8 +100,7 @@ ClassMethod Ping() As %Status
 	set tResult = {}
 	set tResult.timestamp = $ZDateTime($Horolog, 3)
 	set tResult.version = "1.0"
-	set tSC = ..SendOK(tResult)
-	Quit tSC
+	Quit ..Respond($$$OK, tResult)
 }
 
 /// Browse OPC UA node children.
@@ -76,10 +116,7 @@ ClassMethod Browse() As %Status
 	} Catch (e) {
 		set tSC = e.AsStatus()
 	}
-	if $$$ISERR(tSC) {
-		Quit ..SendError($System.Status.GetErrorText(tSC))
-	}
-	Quit ..SendOK(tResult)
+	Quit ..Respond(tSC, $Get(tResult))
 }
 
 /// Read a single node value.
@@ -95,10 +132,7 @@ ClassMethod Read() As %Status
 	} Catch (e) {
 		set tSC = e.AsStatus()
 	}
-	if $$$ISERR(tSC) {
-		Quit ..SendError($System.Status.GetErrorText(tSC))
-	}
-	Quit ..SendOK(tResult)
+	Quit ..Respond(tSC, $Get(tResult))
 }
 
 /// Test OPC UA server connectivity.
@@ -114,10 +148,7 @@ ClassMethod Test() As %Status
 	} Catch (e) {
 		set tSC = e.AsStatus()
 	}
-	if $$$ISERR(tSC) {
-		Quit ..SendError($System.Status.GetErrorText(tSC))
-	}
-	Quit ..SendOK(tResult)
+	Quit ..Respond(tSC, $Get(tResult))
 }
 
 /// Deploy a data pipeline (DataSource + Production).
@@ -133,10 +164,7 @@ ClassMethod Deploy() As %Status
 	} Catch (e) {
 		set tSC = e.AsStatus()
 	}
-	if $$$ISERR(tSC) {
-		Quit ..SendError($System.Status.GetErrorText(tSC))
-	}
-	Quit ..SendOK(tResult)
+	Quit ..Respond(tSC, $Get(tResult))
 }
 
 /// List all pipelines.
@@ -151,10 +179,7 @@ ClassMethod Pipelines() As %Status
 	} Catch (e) {
 		set tSC = e.AsStatus()
 	}
-	if $$$ISERR(tSC) {
-		Quit ..SendError($System.Status.GetErrorText(tSC))
-	}
-	Quit ..SendOK(tResult)
+	Quit ..Respond(tSC, $Get(tResult))
 }
 
 /// Toggle a pipeline on/off.
@@ -169,10 +194,7 @@ ClassMethod PipelinesToggle() As %Status
 	} Catch (e) {
 		set tSC = e.AsStatus()
 	}
-	if $$$ISERR(tSC) {
-		Quit ..SendError($System.Status.GetErrorText(tSC))
-	}
-	Quit ..SendOK(tResult)
+	Quit ..Respond(tSC, $Get(tResult))
 }
 
 /// Delete a pipeline.
@@ -187,10 +209,7 @@ ClassMethod PipelinesDelete() As %Status
 	} Catch (e) {
 		set tSC = e.AsStatus()
 	}
-	if $$$ISERR(tSC) {
-		Quit ..SendError($System.Status.GetErrorText(tSC))
-	}
-	Quit ..SendOK(tResult)
+	Quit ..Respond(tSC, $Get(tResult))
 }
 
 /// Rebind an existing pipeline's device list, without regenerating its schema.
@@ -205,10 +224,7 @@ ClassMethod PipelinesRebind() As %Status
 	} Catch (e) {
 		set tSC = e.AsStatus()
 	}
-	if $$$ISERR(tSC) {
-		Quit ..SendError($System.Status.GetErrorText(tSC))
-	}
-	Quit ..SendOK(tResult)
+	Quit ..Respond(tSC, $Get(tResult))
 }
 
 /// Create a device schema, with no production side effects.
@@ -223,10 +239,7 @@ ClassMethod SchemasCreate() As %Status
 	} Catch (e) {
 		set tSC = e.AsStatus()
 	}
-	if $$$ISERR(tSC) {
-		Quit ..SendError($System.Status.GetErrorText(tSC))
-	}
-	Quit ..SendOK(tResult)
+	Quit ..Respond(tSC, $Get(tResult))
 }
 
 /// List all device schemas.
@@ -241,10 +254,7 @@ ClassMethod SchemasList() As %Status
 	} Catch (e) {
 		set tSC = e.AsStatus()
 	}
-	if $$$ISERR(tSC) {
-		Quit ..SendError($System.Status.GetErrorText(tSC))
-	}
-	Quit ..SendOK(tResult)
+	Quit ..Respond(tSC, $Get(tResult))
 }
 
 /// Column detail for one schema.
@@ -263,10 +273,7 @@ ClassMethod SchemasGet(pName As %String) As %Status
 	} Catch (e) {
 		set tSC = e.AsStatus()
 	}
-	if $$$ISERR(tSC) {
-		Quit ..SendError($System.Status.GetErrorText(tSC))
-	}
-	Quit ..SendOK(tResult)
+	Quit ..Respond(tSC, $Get(tResult))
 }
 
 /// Delete a schema. Refused while a pipeline still references it.
@@ -285,10 +292,7 @@ ClassMethod SchemasDelete(pName As %String) As %Status
 	} Catch (e) {
 		set tSC = e.AsStatus()
 	}
-	if $$$ISERR(tSC) {
-		Quit ..SendError($System.Status.GetErrorText(tSC))
-	}
-	Quit ..SendOK(tResult)
+	Quit ..Respond(tSC, $Get(tResult))
 }
 
 /// Dry run a device binding: report which columns resolve per device.
@@ -307,10 +311,7 @@ ClassMethod SchemasValidate(pName As %String) As %Status
 	} Catch (e) {
 		set tSC = e.AsStatus()
 	}
-	if $$$ISERR(tSC) {
-		Quit ..SendError($System.Status.GetErrorText(tSC))
-	}
-	Quit ..SendOK(tResult)
+	Quit ..Respond(tSC, $Get(tResult))
 }
 
 /// Build a %DynamicObject from either JSON body or query parameters.
@@ -320,16 +321,9 @@ ClassMethod GetRequestParams(Output pBody As %DynamicObject) As %Status [ Privat
 	#dim tSC As %Status = $$$OK
 	Try {
 		// Try to parse JSON body first
-		set tContent = ""
 		if %request.Content '= "" {
-			if $IsObject(%request.Content) {
-				set tContent = %request.Content.Read()
-			} else {
-				set tContent = %request.Content
-			}
-		}
-		if tContent '= "" {
-			set pBody = {}.%FromJSON(tContent)
+			// Parse directly from Content (handles both streams and strings)
+			set pBody = {}.%FromJSON(%request.Content)
 			Quit
 		}
 
@@ -343,9 +337,110 @@ ClassMethod GetRequestParams(Output pBody As %DynamicObject) As %Status [ Privat
 			do pBody.%Set(tParam, tVal)
 		}
 	} Catch (e) {
-		set tSC = $$$ERROR($$$GeneralError, "Invalid request: "_e.DisplayString())
+		// The exception names a %FromJSON routine offset; the caller only needs
+		// to know the body is not JSON.
+		set tSC = ##class(OPCUA.REST.Error).BadRequest("Invalid request: the body is not valid JSON")
 	}
 	Quit tSC
+}
+
+/// Send the response for a route: the data envelope on success, otherwise the
+/// error envelope with the HTTP status from <class>OPCUA.REST.Error</class>.
+///
+/// Mapping: bad input 400 (plain <tt>$$$GeneralError</tt>s and
+/// <method>OPCUA.REST.Error.BadRequest</method>), unknown schema or pipeline 404,
+/// conflict 409 (schema in use, name taken, another production running, edit lock
+/// busy, stale save), failed sign-in 401 (<method>Login</method>), anything else
+/// 500. 4xx responses carry our own message without the "ERROR #5001: " prefix.
+///
+/// A 500 never carries internal detail. The full error goes to the
+/// Interoperability event log (<method>LogInternal</method>) under a reference that
+/// the response quotes. An unexpected error answers
+/// "Internal error. Reference &lt;ref&gt;". A change that was saved but whose
+/// follow-up failed (the "... saved, but ..." errors from Rebind, Toggle and
+/// Delete) is a 500 built with <method>OPCUA.REST.Error.Make</method>: it shows
+/// its own message, so the console can say what was saved, plus the reference.
+ClassMethod Respond(pSC As %Status, pData = "") As %Status
+{
+	Quit:$$$ISOK(pSC) ..SendOK(pData)
+	set tHttp = ##class(OPCUA.REST.Error).HttpCode(pSC)
+	if tHttp '= 500 {
+		Quit ..SendError(tHttp, ##class(OPCUA.REST.Error).Message(pSC))
+	}
+
+	// yyyymmddThhmmss-job-n: no space, so it copies as one word, and the
+	// per-process counter keeps two errors in one second apart.
+	set tRef = $Translate($ZDateTime($Horolog, 8), " :", "T")_"-"_$Job_"-"_$Increment(^||OPCUA.REST("ref"))
+	set tWhere = ""
+	if $IsObject($Get(%request)) {
+		set tWhere = " ("_%request.Method_" "_%request.URL_")"
+	}
+	do ..LogInternal("OPC UA REST error, reference "_tRef_tWhere_": "_$System.Status.GetErrorText(pSC))
+
+	if ##class(OPCUA.REST.Error).Carried(pSC) {
+		set tMsg = ##class(OPCUA.REST.Error).Message(pSC)_" (Reference "_tRef_")"
+	} else {
+		set tMsg = "Internal error. Reference "_tRef
+	}
+	Quit ..SendError(500, tMsg, tRef)
+}
+
+/// Write the text of an internal error to the Interoperability event log
+/// (Interoperability &gt; View &gt; Event Log, source OPCUA.REST.Handler).
+///
+/// Not the application error log: <tt>LOG^%ETN</tt> saves every stack frame's
+/// variables, the request body and its parsed objects among them, which would copy
+/// OPC UA passwords into <tt>^ERRORS</tt>. The event log entry holds only this text,
+/// and any password-like value from the request is masked in it first.
+ClassMethod LogInternal(pText As %String) [ Private ]
+{
+	set tText = pText
+	try {
+		do ..RequestSecrets(.tSecrets)
+		set tSecret = ""
+		for {
+			set tSecret = $Order(tSecrets(tSecret), -1)
+			Quit:tSecret=""
+			set tText = $Replace(tText, tSecret, "*****")
+		}
+	} catch e {
+		// Could not read the request: log no request-derived text at all.
+		set tText = $Piece(tText, ": ", 1)_": (error text withheld, the request could not be checked for secrets)"
+	}
+	do ##class(Ens.Util.Log).LogError($ClassName(), "Respond", $Extract(tText, 1, 32000))
+}
+
+/// The non-empty values of every request field whose name contains "password",
+/// in the JSON body (at any depth) or the query string, as <var>pSecrets</var>(value).
+ClassMethod RequestSecrets(Output pSecrets) [ Private ]
+{
+	kill pSecrets
+	Quit:'$IsObject($Get(%request))
+	set tName = ""
+	for {
+		set tName = $Order(%request.Data(tName))
+		Quit:tName=""
+		set tValue = $Get(%request.Data(tName, 1))
+		set:($ZConvert(tName, "L") [ "password")&&(tValue'="") pSecrets(tValue) = ""
+	}
+	set tContent = %request.Content
+	Quit:tContent=""
+	do:$IsObject(tContent) tContent.Rewind()
+	set tBody = {}.%FromJSON(tContent)
+	do ..CollectSecrets(tBody, .pSecrets)
+}
+
+ClassMethod CollectSecrets(pNode, ByRef pSecrets) [ Private ]
+{
+	Quit:'$IsObject(pNode)
+	set tIter = pNode.%GetIterator()
+	while tIter.%GetNext(.tKey, .tValue) {
+		if $IsObject(tValue) {
+			do ..CollectSecrets(tValue, .pSecrets)
+		} elseif ($ZConvert(tKey, "L") [ "password") && (tValue '= "") {
+			set pSecrets(tValue) = ""
+		}
+	}
 }
 
 /// Send a success response envelope.
@@ -358,13 +453,21 @@ ClassMethod SendOK(pData) As %Status
 	Quit $$$OK
 }
 
-/// Send an error response envelope and set HTTP 400 status.
-ClassMethod SendError(pMessage As %String) As %Status
+/// Send an error response envelope with HTTP status <var>pHttp</var>.
+/// <var>pRef</var>, for a 500, is the event log reference.
+ClassMethod SendError(pHttp As %Integer, pMessage As %String, pRef As %String = "") As %Status [ Private ]
 {
-	set %response.Status = "400 Bad Request"
+	set %response.Status = $Case(pHttp,
+		400: ..#HTTP400BADREQUEST,
+		401: ..#HTTP401UNAUTHORIZED,
+		403: ..#HTTP403FORBIDDEN,
+		404: ..#HTTP404NOTFOUND,
+		409: ..#HTTP409CONFLICT,
+		: ..#HTTP500INTERNALSERVERERROR)
 	set tResponse = {}
 	set tResponse.status = "error"
 	set tResponse.error = pMessage
+	set:pRef'="" tResponse.ref = pRef
 	write tResponse.%ToJSON()
 	Quit $$$OK
 }

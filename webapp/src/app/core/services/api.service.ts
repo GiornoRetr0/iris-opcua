@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 import { Observable, map, timeout, catchError, throwError } from 'rxjs';
 import { ConfigService } from './config.service';
 import {
@@ -21,6 +21,53 @@ interface ApiEnvelope<T> {
   error?: string;
 }
 
+/** What the console shows when IRIS refuses the API account (HTTP 401). */
+export const SIGN_IN_FAILED = 'Sign-in failed';
+
+/** The message of our {"status":"error","error":"…"} envelope, if the body is one. */
+function envelopeError(err: HttpErrorResponse): string {
+  const body = err.error as Partial<ApiEnvelope<unknown>> | null;
+  if (body && typeof body === 'object' && body.status === 'error' && typeof body.error === 'string') {
+    return body.error;
+  }
+  return '';
+}
+
+/**
+ * Whether IRIS refused the API account. Our own Login answers 401, but under the
+ * default security setup it never runs: CSP calls it as CSPSystem, which cannot
+ * read the code database, so IRIS itself answers a bare text/html 404 (audit #16).
+ * A real 404 from our API always carries the envelope (e.g. GET /schemas/NoSuch),
+ * so a 404 without one is the failed sign-in.
+ */
+export function isSignInFailure(err: unknown): boolean {
+  if (!(err instanceof HttpErrorResponse)) return false;
+  if (err.status === 401) return true;
+  return err.status === 404 && !envelopeError(err);
+}
+
+/**
+ * The message to show for a failed API call, whatever its HTTP status.
+ *
+ * The API answers errors with a real status (400, 401, 403, 404, 409, 500) and the
+ * envelope {"status":"error","error":"…"}; a 500 says only "Internal error.
+ * Reference …", the detail being in the Interoperability event log (source
+ * OPCUA.REST.Handler), not the application error log. Angular
+ * puts that envelope in HttpErrorResponse.error. Its own `message` ("Http failure
+ * response for …") is never shown.
+ */
+export function apiErrorMessage(err: unknown, fallback = 'Request failed'): string {
+  if (err instanceof HttpErrorResponse) {
+    const body = envelopeError(err);
+    if (body) return body;
+    if (isSignInFailure(err)) return SIGN_IN_FAILED;
+    if (err.status === 0) return 'Cannot reach the IRIS API';
+    return `${fallback} (HTTP ${err.status})`;
+  }
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
+}
+
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   private http = inject(HttpClient);
@@ -40,6 +87,25 @@ export class ApiService {
       );
     }
     return headers;
+  }
+
+  /**
+   * Common error path for every call. A failed sign-in (see isSignInFailure) in
+   * the hosted console means the IRIS account in Settings no longer signs in
+   * (wrong or changed password, disabled account), so Settings opens on that tab
+   * with the reason. The error still
+   * reaches the caller, which shows apiErrorMessage(err).
+   */
+  private fail(err: any): Observable<never> {
+    if (err?.name === 'TimeoutError') {
+      return throwError(() => new Error('Request timed out'));
+    }
+    if (isSignInFailure(err) && this.configService.hosted) {
+      document.dispatchEvent(
+        new CustomEvent('open-settings', { detail: { tab: 'gateway', notice: SIGN_IN_FAILED } })
+      );
+    }
+    return throwError(() => err);
   }
 
   /** Build request body with connection params from a specific server profile */
@@ -78,8 +144,22 @@ export class ApiService {
   }
 
   private post<T>(endpoint: string, params: Record<string, any> = {}, timeoutMs = 15000, server?: ServerProfile): Observable<T> {
+    return this.postBody<T>(endpoint, this.buildBody(params, server), timeoutMs);
+  }
+
+  /**
+   * POST for managing an existing pipeline: sends only `params`, never the
+   * connection fields. The server reads a pipeline's endpoint and credentials
+   * from the pipeline itself (its password sits in an IRIS credentials entry,
+   * audit #15), so the browser's stored OPC UA password has no business here.
+   */
+  private postPlain<T>(endpoint: string, params: Record<string, any>, timeoutMs = 15000): Observable<T> {
+    return this.postBody<T>(endpoint, params, timeoutMs);
+  }
+
+  private postBody<T>(endpoint: string, body: Record<string, any>, timeoutMs: number): Observable<T> {
     return this.http
-      .post<ApiEnvelope<T>>(`${this.baseUrl}${endpoint}`, this.buildBody(params, server), {
+      .post<ApiEnvelope<T>>(`${this.baseUrl}${endpoint}`, body, {
         headers: this.headers,
       })
       .pipe(
@@ -88,12 +168,7 @@ export class ApiService {
           if (res.status === 'error') throw new Error(res.error || 'Unknown API error');
           return res.data as T;
         }),
-        catchError((err) => {
-          if (err.name === 'TimeoutError') {
-            return throwError(() => new Error('Request timed out'));
-          }
-          return throwError(() => err);
-        })
+        catchError((err) => this.fail(err))
       );
   }
 
@@ -107,7 +182,8 @@ export class ApiService {
         map((res) => {
           if (res.status === 'error') throw new Error(res.error);
           return res.data!;
-        })
+        }),
+        catchError((err) => this.fail(err))
       );
   }
 
@@ -136,15 +212,15 @@ export class ApiService {
   }
 
   listPipelines(): Observable<Pipeline[]> {
-    return this.post<Pipeline[]>('/pipelines', {});
+    return this.postPlain<Pipeline[]>('/pipelines', {});
   }
 
   togglePipeline(name: string): Observable<any> {
-    return this.post('/pipelines/toggle', { name });
+    return this.postPlain('/pipelines/toggle', { name });
   }
 
   deletePipeline(name: string): Observable<any> {
-    return this.post('/pipelines/delete', { name });
+    return this.postPlain('/pipelines/delete', { name });
   }
 
   /**
@@ -162,10 +238,10 @@ export class ApiService {
     name: string,
     devices: string,
     categories?: string[]
-  ): Observable<{ updated: number; name: string; deviceCount: number; restarted?: number }> {
+  ): Observable<{ updated: number; name: string; deviceCount: number; restarted: number; restartNote: string }> {
     const body: Record<string, unknown> = { name, devices };
     if (categories !== undefined) body['categories'] = categories;
-    return this.post('/pipelines/rebind', body, 30000);
+    return this.postPlain('/pipelines/rebind', body, 30000);
   }
 
   // ── Schemas: reusable device types, independent of any pipeline ──
@@ -184,12 +260,7 @@ export class ApiService {
           if (res.status === 'error') throw new Error(res.error || 'Unknown API error');
           return res.data as T;
         }),
-        catchError((err) => {
-          if (err.name === 'TimeoutError') {
-            return throwError(() => new Error('Request timed out'));
-          }
-          return throwError(() => err);
-        })
+        catchError((err) => this.fail(err))
       );
   }
 
@@ -212,7 +283,8 @@ export class ApiService {
         map((res) => {
           if (res.status === 'error') throw new Error(res.error || 'Unknown API error');
           return res.data as CreateSchemaResult;
-        })
+        }),
+        catchError((err) => this.fail(err))
       );
   }
 

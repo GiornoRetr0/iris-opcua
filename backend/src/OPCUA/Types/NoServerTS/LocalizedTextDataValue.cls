@@ -5,7 +5,7 @@ Class OPCUA.Types.NoServerTS.LocalizedTextDataValue Extends OPCUA.Types.NoServer
 
 Property Text As %String(MAXLEN = "");
 
-Property Locale As %String;
+Property Locale As %String(MAXLEN = "");
 
 Storage Default
 {

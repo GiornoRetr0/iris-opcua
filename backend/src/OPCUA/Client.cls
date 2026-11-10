@@ -3,8 +3,9 @@ Include (%callout, OPCUA.Constants, Ensemble)
 /// This class implements an interface to portions of the open source open62541 library,
 /// allowing for the creation of two different types of data feeds that can be used
 /// to import data into IRIS from OPC UA servers located locally, across a LAN, and/or
-/// over the Internet. Security features such as encrypted 
-/// transmission and password authentication are not implemented at this time.
+/// over the Internet. Supports SecurityMode 1 (None: unencrypted, anonymous) and
+/// SecurityMode 3 (Sign & Encrypt: mutual TLS authentication with client certificate,
+/// private key, trust list and revocation list).
 /// Details about open62541 can be found at https://open62541.org.
 /// This client provides the ability to connect to an OPC UA server locally,
 /// across a LAN, or over the Internet. 
@@ -40,7 +41,10 @@ Property Handle As %Integer [ InitialExpression = 0, Private ];
 /// Used internally to interpret error codes returned by the client.
 ClassMethod DecodeError(list As %String) As %Status [ Final ]
 {
-	Set tType=$List(list,2),tCode=$List(list,3),tMsgTxt=$List(list,4)
+	// $ListGet: an error list without a message (or code) must still decode. $List
+	// would throw, and the caller would report <NULL VALUE> instead of the error.
+	Set tType=$ListGet(list,2),tCode=$ListGet(list,3),tMsgTxt=$ListGet(list,4)
+	Set:tMsgTxt="" tMsgTxt="OPC UA library error, type "_tType_", code "_tCode
 	If tType=$$$ErrorTypeNone {
 		Set tTypeTxt=$$$Text("No Error")
 	} elseif tType=$$$ErrorTypeInfo {
@@ -61,8 +65,9 @@ ClassMethod DecodeError(list As %String) As %Status [ Final ]
 		Set tTypeTxt=$$$Text("Undefined Error")
 	}
 	
-	//Quit $$$ERROR($$$OPCUACLIENT,tCode,tTypeTxt,tMsgTxt)
-	Quit $$$ERROR($$$OPCUACLIENT,tMsgTxt)
+	// $$$GeneralError (5001), not a private code: 29000 is an IRIS system error
+	// ("Context class '%1' does not exist") and would replace this message
+	Quit $$$ERROR($$$GeneralError,tMsgTxt)
 }
 
 /// Loads the IrisOPCUA library if necessary
@@ -339,6 +344,7 @@ Method GetClientStateString(ByRef pSC As %Status = "") As %String [ Final ]
 		Set ResetFlag = $LI(tRetval,6)
         
 		#dim tConnStatusDesc as %String
+		// Trace text only: an unknown name leaves the description empty.
 		do ##class(OPCUA.Client).GetStatusCodeName(.tConnStatusDesc,ConnectionStatus)
 
 		set tRetStr = "ChannelStatus='"_..GetChannelStateName(SecureChannelStatus)_"', SessionStatus='"_..GetSessionStateName(SessionStatus)_"', ConnectionStatus='"_tConnStatusDesc_"'"
@@ -822,6 +828,13 @@ Method PollSubscriptionSet(Output Results As %List, QueryHandle As %Integer, Pol
 }
 
 /// Deletes a set of subscriptions with a given server.
+///
+/// Needs the native library built on 2026-10-21 or later. Older builds freed the
+/// subscription here but kept a pointer to it, and freed it again when the client
+/// was reset or closed, which killed the process (signal 11).
+///
+/// Before a disconnect it is not needed. <method>Disconnect</method> closes the
+/// session with deleteSubscriptions = true, so the server drops every subscription.
 Method DeleteSubscriptionSet(QueryHandle As %Integer) As %Status [ Final ]
 {
 	#dim tSC As %Status = $$$OK

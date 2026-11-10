@@ -41,8 +41,7 @@ XData ProductionDefinition
     <Setting Target="Adapter" Name="RequestedPublishingInterval">1000</Setting>
     <Setting Target="Adapter" Name="RequestedSamplingInterval">250</Setting>
     <Setting Target="Adapter" Name="RequestedQueueSize">5</Setting>
-    <Setting Target="Adapter" Name="Username">user1</Setting>
-    <Setting Target="Adapter" Name="Password">password</Setting>
+    <Setting Target="Adapter" Name="Credentials">CertifiedServerDemo</Setting>
     <Setting Target="Adapter" Name="SecurityMode">3</Setting>
     <Setting Target="Adapter" Name="ClientURI">urn:secuac</Setting>
     <Setting Target="Adapter" Name="PublicCertificate">/usr/irissys/uac/certs/secuac.crt.der</Setting>

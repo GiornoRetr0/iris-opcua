@@ -7,7 +7,7 @@ Property SourceTimeStamp As %TimeStamp [ SqlFieldName = "SourceTS"];
 
 Property ServerTimeStamp As %TimeStamp [ SqlFieldName = "ServerTS"];
 
-Property Status As %Integer;
+Property Status As %BigInt;
 
 Storage Default
 {

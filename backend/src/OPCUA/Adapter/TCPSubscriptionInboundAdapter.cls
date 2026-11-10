@@ -207,6 +207,7 @@ Method Connect() As %Status
 	
 		$$$LOGERROR("OPCUA subscription query setup failed : "_$SYSTEM.Status.GetErrorText(tSC))
 
+		// Status ignored: the setup error in tSC is the one to report.
 		do ..Disconnect()
 
 		Quit tSC
@@ -222,7 +223,8 @@ Method OnTask() As %Status
 
 	#dim tQtyProcessed as %Integer = 0
 	#dim tProcessingErrors as %Integer = 0
-	
+	#dim tFirstProcessingError as %Status = $$$OK
+
 	#dim tStartTime as %TimeStamp = $ZTimestamp
 
 	try {
@@ -268,33 +270,12 @@ Method OnTask() As %Status
 			$$$LOGWARNING("Batch size capacity warning. Performance may degrade. Current queue items processed = "_tQueueItemsProcessed_". Current internal queue size = "_tCurrentQueueSize_".")
 		}
 
-		for i=1:1:tQty {
-
-			// Ensure that this is set even in the event of error.
-			// (If an error occurs within ProcessInput(), then 
-			// %WaitForNextCallInterval should hopefully still be set.)
-			set ..BusinessHost.%WaitForNextCallInterval = 1 
-
-			set tSC = ..BusinessHost.ProcessInput($LI(tBatch,i))  
-
-			if $$$ISERR(tSC) {
-
-				$$$TRACE("Error encountered processing adapter output, continuing... : "_$SYSTEM.Status.GetErrorText(tSC))
-				set tProcessingErrors = tProcessingErrors + 1
-
-			} else {
-
-				set tQtyProcessed = tQtyProcessed + 1
-			}
-
-		}
+		do ..ProcessBatch(tBatch, tQty, .tQtyProcessed, .tProcessingErrors, .tFirstProcessingError)
 
 		// *********
 
 		// Again, ensure that %WaitForNextCallInterval remains set.
 		set ..BusinessHost.%WaitForNextCallInterval = 1
-			
-		Quit:$$$ISERR(tSC)
 
 	} catch (e) {
 		Set tSC = e.AsStatus()
@@ -305,20 +286,8 @@ Method OnTask() As %Status
 
 	if $$$ISERR(tSC) {
 
-		try {
-
-			#dim tTmpConn as %Integer = -1
-			#dim tTmpReset as %Integer = 0
-			
-			do ..Client.GetClientState("",.tTmpConn,"","",.tTmpReset)
-			
-			set ..IsConnected = tTmpConn
-			set ..ResetClientFlag = tTmpReset
-		
-		} catch (e) {
-			set ..IsConnected = 0
-			set ..ResetClientFlag = 0
-		}
+		set ..IsConnected = ..ConnectedState(..Client, .tTmpReset)
+		set ..ResetClientFlag = tTmpReset
 
 		if ..LastReportedError '= tSC {
 
@@ -348,7 +317,7 @@ Method OnTask() As %Status
 
 		if (##class(%SYSTEM.SQL).DATEDIFF("ms",..ConnectionRetryEndTime,$ZTimestamp) > 0) {
 			if ..AlwaysConnect {
-				$$$LOGWARNING("Client has not been able to establish the conection within the last "_..ConnectionRetryTimeout_" seconds")
+				$$$LOGWARNING("Client has not been able to establish the connection within the last "_..ConnectionRetryTimeout_" seconds")
 				set ..ConnectionRetryEndTime = ##class(%SYSTEM.SQL).DATEADD("s",..ConnectionRetryTimeout,$ZTimestamp)
 			} else {
 				$$$LOGERROR("Error encountered : Maximum time since a successful response exceeded : "_$SYSTEM.Status.GetErrorText(tSC))
@@ -369,7 +338,7 @@ Method OnTask() As %Status
 		
 		if tProcessingErrors > 0 {
 
-			$$$LOGWARNING(tProcessingErrors_" processing error(s) encountered concurrent with the successful entry of "_tQtyProcessed_" record(s) : "_..Client.GetClientStateString())
+			$$$LOGWARNING(tProcessingErrors_" processing error(s) encountered concurrent with the successful entry of "_tQtyProcessed_" record(s). First error : "_$SYSTEM.Status.GetErrorText(tFirstProcessingError)_" : "_..Client.GetClientStateString())
 
 			set ..QtySequentialEmptyResults = 0
 
@@ -383,13 +352,7 @@ Method OnTask() As %Status
 		} else {
 		
 			// No results were returned. Is the client connected?
-			try {
-				#dim tTmp as %Integer = -1
-				do ..Client.GetClientState("",.tTmp)
-				set ..IsConnected = tTmp
-			} catch (e) {
-				set ..IsConnected = 0
-			}
+			set ..IsConnected = ..ConnectedState(..Client)
 
 			if ..IsConnected = 0 {
 
@@ -404,18 +367,10 @@ Method OnTask() As %Status
 
 				if ..QtySequentialEmptyResults >= ..ReestablishOnEmptyResult {
 
-					$$$LOGWARNING("Maximum number of sequential empty results exceeded. Disconnecting.")	
+					$$$LOGWARNING("Maximum number of sequential empty results exceeded. Disconnecting.")
 
-					try {
-						set tSC = ..Client.ReadBulkClear(..QueryHandle)
-					} catch (e) {
-						set tSC = e.AsStatus()
-					}
-
-					if $$$ISERR(tSC) {
-						$$$TRACE("Ignoring error encountered when deleting old subscription : "_$SYSTEM.Status.GetErrorText(tSC))
-					}
-
+					// Disconnecting deletes the subscription: the session is closed with
+					// deleteSubscriptions = true, so no DeleteSubscriptionSet is needed.
 					try {
 						set tSC = ..Client.Disconnect()
 					} catch (e) {
@@ -446,14 +401,38 @@ Method OnTask() As %Status
 	Quit $$$OK
 }
 
-/// Used internally to disconnect the OPC-UA client.
-Method OnTearDown() As %Status
+/// Hands each notification in <var>pBatch</var> to the business host. A failed
+/// notification is counted, never returned: it says nothing about the connection,
+/// so it must not send <method>OnTask</method> down its error path, and the
+/// position of a failure in the batch must not change how the batch is reported.
+Method ProcessBatch(pBatch As %List, pQty As %Integer, Output pQtyProcessed As %Integer, Output pErrors As %Integer, Output pFirstError As %Status)
 {
-	try {
-		do ..Client.ReadBulkClear(..QueryHandle)	// Perhaps unnecessary
-	} catch (e) {}
+	set pQtyProcessed = 0, pErrors = 0, pFirstError = $$$OK
 
-	return ##super()
+	for i=1:1:pQty {
+
+		// Ensure that this is set even in the event of error.
+		// (If an error occurs within ProcessInput(), then
+		// %WaitForNextCallInterval should hopefully still be set.)
+		set ..BusinessHost.%WaitForNextCallInterval = 1
+
+		try {
+			set tItemSC = ..BusinessHost.ProcessInput($LI(pBatch,i))
+		} catch (e) {
+			set tItemSC = e.AsStatus()
+		}
+
+		if $$$ISERR(tItemSC) {
+
+			$$$TRACE("Error encountered processing adapter output, continuing... : "_$SYSTEM.Status.GetErrorText(tItemSC))
+			set pErrors = pErrors + 1
+			set:pErrors=1 pFirstError = tItemSC
+
+		} else {
+
+			set pQtyProcessed = pQtyProcessed + 1
+		}
+	}
 }
 
 }

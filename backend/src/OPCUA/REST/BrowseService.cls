@@ -109,38 +109,26 @@ ClassMethod WalkBrowseResults(pResults As %List, Output pChildren) As %Integer
 			set tChildId = $LI(tNodeInfo, 2)
 			set tChildIdType = $LI(tNodeInfo, 3)
 
+			// Elements 4-7 may be absent or empty (older library builds), so
+			// they are read with $ListGet, never $LI.
+
 			// --- BrowseName [4]: the stable, non-localized identifier ---
-			set tBrowseName = ""
-			Try {
-				set tBrowseInfo = $LI(tRef, 4)
-				if $ListValid($Get(tBrowseInfo)) set tBrowseName = $LI(tBrowseInfo, 1)
-			} Catch (ex) {}
+			set tBrowseInfo = $ListGet(tRef, 4)
+			set tBrowseName = $Select($ListValid(tBrowseInfo):$ListGet(tBrowseInfo, 1), 1:"")
 
 			// --- DisplayName [5]: localized presentation text ---
-			set tDisplayName = ""
-			Try {
-				set tDisplayInfo = $LI(tRef, 5)
-				if $ListValid($Get(tDisplayInfo)) set tDisplayName = $LI(tDisplayInfo, 1)
-			} Catch (ex) {}
+			set tDisplayInfo = $ListGet(tRef, 5)
+			set tDisplayName = $Select($ListValid(tDisplayInfo):$ListGet(tDisplayInfo, 1), 1:"")
 
 			// --- NodeClass [6]: the server's own answer, when the library gives it ---
 			// Older prebuilt binaries predate the UA2CL_ReferenceDescription export of
 			// this field and leave it empty; ClassifyNode falls back to inference then.
-			set tNodeClass = ""
-			Try {
-				set tNodeClass = $LI(tRef, 6)
-			} Catch (ex) {}
+			set tNodeClass = $ListGet(tRef, 6)
 
 			// --- Type definition (what kind of Object/Variable) ---
-			set tTypeDefNS = ""
-			set tTypeDefId = ""
-			Try {
-				set tTypeDefInfo = $LI(tRef, 7)
-				if $ListValid($Get(tTypeDefInfo)) {
-					set tTypeDefNS = $LI(tTypeDefInfo, 1)
-					set tTypeDefId = $LI(tTypeDefInfo, 2)
-				}
-			} Catch (ex) {}
+			set tTypeDefInfo = $ListGet(tRef, 7)
+			set tTypeDefNS = $Select($ListValid(tTypeDefInfo):$ListGet(tTypeDefInfo, 1), 1:"")
+			set tTypeDefId = $Select($ListValid(tTypeDefInfo):$ListGet(tTypeDefInfo, 2), 1:"")
 
 			set tCategory = ..ClassifyNode(tRefType, tTypeDefNS, tTypeDefId, tNodeClass)
 

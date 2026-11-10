@@ -1,12 +1,10 @@
 Include (%occInclude, Ensemble)
 
-/// Manage deployed OPC UA pipelines: list, toggle, delete.
-/// Reads from the shared production (OPCUA.Pipeline.Production).
+/// Manage deployed OPC UA pipelines: list, toggle, delete, rebind.
+/// Reads and edits the shared production, OPCUA.Pipeline.Production
+/// (<method>OPCUA.REST.ProductionEdit.ProductionClass</method>).
 Class OPCUA.REST.PipelineService
 {
-
-/// The shared production class.
-Parameter ProductionClass = "OPCUA.Pipeline.Production";
 
 /// How long a cached row count stays usable, in seconds.
 ///
@@ -21,90 +19,28 @@ ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %S
 	#dim tSC As %Status = $$$OK
 	set pResult = []
 	Try {
-		if '##class(%Dictionary.ClassDefinition).%ExistsId(..#ProductionClass) Quit
+		// The same production that Toggle, Delete and Rebind edit.
+		set tProdClass = ##class(OPCUA.REST.ProductionEdit).ProductionClass()
+		if '##class(%Dictionary.ClassDefinition).%ExistsId(tProdClass) Quit
 
-		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
+		set tProd = ##class(Ens.Config.Production).%OpenId(tProdClass)
 		if '$IsObject(tProd) Quit
 
-		do ##class(Ens.Director).GetProductionStatus(.tRunningProd, .tProdState)
-		set tProdRunning = (tRunningProd = ..#ProductionClass) && (tProdState = 1)
+		set tSC = ##class(OPCUA.REST.ProductionEdit).ProductionStatus(.tRunningProd, .tProdState)
+		Quit:$$$ISERR(tSC)
+		set tProdRunning = (tRunningProd = tProdClass) && (tProdState = 1)
 
 		for i=1:1:tProd.Items.Count() {
 			set tCfgItem = tProd.Items.GetAt(i)
-
-			set tItem = {}
-			set tItem.name = tCfgItem.Name
-			set tItem.className = tCfgItem.ClassName
-			set tItem.enabled = tCfgItem.Enabled
-			// Portal categories, as an array rather than the stored comma string:
-			// the console edits them as discrete chips, and splitting on the client
-			// would duplicate the trimming rules that already live server-side.
-			set tItem.categories = []
-			for c=1:1:$Length(tCfgItem.Category, ",") {
-				set tCat = $ZStrip($Piece(tCfgItem.Category, ",", c), "<>WC")
-				continue:tCat=""
-				do tItem.categories.%Push(tCat)
+			// One pipeline that cannot be described must not hide the others: it is
+			// listed with its error, as SchemaService.List lists an unreadable schema.
+			Try {
+				set tItem = ..ListEntry(tCfgItem, tProdRunning)
+			} Catch (eItem) {
+				set tItem = {"name": (tCfgItem.Name), "className": (tCfgItem.ClassName), "categories": []}
+				set tItem.enabled = tCfgItem.Enabled
+				set tItem.error = ##class(OPCUA.REST.Error).Text(eItem.AsStatus())
 			}
-
-			// Determine mode and pipeline version from service class
-			if tItem.className = "OPCUA.Service.TCPSubscriptionRowSourceService" {
-				set tItem.mode = "subscription"
-				set tItem.pipelineVersion = 2
-			} elseif tItem.className = "OPCUA.Service.TCPSubscriptionService" {
-				set tItem.mode = "subscription"
-				set tItem.pipelineVersion = 1
-			} elseif tItem.className = "OPCUA.Service.TCPPollingRowSourceService" {
-				set tItem.mode = "polling"
-				set tItem.pipelineVersion = 2
-			} else {
-				set tItem.mode = "polling"
-				set tItem.pipelineVersion = 1
-			}
-
-			// Read settings from config item
-			set tItem.dataSourceClass = ..GetSettingValue(tCfgItem, "DataSourceClass")
-			set tItem.serverUrl = ..GetSettingValue(tCfgItem, "URL")
-			set tItem.callInterval = ..GetSettingValue(tCfgItem, "CallInterval")
-			set tItem.publishingInterval = ..GetSettingValue(tCfgItem, "RequestedPublishingInterval")
-			// The device list is now a plain setting, so surface it directly —
-			// editing a pipeline's devices is editing this string.
-			set tDeviceNodePaths = ..GetSettingValue(tCfgItem, "DeviceNodePaths")
-			set tItem.deviceNodePaths = tDeviceNodePaths
-
-			// Derive table name from DataSource class
-			if tItem.dataSourceClass '= "" {
-				set tPkg = $Piece(tItem.dataSourceClass, ".", 1, *-1)
-				set tShort = $Piece(tItem.dataSourceClass, ".", *)
-				set tItem.tableName = $Select(tPkg="":tShort, 1:$Replace(tPkg, ".", "_")_"."_tShort)
-			}
-
-			if tProdRunning {
-				set tItem.running = ##class(Ens.Director).IsItemEnabled(tItem.name, .tSCStatus)
-			} else {
-				set tItem.running = 0
-			}
-			// Rows are a property of the table, not of the run state. Reporting 0
-			// for a stopped pipeline claimed its collected data was gone — and since
-			// a pipeline is now deployed stopped, that is the common case.
-			set tItem.rowCount = ..GetRowCount(tItem.dataSourceClass)
-
-			// Enabled is not the same as collecting: a service whose adapter fails
-			// to connect or resolve stays enabled and keeps retrying while writing
-			// nothing. Surface the adapter's own verdict so the UI can tell the two
-			// apart — this is what "started but silently collecting nothing" looked
-			// like before.
-			do ..GetHealth(tItem.name, tProdRunning, tCfgItem.Enabled, .tHealth, .tLastActivity, .tCycles)
-			set tItem.health = tHealth
-			set tItem.lastActivity = tLastActivity
-			set tItem.cycles = tCycles
-
-			set tItem.productionRunning = tProdRunning
-			set tItem.nodes = ..GetNodeNames(tItem.dataSourceClass)
-
-			if tItem.pipelineVersion = 2 {
-				set tItem.rowSources = ..GetRowSourceInfo(tItem.dataSourceClass, tDeviceNodePaths)
-			}
-
 			do pResult.%Push(tItem)
 		}
 
@@ -112,6 +48,91 @@ ClassMethod List(pBody As %DynamicObject, Output pResult As %DynamicArray) As %S
 		set tSC = e.AsStatus()
 	}
 	Quit tSC
+}
+
+/// One pipeline's entry for <method>List</method>. Throws on an unexpected
+/// error, which List reports as that item's <tt>error</tt>.
+ClassMethod ListEntry(pCfgItem As Ens.Config.Item, pProdRunning As %Boolean) As %DynamicObject [ Private ]
+{
+	// Test seam (process-private, so not reachable over REST): force this item to fail.
+	if $Get(^||OPCUA.Tests("failPipelineItem")) = pCfgItem.Name {
+		$$$ThrowStatus($$$ERROR($$$GeneralError, "Forced failure describing pipeline '"_pCfgItem.Name_"'"))
+	}
+	set tCfgItem = pCfgItem, tProdRunning = pProdRunning
+
+	set tItem = {}
+	set tItem.name = tCfgItem.Name
+	set tItem.className = tCfgItem.ClassName
+	set tItem.enabled = tCfgItem.Enabled
+	// Portal categories, as an array rather than the stored comma string:
+	// the console edits them as discrete chips, and splitting on the client
+	// would duplicate the trimming rules that already live server-side.
+	set tItem.categories = []
+	for c=1:1:$Length(tCfgItem.Category, ",") {
+		set tCat = $ZStrip($Piece(tCfgItem.Category, ",", c), "<>WC")
+		continue:tCat=""
+		do tItem.categories.%Push(tCat)
+	}
+
+	// Determine mode and pipeline version from service class
+	if tItem.className = "OPCUA.Service.TCPSubscriptionRowSourceService" {
+		set tItem.mode = "subscription"
+		set tItem.pipelineVersion = 2
+	} elseif tItem.className = "OPCUA.Service.TCPSubscriptionService" {
+		set tItem.mode = "subscription"
+		set tItem.pipelineVersion = 1
+	} elseif tItem.className = "OPCUA.Service.TCPPollingRowSourceService" {
+		set tItem.mode = "polling"
+		set tItem.pipelineVersion = 2
+	} else {
+		set tItem.mode = "polling"
+		set tItem.pipelineVersion = 1
+	}
+
+	// Read settings from config item
+	set tItem.dataSourceClass = ..GetSettingValue(tCfgItem, "DataSourceClass")
+	set tItem.serverUrl = ..GetSettingValue(tCfgItem, "URL")
+	set tItem.callInterval = ..GetSettingValue(tCfgItem, "CallInterval")
+	set tItem.publishingInterval = ..GetSettingValue(tCfgItem, "RequestedPublishingInterval")
+	// The device list is now a plain setting, so surface it directly —
+	// editing a pipeline's devices is editing this string.
+	set tDeviceNodePaths = ..GetSettingValue(tCfgItem, "DeviceNodePaths")
+	set tItem.deviceNodePaths = tDeviceNodePaths
+
+	// Derive table name from DataSource class
+	if tItem.dataSourceClass '= "" {
+		set tItem.tableName = ##class(OPCUA.REST.SchemaService).TableName(tItem.dataSourceClass)
+	}
+
+	if tProdRunning {
+		set tItem.running = ##class(Ens.Director).IsItemEnabled(tItem.name, .tSCStatus)
+	} else {
+		set tItem.running = 0
+	}
+	// Rows are a property of the table, not of the run state. Reporting 0
+	// for a stopped pipeline claimed its collected data was gone — and since
+	// a pipeline is now deployed stopped, that is the common case.
+	set tCount = ..GetRowCount(tItem.dataSourceClass)
+	do tItem.%Set("rowCount", tCount, $Select(tCount = "":"null", 1:"number"))
+
+	// Enabled is not the same as collecting: a service whose adapter fails
+	// to connect or resolve stays enabled and keeps retrying while writing
+	// nothing. Surface the adapter's own verdict so the UI can tell the two
+	// apart — this is what "started but silently collecting nothing" looked
+	// like before.
+	do ..GetHealth(tItem.name, tProdRunning, tCfgItem.Enabled, .tHealth, .tLastActivity, .tCycles)
+	set tItem.health = tHealth
+	set tItem.lastActivity = tLastActivity
+	set tItem.cycles = tCycles
+
+	set tItem.productionRunning = tProdRunning
+	set tItem.nodes = ..GetNodeNames(tItem.dataSourceClass)
+
+	if tItem.pipelineVersion = 2 {
+		set tItem.rowSources = ..GetRowSourceInfo(tItem.dataSourceClass, tDeviceNodePaths)
+	}
+
+	Quit tItem
 }
 
 /// Get a setting value from a config item by name.
@@ -197,12 +218,17 @@ ClassMethod GetHealth(pItemName As %String, pProdRunning As %Boolean, pEnabled A
 ///
 /// Cached in <tt>^IRIS.Temp</tt> deliberately — it is derived data that should not
 /// survive a restart or be journalled.
-ClassMethod GetRowCount(pClassName As %String) As %Integer [ Private ]
+///
+/// Returns "" (unknown, null in the JSON) when the count cannot be taken, e.g.
+/// the class has no table or the user may not SELECT from it. 0 would read as
+/// "no rows", and the dashboard warns about a pipeline collecting nothing.
+ClassMethod GetRowCount(pClassName As %String) As %Integer [ Internal ]
 {
 	set tCount = 0
 	Try {
 		if pClassName = "" Quit
-		if '##class(%Dictionary.ClassDefinition).%ExistsId(pClassName) Quit
+		// A schema class that is gone has an unknown count, not 0 rows.
+		if '##class(%Dictionary.ClassDefinition).%ExistsId(pClassName) set tCount = "" Quit
 
 		// $ZH is a monotonic second counter, so this needs no date arithmetic.
 		set tNow = $ZH
@@ -214,16 +240,15 @@ ClassMethod GetRowCount(pClassName As %String) As %Integer [ Private ]
 				Quit
 			}
 		}
-		// SQL schema.table: package becomes schema, last part becomes table
-		set tPkg = $Piece(pClassName, ".", 1, *-1)
-		set tCls = $Piece(pClassName, ".", *)
-		set tSchema = $Select(tPkg="":"SQLUser", 1:$Replace(tPkg, ".", "_"))
-		set tTable = tSchema_"."_tCls
-		set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT COUNT(*) FROM "_tTable)
-		if $IsObject(tRS) && tRS.%Next() set tCount = tRS.%GetData(1)
+		// Quoted, so a reserved word as schema or table name (Group) still parses.
+		// Dynamic SQL: an account without SELECT on the table (the installer's
+		// OPCUA_API role) gets a 403 here, caught below as an unknown count.
+		set tTable = ##class(OPCUA.REST.SchemaService).QuotedTableName(pClassName)
+		set tRS = ##class(OPCUA.Utils).ExecQuery("SELECT COUNT(*) FROM "_tTable)
+		if tRS.%Next() set tCount = tRS.%GetData(1)
 		set ^IRIS.Temp.OPCUARowCount(pClassName) = $ListBuild(tNow, tCount)
 	} Catch (e) {
-		// Table might not exist or be empty
+		set tCount = ""
 	}
 	Quit tCount
 }
@@ -231,24 +256,24 @@ ClassMethod GetRowCount(pClassName As %String) As %Integer [ Private ]
 /// Get the OPC UA node names from a DataSource class definition.
 ClassMethod GetNodeNames(pClassName As %String) As %DynamicArray [ Private ]
 {
+	// No Try: an unexpected error goes to List's Catch and is reported, rather
+	// than showing the pipeline with no nodes.
 	set tNodes = []
-	Try {
-		if pClassName = "" Quit
-		// Use compiled class info (CompiledProperty) which has parameter access
-		set tClassDef = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
-		if '$IsObject(tClassDef) Quit
-		for i=1:1:tClassDef.Properties.Count() {
-			set tProp = tClassDef.Properties.GetAt(i)
-			// Get OPCUANODENAME from property parameters
-			set tNodeName = tProp.Parameters.GetAt("OPCUANODENAME")
-			if tNodeName '= "" {
-				set tNodeInfo = {}
-				set tNodeInfo.property = tProp.Name
-				set tNodeInfo.nodeId = tNodeName
-				do tNodes.%Push(tNodeInfo)
-			}
+	Quit:pClassName="" tNodes
+	// Use compiled class info (CompiledProperty) which has parameter access
+	set tClassDef = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
+	Quit:'$IsObject(tClassDef) tNodes
+	for i=1:1:tClassDef.Properties.Count() {
+		set tProp = tClassDef.Properties.GetAt(i)
+		// Get OPCUANODENAME from property parameters
+		set tNodeName = tProp.Parameters.GetAt("OPCUANODENAME")
+		if tNodeName '= "" {
+			set tNodeInfo = {}
+			set tNodeInfo.property = tProp.Name
+			set tNodeInfo.nodeId = tNodeName
+			do tNodes.%Push(tNodeInfo)
 		}
-	} Catch (e) {}
+	}
 	Quit tNodes
 }
 
@@ -264,39 +289,42 @@ ClassMethod Toggle(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 			Quit
 		}
 
-		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
-		if '$IsObject(tProd) {
-			set tSC = $$$ERROR($$$GeneralError, "Cannot open production")
-			Quit
+		set tSC = ##class(OPCUA.REST.ProductionEdit).Begin(.tProd, .tStamp)
+		Quit:$$$ISERR(tSC)
+		Try {
+			set tItem = ##class(OPCUA.REST.ProductionEdit).FindItem(tProd, tName)
+			if '$IsObject(tItem) {
+				set tSC = ##class(OPCUA.REST.Error).NotFound("Pipeline '"_tName_"' not found")
+			} else {
+				set tNewState = 'tItem.Enabled
+				// Check before saving, so a refused enable leaves the pipeline disabled
+				if tNewState set tSC = ##class(OPCUA.REST.DeployService).CheckNoOtherProduction()
+				if $$$ISOK(tSC) {
+					set tItem.Enabled = tNewState
+					set tSC = ##class(OPCUA.REST.ProductionEdit).Commit(tProd, tStamp)
+				}
+			}
+		} Catch (eEdit) {
+			set tSC = eEdit.AsStatus()
 		}
-
-		set tItem = tProd.FindItemByConfigName(tName, .tSC2)
-		if '$IsObject(tItem) {
-			set tSC = $$$ERROR($$$GeneralError, "Pipeline '"_tName_"' not found")
-			Quit
-		}
-
-		set tNewState = 'tItem.Enabled
-		set tItem.Enabled = tNewState
-
-		set tSC = tProd.%Save()
-		$$$ThrowOnError(tSC)
-		set tSC = tProd.SaveToClass()
-		$$$ThrowOnError(tSC)
-
-		// Start production if not running, otherwise just update
-		do ##class(Ens.Director).GetProductionStatus(.tRunning, .tRunState)
-		if (tRunning = ..#ProductionClass) && (tRunState = 1) {
-			set tSC = ##class(Ens.Director).UpdateProduction()
-			$$$ThrowOnError(tSC)
-		} elseif tNewState {
-			// Production not running and we're enabling — start it
-			set tSC = ##class(OPCUA.REST.DeployService).StartOrUpdateProduction()
-			$$$ThrowOnError(tSC)
-		}
+		do ##class(OPCUA.REST.ProductionEdit).End()
+		Quit:$$$ISERR(tSC)
 
 		set pResult.name = tName
 		set pResult.enabled = tNewState
+
+		// Update the running production, or start it when enabling a pipeline
+		// while it is not running.
+		set tSC = ##class(OPCUA.REST.ProductionEdit).ApplyToRunning(.tRestarted, .tNote)
+		if $$$ISOK(tSC) && 'tRestarted && tNewState {
+			set tSC = ##class(OPCUA.REST.DeployService).StartOrUpdateProduction()
+			if $$$ISOK(tSC) set tRestarted = 1, tNote = ""
+		}
+		set pResult.restarted = tRestarted
+		set pResult.restartNote = tNote
+		if $$$ISERR(tSC) {
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Pipeline "_$Select(tNewState:"enabled",1:"disabled")_" and saved, but the production could not be updated: "_##class(OPCUA.REST.Error).Text(tSC), tSC)
+		}
 
 	} Catch (e) {
 		set tSC = e.AsStatus()
@@ -324,46 +352,71 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 			Quit
 		}
 
-		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
-		if '$IsObject(tProd) {
-			set tSC = $$$ERROR($$$GeneralError, "Cannot open production")
-			Quit
-		}
+		// A pipeline whose credentials entry deploy created takes the entry with
+		// it, which needs %Ens_Credentials:W. Without it, refuse before anything
+		// is removed, rather than delete the pipeline and orphan the entry (every
+		// redeploy under the name would then get 409).
+		set tSC = ..CheckCanDeleteCredentials(tName)
+		Quit:$$$ISERR(tSC)
 
-		// Find the item and get its DataSourceClass before removing
-		set tDSClass = ""
-		set tFoundIdx = 0
-		for i=1:1:tProd.Items.Count() {
-			set tCfgItem = tProd.Items.GetAt(i)
-			if tCfgItem.Name = tName {
+		set tDSClass = "", tItemId = "", tCredId = ""
+		set tSC = ##class(OPCUA.REST.ProductionEdit).Begin(.tProd, .tStamp)
+		Quit:$$$ISERR(tSC)
+		Try {
+			set tCfgItem = ##class(OPCUA.REST.ProductionEdit).FindItem(tProd, tName, .tFoundIdx)
+			if '$IsObject(tCfgItem) {
+				set tSC = ##class(OPCUA.REST.Error).NotFound("Pipeline '"_tName_"' not found in production")
+			} else {
+				// Capture the schema and the row ID before removing
 				set tDSClass = ..GetSettingValue(tCfgItem, "DataSourceClass")
-				set tFoundIdx = i
-				Quit
+				set tCredId = ..GetSettingValue(tCfgItem, "Credentials")
+				set tItemId = tCfgItem.%Id()
+				do tProd.Items.RemoveAt(tFoundIdx)
+				set tSC = ##class(OPCUA.REST.ProductionEdit).Commit(tProd, tStamp)
+			}
+		} Catch (eEdit) {
+			set tSC = eEdit.AsStatus()
+		}
+		do ##class(OPCUA.REST.ProductionEdit).End()
+		Quit:$$$ISERR(tSC)
+
+		// Delete the config item row to prevent orphans. The pipeline is already
+		// gone from the production, so a failure here is reported with the other
+		// follow-ups below, which still run.
+		set tSCItem = $$$OK
+		if tItemId '= "" {
+			Try {
+				set tSCItem = ##class(Ens.Config.Item).%DeleteId(tItemId)
+			} Catch (eItem) {
+				set tSCItem = eItem.AsStatus()
 			}
 		}
-		if tFoundIdx = 0 {
-			set tSC = $$$ERROR($$$GeneralError, "Pipeline '"_tName_"' not found in production")
-			Quit
+
+		// The credentials entry goes too, but only if deploy created it for this
+		// pipeline. An entry the pipeline merely pointed at belongs to someone else.
+		set tSCCred = ##class(OPCUA.REST.DeployService).DeleteOwnedCredentials(tCredId, tName)
+
+		// A running production stops the removed item's job when it updates.
+		// EnableConfigItem is not used to stop it first: it saves the production
+		// itself, outside our edit, which Commit would then refuse as stale.
+		set tSCApply = ##class(OPCUA.REST.ProductionEdit).ApplyToRunning(.tRestarted, .tNote)
+
+		// Report every follow-up that failed, not just the last.
+		set tFailed = "", tCause = $$$OK
+		if $$$ISERR(tSCItem) {
+			set tFailed = "its config item row "_tItemId_" could not be removed: "_##class(OPCUA.REST.Error).Text(tSCItem)
+			set tCause = $$$ADDSC(tCause, tSCItem)
 		}
-
-		// If production is running, disable the item first
-		do ##class(Ens.Director).GetProductionStatus(.tRunning, .tRunState2)
-		set tProdRunning = (tRunning = ..#ProductionClass) && (tRunState2 = 1)
-		if tProdRunning {
-			if ##class(Ens.Director).IsItemEnabled(tName, .tSCCheck) {
-				do ##class(Ens.Director).EnableConfigItem(tName, 0)
-			}
+		if $$$ISERR(tSCCred) {
+			set tFailed = tFailed_$Select(tFailed="":"", 1:"; and ")_"its credentials '"_tCredId_"' could not be deleted: "_##class(OPCUA.REST.Error).Text(tSCCred)
+			set tCause = $$$ADDSC(tCause, tSCCred)
 		}
-
-		// Remove from production and persist
-		do tProd.Items.RemoveAt(tFoundIdx)
-		set tSC = tProd.%Save()
-		$$$ThrowOnError(tSC)
-		set tSC = tProd.SaveToClass()
-		$$$ThrowOnError(tSC)
-
-		if tProdRunning {
-			do ##class(Ens.Director).UpdateProduction()
+		if $$$ISERR(tSCApply) {
+			set tFailed = tFailed_$Select(tFailed="":"", 1:"; and ")_"the running production could not be updated: "_##class(OPCUA.REST.Error).Text(tSCApply)
+			set tCause = $$$ADDSC(tCause, tSCApply)
+		}
+		if tFailed '= "" {
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Pipeline deleted, but "_tFailed, tCause)
 		}
 
 		set pResult.deleted = 1
@@ -374,8 +427,13 @@ ClassMethod Delete(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		set pResult.schemaClass = tDSClass
 		set pResult.schemaRetained = 1
 		if tDSClass '= "" {
-			do ##class(OPCUA.REST.SchemaService).MapSchemaUsage(.tUsage)
-			set pResult.schemaStillUsedBy = ##class(OPCUA.REST.SchemaService).UsageArray($Get(tUsage(tDSClass), ""))
+			set tSC2 = ##class(OPCUA.REST.SchemaService).MapSchemaUsage(.tUsage)
+			if $$$ISOK(tSC2) {
+				set pResult.schemaStillUsedBy = ##class(OPCUA.REST.SchemaService).UsageArray(.tUsage, tDSClass)
+			} else {
+				// Usage check failed, report empty — the schema is retained anyway
+				set pResult.schemaStillUsedBy = []
+			}
 		} else {
 			set pResult.schemaStillUsedBy = []
 		}
@@ -437,27 +495,26 @@ ClassMethod Rebind(pBody As %DynamicObject, Output pResult As %DynamicObject) As
 		set tSC = ##class(OPCUA.REST.SchemaService).RequireUsableDevices(tConn, tSchemaClass)
 		Quit:$$$ISERR(tSC)
 
-		set tSC = ..UpdateDeviceNodePaths(tName, tDevices)
+		// Devices and categories change in one locked open and save. Categories
+		// ride along with a rebind, since editing a pipeline is where a user would
+		// expect to change them. Absent leaves them alone, an empty array clears
+		// them. Organisational only, so an odd list cannot break collection, which
+		// is why this is a plain overwrite beyond normalising the delimiter.
+		set tFields = ""
+		if pBody.%IsDefined("categories") {
+			set tFields = {"Category": (##class(OPCUA.REST.DeployService).NormalizeCategories(pBody.%Get("categories")))}
+		}
+		set tSC = ##class(OPCUA.REST.ProductionEdit).UpdateItem(tName, {"Adapter": {"DeviceNodePaths": (tDevices)}}, tFields)
 		Quit:$$$ISERR(tSC)
 
-		// Categories ride along with a rebind, since editing a pipeline is where a
-		// user would expect to change them. Absent leaves them alone, an empty array
-		// clears them. Organisational only, so an odd list cannot break
-		// collection — which is why this is a plain overwrite with no validation
-		// beyond normalising the delimiter.
-		if pBody.%IsDefined("categories") {
-			set tSC = ..UpdateCategories(
-				tName,
-				##class(OPCUA.REST.DeployService).NormalizeCategories(pBody.%Get("categories")))
-			Quit:$$$ISERR(tSC)
-		}
-
-		// The adapter re-resolves on every (re)connect, so restarting the item is
-		// all that is needed for the new device list to take effect.
-		do ##class(Ens.Director).GetProductionStatus(.tRunning, .tRunState)
-		if (tRunning = ..#ProductionClass) && (tRunState = 1) {
-			do ##class(Ens.Director).UpdateProduction()
-			set pResult.restarted = 1
+		// The adapter re-resolves on every (re)connect, so updating the running
+		// production is all that is needed for the new device list to take
+		// effect. restarted is 1 only when that update really happened.
+		set tSC = ##class(OPCUA.REST.ProductionEdit).ApplyToRunning(.tRestarted, .tNote)
+		set pResult.restarted = tRestarted
+		set pResult.restartNote = tNote
+		if $$$ISERR(tSC) {
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Device list saved, but the running pipeline could not be restarted: "_##class(OPCUA.REST.Error).Text(tSC), tSC)
 		}
 
 		set pResult.updated = 1
@@ -482,20 +539,21 @@ ClassMethod DescribeItem(pItemName As %String, Output pSchemaClass As %String, O
 	set pURL = ""
 	set pConn = {}
 
-	set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
+	set tProdClass = ##class(OPCUA.REST.ProductionEdit).ProductionClass()
+	set tProd = ##class(Ens.Config.Production).%OpenId(tProdClass)
 	if '$IsObject(tProd) {
-		Quit $$$ERROR($$$GeneralError, "Cannot open production: "_..#ProductionClass)
+		Quit ##class(OPCUA.REST.Error).Make(500, "Cannot open production: "_tProdClass)
 	}
 
-	set tItem = tProd.FindItemByConfigName(pItemName, .tSCFind)
+	set tItem = ##class(OPCUA.REST.ProductionEdit).FindItem(tProd, pItemName)
 	if '$IsObject(tItem) {
-		Quit $$$ERROR($$$GeneralError, "Pipeline '"_pItemName_"' not found in production")
+		Quit ##class(OPCUA.REST.Error).NotFound("Pipeline '"_pItemName_"' not found in production")
 	}
 
 	set pSchemaClass = ..GetSettingValue(tItem, "DataSourceClass")
 	set pURL = ..GetSettingValue(tItem, "URL")
 	if pSchemaClass = "" {
-		Quit $$$ERROR($$$GeneralError, "Pipeline '"_pItemName_"' has no DataSourceClass setting")
+		Quit ##class(OPCUA.REST.Error).Make(500, "Pipeline '"_pItemName_"' has no DataSourceClass setting")
 	}
 
 	do pConn.%Set("url", pURL)
@@ -503,7 +561,6 @@ ClassMethod DescribeItem(pItemName As %String, Output pSchemaClass As %String, O
 	set tMap("SecurityMode") = "securityMode", tMap("ClientURI") = "clientURI"
 	set tMap("PublicCertificate") = "certPath", tMap("PrivateKey") = "keyPath"
 	set tMap("TrustListDir") = "trustDir", tMap("RevocationListDir") = "crlDir"
-	set tMap("Username") = "username", tMap("Password") = "password"
 	set tSetting = ""
 	for {
 		set tSetting = $Order(tMap(tSetting))
@@ -511,117 +568,35 @@ ClassMethod DescribeItem(pItemName As %String, Output pSchemaClass As %String, O
 		set tVal = ..GetSettingValue(tItem, tSetting)
 		do:tVal'="" pConn.%Set(tMap(tSetting), tVal)
 	}
+
+	// The username and password live in the item's credentials entry. The
+	// check connects as the pipeline does, so a missing entry is an error, not
+	// an anonymous connect.
+	set tCredId = ..GetSettingValue(tItem, "Credentials")
+	if tCredId '= "" {
+		set tSC = ##class(OPCUA.REST.DeployService).ReadCredentials(tCredId, .tUser, .tPassword)
+		if $$$ISERR(tSC) {
+			Quit ##class(OPCUA.REST.Error).Make(##class(OPCUA.REST.Error).HttpCode(tSC), "Pipeline '"_pItemName_"': "_##class(OPCUA.REST.Error).Text(tSC), tSC)
+		}
+		do:tUser'="" pConn.%Set("username", tUser)
+		do:tPassword'="" pConn.%Set("password", tPassword)
+	}
 	Quit $$$OK
 }
 
-/// Write a config item's DeviceNodePaths setting, adding it if absent.
-///
-/// Rebinding a pipeline's devices is now a settings update rather than a class
-/// regeneration — which is why editing a device list no longer needs a recompile.
-ClassMethod UpdateDeviceNodePaths(pItemName As %String, pValue As %String) As %Status [ Private ]
+/// 403 if pipeline <var>pItemName</var> owns a credentials entry (one deploy
+/// created for it) that this IRIS account may not delete. Read without the edit
+/// lock, so it runs before <method>Delete</method> touches anything.
+ClassMethod CheckCanDeleteCredentials(pItemName As %String) As %Status [ Private ]
 {
-	#dim tSC As %Status = $$$OK
-	Try {
-		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
-		if '$IsObject(tProd) {
-			set tSC = $$$ERROR($$$GeneralError, "Cannot open production: "_..#ProductionClass)
-			Quit
-		}
-
-		set tFound = 0
-		for i=1:1:tProd.Items.Count() {
-			set tItem = tProd.Items.GetAt(i)
-			continue:tItem.Name'=pItemName
-
-			set tSet = 0
-			for j=1:1:tItem.Settings.Count() {
-				set tSetting = tItem.Settings.GetAt(j)
-				continue:tSetting.Name'="DeviceNodePaths"
-				set tSetting.Value = pValue
-				set tSet = 1
-			}
-			if 'tSet {
-				set tSetting = ##class(Ens.Config.Setting).%New()
-				set tSetting.Target = "Adapter"
-				set tSetting.Name = "DeviceNodePaths"
-				set tSetting.Value = pValue
-				do tItem.Settings.Insert(tSetting)
-			}
-			// Deliberately does *not* touch categories. This used to backfill them via
-			// EnsureCategories, on the reasoning that a rebind is the one moment an
-			// existing pipeline gets rewritten — harmless while they were derived.
-			// Now that they are the user's to edit it actively fought them: remove
-			// "OPCUA", change a device, and it came straight back, because an
-			// explicitly-empty list and a never-stamped one are both just "".
-			// Categories now move only when a request says so; an unstamped pipeline
-			// shows "None" in the editor with Reset one click away.
-			set tFound = 1
-		}
-
-		if 'tFound {
-			set tSC = $$$ERROR($$$GeneralError, "Pipeline '"_pItemName_"' not found in production")
-			Quit
-		}
-
-		set tSC = tProd.%Save()
-		$$$ThrowOnError(tSC)
-		set tSC = tProd.SaveToClass()
-		$$$ThrowOnError(tSC)
-	} Catch (e) {
-		set tSC = e.AsStatus()
-	}
-	Quit tSC
-}
-
-/// Set a pipeline's Portal categories, as a comma-delimited string.
-///
-/// Categories are organisational only — the Production Configuration page groups
-/// by them and nothing in the runtime reads them back — so this overwrites
-/// whatever was there without validating the names. Pass "" to leave the item
-/// ungrouped. Callers should run the value through
-/// <method>OPCUA.REST.DeployService.NormalizeCategories</method> first.
-ClassMethod UpdateCategories(pItemName As %String, pValue As %String) As %Status [ Private ]
-{
-	Quit ..UpdateItemField(pItemName, "Category", pValue)
-}
-
-/// Set one field on a pipeline's config item and persist the production.
-///
-/// Both saves are required and in this order: <tt>%Save</tt> writes the stored
-/// production definition, <tt>SaveToClass</tt> regenerates the production class
-/// from it. Skipping the second leaves the change invisible to a restart, which is
-/// the failure mode this helper exists to stop being retyped per field.
-ClassMethod UpdateItemField(pItemName As %String, pField As %String, pValue As %String) As %Status [ Private ]
-{
-	#dim tSC As %Status = $$$OK
-	Try {
-		set tProd = ##class(Ens.Config.Production).%OpenId(..#ProductionClass)
-		if '$IsObject(tProd) {
-			set tSC = $$$ERROR($$$GeneralError, "Cannot open production: "_..#ProductionClass)
-			Quit
-		}
-
-		set tFound = 0
-		for i=1:1:tProd.Items.Count() {
-			set tItem = tProd.Items.GetAt(i)
-			continue:tItem.Name'=pItemName
-			set $Property(tItem, pField) = pValue
-			set tFound = 1
-		}
-
-		if 'tFound {
-			set tSC = $$$ERROR($$$GeneralError, "Pipeline '"_pItemName_"' not found in production")
-			Quit
-		}
-
-		set tSC = tProd.%Save()
-		$$$ThrowOnError(tSC)
-		set tSC = tProd.SaveToClass()
-		$$$ThrowOnError(tSC)
-	} Catch (e) {
-		set tSC = e.AsStatus()
-	}
-	Quit tSC
+	set tProd = ##class(Ens.Config.Production).%OpenId(##class(OPCUA.REST.ProductionEdit).ProductionClass(), 0)
+	Quit:'$IsObject(tProd) $$$OK
+	set tItem = ##class(OPCUA.REST.ProductionEdit).FindItem(tProd, pItemName)
+	Quit:'$IsObject(tItem) $$$OK
+	set tCredId = ..GetSettingValue(tItem, "Credentials")
+	Quit:'##class(OPCUA.REST.DeployService).OwnsCredentials(tCredId, pItemName) $$$OK
+	Quit:##class(OPCUA.REST.DeployService).CanWriteCredentials() $$$OK
+	Quit ##class(OPCUA.REST.Error).Forbidden("Pipeline '"_pItemName_"' was not deleted. "_##class(OPCUA.REST.Error).Text(##class(OPCUA.REST.DeployService).NoCredentialsAccess("delete its credentials '"_tCredId_"'", "W")))
 }
 
 /// Describe a v2 pipeline's devices, from the DeviceNodePaths setting plus the
@@ -632,59 +607,73 @@ ClassMethod UpdateItemField(pItemName As %String, pField As %String, pValue As %
 /// time; use POST /schemas/:name/validate for real per-device coverage.
 ClassMethod GetRowSourceInfo(pClassName As %String, pDeviceNodePaths As %String = "") As %DynamicArray [ Private ]
 {
+	// No Try: an unexpected error goes to List's Catch and is reported, rather
+	// than silently listing only the devices handled before it.
 	set tResult = []
-	Try {
-		Quit:pDeviceNodePaths=""
+	Quit:pDeviceNodePaths="" tResult
 
-		do ##class(OPCUA.DataSource.Resolver).ParseDeviceNodePaths(pDeviceNodePaths, .tDevices, .tErrors)
-		Quit:$LL($Get(tDevices))=0
+	// Status ignored: a list with no usable device (all comments, which is how a
+	// pipeline is paused from the Portal, or all invalid) is an error there, but
+	// here it is just a pipeline with no devices. Deploy and the adapter report
+	// unusable lines.
+	do ##class(OPCUA.DataSource.Resolver).ParseDeviceNodePaths(pDeviceNodePaths, .tDevices, .tErrors)
+	Quit:$LL($Get(tDevices))=0 tResult
 
-		// Schema columns, in the same storage order the runtime uses.
-		set tSC = ##class(OPCUA.DataSource.Resolver).GetSchemaColumns(pClassName, .tColumns, .tFolders)
-		if $$$ISERR(tSC) set tColumns = 0
+	// Schema columns, in the same storage order the runtime uses. A schema that
+	// cannot be read (deleted outside the console) still lists its devices,
+	// with no columns: the dashboard shows only device paths and counts.
+	set tSC = ##class(OPCUA.DataSource.Resolver).GetSchemaColumns(pClassName, .tColumns, .tFolders)
+	if $$$ISERR(tSC) set tColumns = 0
 
-		for i=1:1:$LL(tDevices) {
-			set tDev = $LI(tDevices, i)
-			set tInfo = {}
-			set tInfo.path = $LI(tDev, 4)
-			set tInfo.nodeNs = $LI(tDev, 1)
-			set tInfo.nodeId = $LI(tDev, 2)
-			set tInfo.nodeIdType = $LI(tDev, 3)
+	for i=1:1:$LL(tDevices) {
+		set tDev = $LI(tDevices, i)
+		set tInfo = {}
+		set tInfo.path = $LI(tDev, 4)
+		set tInfo.nodeNs = $LI(tDev, 1)
+		set tInfo.nodeId = $LI(tDev, 2)
+		set tInfo.nodeIdType = $LI(tDev, 3)
 
-			set tChildren = []
-			for c=1:1:tColumns {
-				set tCol = tColumns(c)
-				set tFolderName = $LI(tCol, 5)
-				set tNodeName = $LI(tCol, 3)
+		set tChildren = []
+		for c=1:1:tColumns {
+			set tCol = tColumns(c)
+			set tFolderName = $LI(tCol, 5)
+			set tNodeName = $LI(tCol, 3)
 
-				set tChild = {}
-				set tChild.displayName = tNodeName
-				set tChild.nodeNs = $LI(tCol, 2)
-				// Nodes are resolved by name at connect time, so there is no
-				// stored absolute node id to report here.
-				set tChild.nodeId = ""
-				set tChild.nodeIdType = ""
+			set tChild = {}
+			set tChild.displayName = tNodeName
+			set tChild.nodeNs = $LI(tCol, 2)
+			// Nodes are resolved by name at connect time, so there is no
+			// stored absolute node id to report here.
+			set tChild.nodeId = ""
+			set tChild.nodeIdType = ""
 
-				set tRelPath = ##class(%DynamicArray).%New()
-				if tFolderName '= "" do tRelPath.%Push(tFolderName)
-				do tRelPath.%Push(tNodeName)
-				set tChild.relativePath = tRelPath
+			set tRelPath = ##class(%DynamicArray).%New()
+			if tFolderName '= "" do tRelPath.%Push(tFolderName)
+			do tRelPath.%Push(tNodeName)
+			set tChild.relativePath = tRelPath
 
-				do tChildren.%Push(tChild)
-			}
-			set tInfo.childNodes = tChildren
-
-			do tResult.%Push(tInfo)
+			do tChildren.%Push(tChild)
 		}
-	} Catch (e) {}
+		set tInfo.childNodes = tChildren
+
+		do tResult.%Push(tInfo)
+	}
 	Quit tResult
 }
 
 /// Delete serial object subclasses for a DataSource class.
 /// Scans the class's properties for types extending %SerialObject (excluding OPCUA.Types.*).
 /// Also called by <class>OPCUA.REST.SchemaService</class> when deleting a schema.
-ClassMethod DeleteSerialSubclasses(pClassName As %String)
+/// Delete serial subclasses that belong to this schema and are not shared.
+///
+/// A serial class is deleted only if:
+/// 1. Its name matches SerialClassName(pClassName, <folder>) for some folder
+/// 2. No other compiled class (outside pClassName) has a property of that type
+///
+/// Returns %Status so errors propagate to SchemaService.Delete.
+ClassMethod DeleteSerialSubclasses(pClassName As %String) As %Status
 {
+	#dim tSC As %Status = $$$OK
 	Try {
 		set tClassDef = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
 		if '$IsObject(tClassDef) Quit
@@ -697,18 +686,61 @@ ClassMethod DeleteSerialSubclasses(pClassName As %String)
 			// Skip standard types
 			if $Extract(tType, 1) = "%" continue
 			// Check if it extends %SerialObject
+			set tIsSerial = 0
 			Try {
-				if $classmethod(tType, "%Extends", "%SerialObject") {
-					// This is a pipeline-generated serial class — delete it
-					if ##class(%Dictionary.ClassDefinition).%ExistsId(tType) {
-						do $System.OBJ.Delete(tType, "-d")
-					}
-				}
+				set tIsSerial = $classmethod(tType, "%Extends", "%SerialObject")
 			} Catch (eInner) {
-				// Type class may not exist — skip
+				// Type class may not exist: then it is no serial class of ours to delete.
+			}
+			continue:'tIsSerial
+
+			// Check if the serial class name matches the generated pattern
+			continue:'..IsGeneratedSerialClass(pClassName, tType)
+
+			// Check if any other class uses this serial class. A failed check
+			// throws to the outer Catch, so nothing is deleted on a guess.
+			continue:..SerialClassIsShared(pClassName, tType)
+
+			// This is a pipeline-generated serial class that is not shared — delete it.
+			// Quit leaves the loop: a later successful delete must not overwrite tSC.
+			if ##class(%Dictionary.ClassDefinition).%ExistsId(tType) {
+				set tSC = $System.OBJ.Delete(tType, "-d")
+				Quit:$$$ISERR(tSC)
 			}
 		}
-	} Catch (e) {}
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit tSC
+}
+
+/// Check if a serial class name matches the pattern SerialClassName would generate
+/// for the main schema class.
+ClassMethod IsGeneratedSerialClass(pMainClass As %String, pSerialClass As %String) As %Boolean [ Private ]
+{
+	// Generated serial classes are nested under the main class: OPCUA.DS.Foo.BarType
+	// Main class: OPCUA.DS.Foo, serial: OPCUA.DS.Foo.<something>Type
+	if $Extract(pSerialClass, 1, $Length(pMainClass)+1) '= (pMainClass_".") {
+		Return 0
+	}
+	if $Extract(pSerialClass, *-3, *) '= "Type" {
+		Return 0
+	}
+	Return 1
+}
+
+/// Check if a serial class is used by any class other than pMainClass.
+ClassMethod SerialClassIsShared(pMainClass As %String, pSerialClass As %String) As %Boolean [ Private ]
+{
+	// Embedded SQL checks no SQL privilege, so this works for an account with only
+	// the installer's OPCUA_API role (dynamic SQL gave it SQLCODE -99). A failed
+	// query throws: reading it as "not shared" would delete a class another schema
+	// still uses.
+	set tParent = ""
+	&sql(SELECT TOP 1 Parent INTO :tParent FROM %Dictionary.CompiledProperty WHERE Type = :pSerialClass AND Parent <> :pMainClass)
+	if SQLCODE < 0 $$$ThrowStatus($$$ERROR($$$SQLError, SQLCODE, $Get(%msg)))
+	// SQLCODE 0: at least one other class uses this serial class.
+	Quit (SQLCODE = 0)
 }
 
 }
