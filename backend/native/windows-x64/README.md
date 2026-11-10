@@ -6,7 +6,7 @@ dependencies. The terminal installer (`installer/`) does this for you.
 
 | File | What it is |
 |------|------------|
-| `IrisOPCUA.dll` | The connector (version 0.5.0), built from the same C++ sources as the Linux `irisopcua.so`. It links `libcrypto-1_1-x64.dll` directly for certificate creation, inspection and import, and for server certificate pinning |
+| `IrisOPCUA.dll` | The connector (version 0.5.1), built from the same C++ sources as the Linux `irisopcua.so`. It links `libcrypto-1_1-x64.dll` directly for certificate creation, inspection and import, and for server certificate pinning |
 | `open62541.dll` | open62541 v1.2.1, unchanged |
 | `libcrypto-1_1-x64.dll` | OpenSSL 1.1, needed by `open62541.dll` and, from 0.5.0, by `IrisOPCUA.dll` itself |
 
@@ -31,4 +31,6 @@ The previous `IrisOPCUA.dll` was an MSVC build from 2021. It predated
 `zfGetEndpoints` and the change that keeps Bad readings in bulk polls.
 
 From 0.5.0 it also carries the native PKI operations and server certificate
-pinning (`zfSetServerPin`) used by managed Sign & Encrypt.
+pinning (`zfSetServerPin`) used by managed Sign & Encrypt. 0.5.1 adds `zfPkiProtectPath`, which
+restricts the certificate store and its keys to the IRIS process account, SYSTEM and
+Administrators (a protected DACL built from well-known SIDs; no Users or Authenticated Users).

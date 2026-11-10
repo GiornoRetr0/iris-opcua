@@ -52,7 +52,19 @@ ClassMethod ServerDir(pKey As %String, pWhich As %String) As %String
     Quit ##class(%File).NormalizeDirectory(..Dir("servers")_pKey_"/"_pWhich)
 }
 
-/// Create pPath (and parents); 0700 on non-Windows. Fails if any chmod fails.
+/// Create pPath (and parents) and restrict the store to the IRIS account.
+///
+/// Non-Windows: every level from pPath up to the root gets mode 0700 (key files are
+/// 0600, set when they are written). Fails if any chmod fails.
+///
+/// Windows: the root, everything under it and every key file carry a PROTECTED DACL
+/// (no inheritance from the parent) with full control for exactly the account IRIS
+/// runs as, SYSTEM and BUILTIN\Administrators; folder ACEs are inheritable so new
+/// files and folders get the same. It is applied through the connector
+/// (<method>OPCUA.Security.Native.ProtectPath</method>, SIDs not names, no icacls) to the
+/// whole root on every call, so an existing install is tightened the next time the
+/// store is touched. It fails closed: if the DACL cannot be applied (or the connector
+/// is older than 0.5.1) an error is returned and the caller must not store keys.
 ClassMethod EnsureDirs(pPath As %String) As %Status
 {
     If $Get(pPath) = "" Quit $$$ERROR($$$GeneralError, "No directory given")
@@ -63,7 +75,7 @@ ClassMethod EnsureDirs(pPath As %String) As %Status
             Quit $$$ERROR($$$GeneralError, "Cannot create directory "_path_": "_$Get(rc))
         }
     }
-    If $$$isWINDOWS Quit $$$OK
+    If $$$isWINDOWS Quit ##class(OPCUA.Security.Native).ProtectPath($Extract(root, 1, $Length(root) - 1), 1, 1)
     // Tighten every level from path up to and including the root.
     Set cur = path
     While (cur '= "") && ($Extract(cur, 1, $Length(root)) = root) {

@@ -224,6 +224,26 @@ ClassMethod SupportsPki() As %Boolean
     Quit +$Get(tOK)
 }
 
+/// True when the native library is loaded and is version 0.5.1 or later, the first
+/// with <tt>zfPkiProtectPath</tt> (restricting the certificate store on Windows).
+/// Never throws.
+ClassMethod SupportsProtect() As %Boolean
+{
+    Try {
+        If '$Data(%ZUtilsIrisOpcuaLibraryId) {
+            If $$$ISERR(..Initialize()) Quit
+        }
+        If $$$ISERR(..GetVersion(.tVersion)) Quit
+        Set tText = $ListGet(tVersion, 2)
+        Quit:tText=""
+        Set tMajor = +$Piece(tText, ".", 1), tMinor = +$Piece(tText, ".", 2), tRev = +$Piece(tText, ".", 3)
+        Set tOK = (tMajor > 0) || (tMinor > 5) || ((tMinor = 5) && (tRev >= 1))
+    } Catch {
+        Set tOK = 0
+    }
+    Quit +$Get(tOK)
+}
+
 ClassMethod GetVersion(Output pOut As %List) As %Status
 {
     #dim tSC as %Status = $$$OK

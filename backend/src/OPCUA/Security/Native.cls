@@ -101,6 +101,24 @@ ClassMethod Normalise(pKind As %String, pDataHex As %String, pPassword As %Strin
 	Quit tSC
 }
 
+/// Restricts a file or directory to the account running IRIS (Windows: a protected
+/// DACL for that account, SYSTEM and Administrators; elsewhere mode 0700/0600).
+/// <var>pRecursive</var> covers everything under a directory. Needs connector 0.5.1.
+ClassMethod ProtectPath(pPath As %String, pIsDir As %Boolean, pRecursive As %Boolean = 0) As %Status
+{
+	If '##class(OPCUA.Utils).SupportsProtect() {
+		Quit $$$ERROR($$$GeneralError, "The OPC UA connector on this server is older than 0.5.1 and cannot protect the certificate store. Reinstall it with iris-opcua-setup.")
+	}
+	Set tSC = $$$OK
+	Try {
+		Set tRet = $ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfPkiProtectPath,"",$LB(pPath,+pIsDir,+pRecursive))
+		If $List(tRet,1)'=0 Set tSC = ##class(OPCUA.Client).DecodeError(tRet)
+	} Catch e {
+		Set tSC = e.AsStatus()
+	}
+	Quit tSC
+}
+
 /// A $LB (possibly "" for none) as a JSON array of strings.
 ClassMethod ToArray(pList As %List) As %DynamicArray [ Internal ]
 {
