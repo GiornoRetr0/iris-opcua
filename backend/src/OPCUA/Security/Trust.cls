@@ -117,6 +117,57 @@ ClassMethod IsAfterNow(pTime As %String) As %Boolean [ Internal ]
     Quit ($Piece(t, ",", 1) > $Piece(n, ",", 1)) || (($Piece(t, ",", 1) = $Piece(n, ",", 1)) && ($Piece(t, ",", 2) > $Piece(n, ",", 2)))
 }
 
+/// Every reason the presented certificate cannot be trusted as this server's identity:
+/// application URI and host (CheckEndpointIdentity), a self-signed certificate without
+/// keyCertSign (open62541 1.2.1 rejects it unless a CRL is present), and validity period.
+ClassMethod IdentityProblems(pInfo As %DynamicObject, pAppUri As %String, pHost As %String) As %DynamicArray [ Internal ]
+{
+    Do ..CheckEndpointIdentity(pInfo, pAppUri, pHost, .tProblems)
+    If pInfo.selfSigned {
+        If '$ListFind(..ListOf(pInfo.keyUsage), "keyCertSign") Do tProblems.%Push(..#NoKeyCertSign)
+    }
+    If '..IsAfterNow(pInfo.notAfter) {
+        Do tProblems.%Push("The certificate expired on "_pInfo.notAfter_" UTC.")
+    } ElseIf ..IsAfterNow(pInfo.notBefore) {
+        Do tProblems.%Push("The certificate is not valid before "_pInfo.notBefore_" UTC.")
+    }
+    Quit tProblems
+}
+
+/// OK when an Inspect-shaped result may be trusted; else the 400 Trust answers with.
+ClassMethod CheckTrustable(pInspect As %DynamicObject) As %Status [ Internal ]
+{
+    If 'pInspect.offersSignAndEncrypt Quit ##class(OPCUA.REST.Error).BadRequest("This server does not offer a Sign & Encrypt endpoint.")
+    If pInspect.identity.problems.%Size() {
+        Set tText = ""
+        For i = 0:1:pInspect.identity.problems.%Size() - 1 { Set tText = tText _ $Select(tText = "": "", 1: " ") _ pInspect.identity.problems.%Get(i) }
+        Quit ##class(OPCUA.REST.Error).BadRequest(tText)
+    }
+    Quit $$$OK
+}
+
+/// A scratch directory under the store root, outside every server's trusted/ and crl/.
+ClassMethod Scratch(pName As %String) As %String [ Internal ]
+{
+    Set d = ##class(%File).NormalizeDirectory(##class(OPCUA.Security.Store).Root()_"tmp/"_$Job_"-"_pName)
+    Do ##class(%File).RemoveDirectoryTree(d)
+    If $$$ISERR(##class(OPCUA.Security.Store).EnsureDirs(d)) Quit ""
+    Quit d
+}
+
+/// Puts <var>pSrc</var> at <var>pDst</var> by writing a dot file beside it (the native
+/// layer skips dot files) and renaming it over the target.
+ClassMethod Install(pSrc As %String, pDst As %String) As %Boolean [ Internal ]
+{
+    Set tNew = ##class(%File).GetDirectory(pDst)_"."_##class(%File).GetFilename(pDst)_".new"
+    If '##class(%File).CopyFile(pSrc, tNew, 1) Quit 0
+    If '##class(%File).Rename(tNew, pDst) {
+        Do ##class(%File).Delete(tNew)
+        Quit 0
+    }
+    Quit 1
+}
+
 /// Discovers the server at <var>pURL</var> and describes what it presents. See the class
 /// description for the shape. Network or discovery failures come back as an error status.
 ClassMethod Inspect(pURL As %String, Output pResult As %DynamicObject) As %Status
@@ -158,18 +209,9 @@ ClassMethod Inspect(pURL As %String, Output pResult As %DynamicObject) As %Statu
         Quit:$$$ISERR(tSC)
 
         Set tKey = ##class(OPCUA.Security.Store).ServerKey(tURL)
-        Do ..CheckEndpointIdentity(tInfo, tAppUri, ..PlainHost(tURL), .tProblems)
-        Set tUriOk = ('$ListFind(..ListOf(tInfo.sanUris), tAppUri) = 0) && (tAppUri '= "")
+        Set tProblems = ..IdentityProblems(tInfo, tAppUri, ..PlainHost(tURL))
+        Set tUriOk = ($ListFind(..ListOf(tInfo.sanUris), tAppUri) '= 0) && (tAppUri '= "")
         Set tHostOk = ..HostMatches(tInfo, ..PlainHost(tURL))
-        If tInfo.selfSigned {
-            Set tUsage = ..ListOf(tInfo.keyUsage)
-            If '$ListFind(tUsage, "keyCertSign") Do tProblems.%Push(..#NoKeyCertSign)
-        }
-        If '..IsAfterNow(tInfo.notAfter) {
-            Do tProblems.%Push("The certificate expired on "_tInfo.notAfter_" UTC.")
-        } ElseIf ..IsAfterNow(tInfo.notBefore) {
-            Do tProblems.%Push("The certificate is not valid before "_tInfo.notBefore_" UTC.")
-        }
 
         Set tNeedsIssuer = 'tInfo.selfSigned
         Set tHas = ##class(OPCUA.Security.Store).GetServer(tKey, .tEntry)
@@ -211,14 +253,8 @@ ClassMethod Trust(pURL As %String, pFingerprint As %String, pLabel As %String = 
         If (pFingerprint = "") || (..NormFp(pFingerprint) '= ..NormFp(tInspect.certificate.sha256)) {
             Set tSC = ##class(OPCUA.REST.Error).Conflict("The server presented a different certificate than the one you reviewed. Review it again.") Quit
         }
-        If 'tInspect.offersSignAndEncrypt {
-            Set tSC = ##class(OPCUA.REST.Error).BadRequest("This server does not offer a Sign & Encrypt endpoint.") Quit
-        }
-        If tInspect.identity.problems.%Size() {
-            Set tText = ""
-            For i = 0:1:tInspect.identity.problems.%Size() - 1 { Set tText = tText _ $Select(tText = "": "", 1: " ") _ tInspect.identity.problems.%Get(i) }
-            Set tSC = ##class(OPCUA.REST.Error).BadRequest(tText) Quit
-        }
+        Set tSC = ..CheckTrustable(tInspect)
+        Quit:$$$ISERR(tSC)
         // Re-read the bytes we just verified (Inspect does not return them).
         Set tSC = ..FetchCertHex(tInspect.url, tInspect.certificate.sha256, .tHex)
         Quit:$$$ISERR(tSC)
@@ -231,41 +267,51 @@ ClassMethod Trust(pURL As %String, pFingerprint As %String, pLabel As %String = 
         Set tSC = ##class(OPCUA.Security.Store).EnsureDirs(tCrl)
         Quit:$$$ISERR(tSC)
 
-        // The old pin (if any) goes first. A kept issuer must still vouch for the new certificate.
-        Set tHadIssuer = 0
-        If ##class(OPCUA.Security.Store).GetServer(tKey, .tOld) {
-            Set tHadIssuer = +tOld.hasIssuer
-            Do ##class(%File).Delete(tTrusted_"server.der")
+        // Stage the new certificate; nothing in trusted/ or crl/ changes until it parsed and checked.
+        Set tScratch = ..Scratch("trust")
+        If tScratch = "" Set tSC = $$$ERROR($$$GeneralError, "Cannot create a scratch directory.") Quit
+        Try {
+            Set tSC = ##class(OPCUA.Security.Native).Normalise("cert", tHex, "", tScratch_"server.der")
+            Quit:$$$ISERR(tSC)
+            Set tHadOld = ##class(OPCUA.Security.Store).GetServer(tKey, .tOld)
+            Set tHasIssuer = 0
+            If tHadOld && tOld.hasIssuer && 'tInspect.certificate.selfSigned && ##class(%File).Exists(tTrusted_"issuer.der") {
+                If ..ChainsTo(tScratch_"server.der", tTrusted_"issuer.der", tCrl_"issuer.crl", .tWhy) Set tHasIssuer = 1
+            }
+            Set tEntry = {
+                "url": (tInspect.url),
+                "label": (pLabel),
+                "fingerprint": (tInspect.certificate.sha256),
+                "subject": (tInspect.certificate.subject),
+                "issuer": (tInspect.certificate.issuer),
+                "notBefore": (tInspect.certificate.notBefore),
+                "notAfter": (tInspect.certificate.notAfter),
+                "selfSigned": (+tInspect.certificate.selfSigned),
+                "needsIssuer": (+tInspect.needsIssuer),
+                "hasIssuer": (+tHasIssuer),
+                "trustedAt": ($ZDateTime($ZTimeStamp, 3, 1, 0))
+            }
+            If (pLabel = "") && tHadOld Set tEntry.label = tOld.label
+            // Back up what is there, replace the certificate, then the entry; undo on failure.
+            Set tHadFile = ##class(%File).Exists(tTrusted_"server.der")
+            If tHadFile Do ##class(%File).CopyFile(tTrusted_"server.der", tScratch_"old.der", 1)
+            If '..Install(tScratch_"server.der", tTrusted_"server.der") {
+                Set tSC = $$$ERROR($$$GeneralError, "Could not store the server certificate.") Quit
+            }
+            Set tSC = ##class(OPCUA.Security.Store).SaveServer(tKey, tEntry)
+            If $$$ISERR(tSC) {
+                If tHadFile { Do ..Install(tScratch_"old.der", tTrusted_"server.der") } Else { Do ##class(%File).Delete(tTrusted_"server.der") }
+                Quit
+            }
+            If 'tHasIssuer {
+                Do ##class(%File).Delete(tTrusted_"issuer.der")
+                Do ##class(%File).Delete(tCrl_"issuer.crl")
+            }
+        } Catch inner {
+            Set tSC = inner.AsStatus()
         }
-        Set tSC = ##class(OPCUA.Security.Native).Normalise("cert", tHex, "", tTrusted_"server.der")
+        Do ##class(%File).RemoveDirectoryTree(tScratch)
         Quit:$$$ISERR(tSC)
-        Set tHasIssuer = 0
-        If tHadIssuer && 'tInspect.certificate.selfSigned {
-            If ..ChainsTo(tTrusted_"server.der", tTrusted_"issuer.der", tCrl_"issuer.crl", .tWhy) Set tHasIssuer = 1
-        }
-        If 'tHasIssuer {
-            Do ##class(%File).Delete(tTrusted_"issuer.der")
-            Do ##class(%File).Delete(tCrl_"issuer.crl")
-        }
-        Set tEntry = {
-            "url": (tInspect.url),
-            "label": (pLabel),
-            "fingerprint": (tInspect.certificate.sha256),
-            "subject": (tInspect.certificate.subject),
-            "issuer": (tInspect.certificate.issuer),
-            "notBefore": (tInspect.certificate.notBefore),
-            "notAfter": (tInspect.certificate.notAfter),
-            "selfSigned": (+tInspect.certificate.selfSigned),
-            "needsIssuer": (+tInspect.needsIssuer),
-            "hasIssuer": (+tHasIssuer),
-            "trustedAt": ($ZDateTime($ZTimeStamp, 3, 1, 0))
-        }
-        If (pLabel = "") && $IsObject(tOld) Set tEntry.label = tOld.label
-        Set tSC = ##class(OPCUA.Security.Store).SaveServer(tKey, tEntry)
-        If $$$ISERR(tSC) {
-            Do ##class(%File).Delete(tTrusted_"server.der")
-            Quit
-        }
         Set tSC = ..Inspect(tInspect.url, .pResult)
     } Catch e {
         Set tSC = e.AsStatus()
@@ -327,8 +373,8 @@ ClassMethod WriteText(pPath As %String, pText As %String) As %Boolean [ Internal
 ClassMethod ChainsTo(pServerDer As %String, pCaDer As %String, pCrlDer As %String = "", Output pWhy As %String) As %Boolean [ Internal ]
 {
     Set pWhy = ""
-    Set tTmp = ##class(%File).NormalizeDirectory(##class(%File).GetDirectory(pServerDer)_"chk"_$Job)
-    Do ##class(%File).CreateDirectoryChain(tTmp)
+    Set tTmp = ..Scratch("chk")
+    If tTmp = "" Set pWhy = "internal: cannot create a scratch directory"  Quit 0
     Set tOk = 0
     Try {
         If '..WriteText(tTmp_"ca.pem", ..DerToPem(pCaDer)) Set pWhy = "internal: cannot write a temporary file" Quit
@@ -375,9 +421,9 @@ ClassMethod AddIssuer(pURL As %String, pCaHex As %String, pCrlHex As %String, Ou
         If '##class(%File).Exists(tTrusted_"server.der") {
             Set tSC = ##class(OPCUA.REST.Error).BadRequest(..#NotTrusted) Quit
         }
-        // Stage outside the trust and CRL directories; move in only after it all checks out.
-        Set tStage = ##class(%File).NormalizeDirectory(##class(OPCUA.Security.Store).Dir("servers")_tKey_"/stage"_$Job)
-        Do ##class(%File).CreateDirectoryChain(tStage)
+        // Stage outside the trust and CRL directories; replace the live files only after it all checks out.
+        Set tStage = ..Scratch("issuer")
+        If tStage = "" Set tSC = $$$ERROR($$$GeneralError, "Cannot create a scratch directory.") Quit
         Try {
             Set tSC = ##class(OPCUA.Security.Native).Normalise("cert", pCaHex, "", tStage_"issuer.der")
             If $$$ISERR(tSC) Set tSC = ##class(OPCUA.REST.Error).BadRequest("The CA certificate could not be read: "_..Cut(tSC)) Quit
@@ -386,16 +432,20 @@ ClassMethod AddIssuer(pURL As %String, pCaHex As %String, pCrlHex As %String, Ou
             If '..ChainsTo(tTrusted_"server.der", tStage_"issuer.der", tStage_"issuer.crl", .tWhy) {
                 Set tSC = ##class(OPCUA.REST.Error).BadRequest(tWhy) Quit
             }
-            If '##class(%File).CopyFile(tStage_"issuer.der", tTrusted_"issuer.der", 1) || '##class(%File).CopyFile(tStage_"issuer.crl", tCrl_"issuer.crl", 1) {
-                Do ##class(%File).Delete(tTrusted_"issuer.der")
-                Do ##class(%File).Delete(tCrl_"issuer.crl")
-                Set tSC = $$$ERROR($$$GeneralError, "Could not store the issuer files.") Quit
+            // Back up any issuer already stored, install both, restore the backup if anything fails.
+            Set tHadCa = ##class(%File).Exists(tTrusted_"issuer.der"), tHadCrl = ##class(%File).Exists(tCrl_"issuer.crl")
+            If tHadCa Do ##class(%File).CopyFile(tTrusted_"issuer.der", tStage_"old.der", 1)
+            If tHadCrl Do ##class(%File).CopyFile(tCrl_"issuer.crl", tStage_"old.crl", 1)
+            Set tOk = ..Install(tStage_"issuer.der", tTrusted_"issuer.der") && ..Install(tStage_"issuer.crl", tCrl_"issuer.crl")
+            If tOk {
+                Set tEntry.hasIssuer = 1
+                Set tSC = ##class(OPCUA.Security.Store).SaveServer(tKey, tEntry)
+                If $$$ISERR(tSC) Set tOk = 0
             }
-            Set tEntry.hasIssuer = 1
-            Set tSC = ##class(OPCUA.Security.Store).SaveServer(tKey, tEntry)
-            If $$$ISERR(tSC) {
-                Do ##class(%File).Delete(tTrusted_"issuer.der")
-                Do ##class(%File).Delete(tCrl_"issuer.crl")
+            If 'tOk {
+                If tHadCa { Do ..Install(tStage_"old.der", tTrusted_"issuer.der") } Else { Do ##class(%File).Delete(tTrusted_"issuer.der") }
+                If tHadCrl { Do ..Install(tStage_"old.crl", tCrl_"issuer.crl") } Else { Do ##class(%File).Delete(tCrl_"issuer.crl") }
+                If $$$ISOK(tSC) Set tSC = $$$ERROR($$$GeneralError, "Could not store the issuer files.")
             }
         } Catch inner {
             Set tSC = inner.AsStatus()

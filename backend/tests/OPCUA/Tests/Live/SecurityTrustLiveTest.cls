@@ -2,10 +2,10 @@ Include %occInclude
 
 /// Live tests of OPCUA.Security.Trust against the demo certified-server (certificate
 /// issued by myCA; discovery reports applicationUri urn:certified-server). The store is
-/// redirected to a throwaway global and directory. The myCA certificate and CRL are the
-/// ones the IRIS image already carries in /usr/irissys/uac/certs. For the sha256
-/// comparison, copy demo/certified-server/certs/secsvr.crt.der to
-/// /tmp/opcua-trust-fixtures/ in the container; without it that one assertion is skipped.
+/// redirected to a throwaway global and directory. The public demo certificates
+/// (secsvr.crt.der, myCA.crt.der, myCA.crl) are copied into the container by
+/// demo/iris/dev-load.sh to /tmp/opcua-dev/fixtures/certified-server/; tests that need
+/// them record a skip when they are absent (run demo/certgen/generate.sh first).
 Class OPCUA.Tests.Live.SecurityTrustLiveTest Extends %UnitTest.TestCase
 {
 
@@ -39,6 +39,19 @@ Method OnBeforeOneTest(testname As %String) As %Status
     Kill ^%OPCUA.SecurityTrustLive
     If ..Root '= "" Do ##class(%File).RemoveDirectoryTree(..Root)
     Quit $$$OK
+}
+
+ClassMethod Fx() As %String
+{
+    Quit "/tmp/opcua-dev/fixtures/certified-server/"
+}
+
+/// True when the demo public certificates are present; else records a skip.
+Method HaveFixtures() As %Boolean
+{
+    If ##class(%File).Exists(..Fx()_"myCA.crt.der") && ##class(%File).Exists(..Fx()_"myCA.crl") && ##class(%File).Exists(..Fx()_"secsvr.crt.der") Quit 1
+    Do $$$AssertSkipped("demo certificates not in "_..Fx()_" (run demo/certgen/generate.sh, then dev-load.sh)")
+    Quit 0
 }
 
 Method Skipped() As %Boolean
@@ -98,7 +111,7 @@ Method TestInspectCaSigned()
     Do $$$AssertEquals(r.identity.uriMatches, 1, "SAN URI matches")
     Do $$$AssertEquals(r.identity.hostMatches, 1, "host matches")
     Do $$$AssertEquals(r.identity.problems.%Size(), 0, "no identity problems")
-    Set f = "/tmp/opcua-trust-fixtures/secsvr.crt.der"
+    Set f = ..Fx()_"secsvr.crt.der"
     If ##class(%File).Exists(f) {
         Set tSC = ##class(OPCUA.Security.Native).InspectCert(f, 1, .ref)
         Do $$$AssertStatusOK(tSC, "fixture readable")
@@ -123,6 +136,7 @@ Method TestTrustWrongFingerprint()
 Method TestTrustThenIssuer()
 {
     Quit:..Skipped()
+    Quit:'..HaveFixtures()
     Quit:'..Fetch(.r)
     Set tSC = ##class(OPCUA.Security.Trust).Trust(..#URL, r.certificate.sha256, "Demo", .res)
     Do $$$AssertStatusOK(tSC, "trust")
@@ -132,7 +146,7 @@ Method TestTrustThenIssuer()
     Set tSC = ##class(OPCUA.Security.Trust).Pin(..#URL, .fps, .td, .cd, .h)
     Do $$$AssertTrue($$$ISERR(tSC), "Pin refuses until the issuer is added")
     Do $$$AssertTrue($System.Status.GetErrorText(tSC) [ "was issued by", "needs-issuer message")
-    Set tSC = ##class(OPCUA.Security.Trust).AddIssuer(..#URL, ..Hex("/usr/irissys/uac/certs/trustdir/myCA.crt.der"), ..Hex("/usr/irissys/uac/certs/crldir/myCA.crl"), .res2)
+    Set tSC = ##class(OPCUA.Security.Trust).AddIssuer(..#URL, ..Hex(..Fx()_"myCA.crt.der"), ..Hex(..Fx()_"myCA.crl"), .res2)
     Do $$$AssertStatusOK(tSC, "add issuer")
     Quit:$$$ISERR(tSC)
     Set tSC = ##class(OPCUA.Security.Trust).Pin(..#URL, .fps, .td, .cd, .h)
@@ -163,6 +177,7 @@ Method TestTrustThenIssuer()
 Method TestAddIssuerWrongCa()
 {
     Quit:..Skipped()
+    Quit:'..HaveFixtures()
     Quit:'..Fetch(.r)
     Set tSC = ##class(OPCUA.Security.Trust).Trust(..#URL, r.certificate.sha256, "", .res)
     Do $$$AssertStatusOK(tSC, "trust")
@@ -172,14 +187,73 @@ Method TestAddIssuerWrongCa()
     Do ##class(%File).CreateDirectoryChain(dir)
     Set tSC = ##class(OPCUA.Security.Native).CreateIdentity(dir_"c.der", dir_"k.der", "urn:fake:ca", "fake", "Fake CA")
     Do $$$AssertStatusOK(tSC, "make the fake CA")
-    Set tSC = ##class(OPCUA.Security.Trust).AddIssuer(..#URL, ..Hex(dir_"c.der"), ..Hex("/usr/irissys/uac/certs/crldir/myCA.crl"), .res2)
+    Set tSC = ##class(OPCUA.Security.Trust).AddIssuer(..#URL, ..Hex(dir_"c.der"), ..Hex(..Fx()_"myCA.crl"), .res2)
     Do $$$AssertTrue($$$ISERR(tSC), "a CA that did not issue the certificate is refused")
     Do $$$AssertEquals(##class(OPCUA.REST.Error).HttpCode(tSC), 400, "400")
     Do $$$AssertEquals(..TrustDirCount(), 1, "nothing added to the trust dir")
     // right CA, but a CRL the CA did not sign
-    Set tSC = ##class(OPCUA.Security.Trust).AddIssuer(..#URL, ..Hex("/usr/irissys/uac/certs/trustdir/myCA.crt.der"), "00", .res3)
+    Set tSC = ##class(OPCUA.Security.Trust).AddIssuer(..#URL, ..Hex(..Fx()_"myCA.crt.der"), "00", .res3)
     Do $$$AssertTrue($$$ISERR(tSC), "an unreadable CRL is refused")
     Do $$$AssertEquals(..TrustDirCount(), 1, "still nothing added")
+}
+
+Method Openssl(pArgs...) As %Integer
+{
+    Quit $ZF(-100, "/STDOUT=""/dev/null"" /STDERR=""/dev/null""", "openssl", pArgs...)
+}
+
+Method WriteLines(pPath As %String, pLines As %String)
+{
+    Set f = ##class(%Stream.FileCharacter).%New()
+    Do f.LinkToFile(pPath)
+    For i = 1:1:$Length(pLines, "|") Do f.WriteLine($Piece(pLines, "|", i))
+    Do f.%Save()
+}
+
+/// A well-formed CRL that another CA signed must not be accepted for myCA; the previously
+/// stored issuer must survive the failed attempt.
+Method TestAddIssuerCrlFromOtherCa()
+{
+    Quit:..Skipped()
+    Quit:'..HaveFixtures()
+    Quit:'..Fetch(.r)
+    Set tSC = ##class(OPCUA.Security.Trust).Trust(..#URL, r.certificate.sha256, "", .res)
+    Do $$$AssertStatusOK(tSC, "trust")
+    Quit:$$$ISERR(tSC)
+    Set d = ..Root_"ca2/"
+    Do ##class(%File).CreateDirectoryChain(d)
+    Do ..WriteLines(d_"ca.cnf", "[ca]|default_ca=x|[x]|database="_d_"index.txt|crlnumber="_d_"crlnumber|default_md=sha256|default_crl_days=30|[ext]|basicConstraints=critical,CA:TRUE|keyUsage=keyCertSign,cRLSign")
+    Open d_"index.txt":"NWS":2
+    Close d_"index.txt"
+    Do ..WriteLines(d_"crlnumber", "01")
+    Set rc = ..Openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", d_"ca.key", "-out", d_"ca.pem", "-days", "30", "-subj", "/CN=OtherCA", "-extensions", "ext", "-config", d_"ca.cnf")
+    If rc '= 0 Set rc = ..Openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", d_"ca.key", "-out", d_"ca.pem", "-days", "30", "-subj", "/CN=OtherCA")
+    Do $$$AssertEquals(rc, 0, "openssl made the other CA")
+    Quit:rc
+    Set rc = ..Openssl("ca", "-gencrl", "-config", d_"ca.cnf", "-keyfile", d_"ca.key", "-cert", d_"ca.pem", "-out", d_"other.crl.pem")
+    Do $$$AssertEquals(rc, 0, "openssl made a CRL signed by the other CA")
+    Quit:rc
+    Set tHexCrl = ..Hex(d_"other.crl.pem")
+    // 1: nothing stored yet
+    Set tSC = ##class(OPCUA.Security.Trust).AddIssuer(..#URL, ..Hex(..Fx()_"myCA.crt.der"), tHexCrl, .x1)
+    Do $$$AssertTrue($$$ISERR(tSC), "a valid CRL signed by another CA is refused")
+    Do $$$AssertEquals(##class(OPCUA.REST.Error).HttpCode(tSC), 400, "400")
+    Do $$$AssertEquals(..TrustDirCount(), 1, "trusted/ holds only the server certificate")
+    Set tKey = ##class(OPCUA.Security.Store).ServerKey(..#URL)
+    Do $$$AssertEquals(..CountFiles(##class(OPCUA.Security.Store).ServerDir(tKey, "crl")), 0, "crl/ is empty")
+    Do ##class(OPCUA.Security.Store).GetServer(tKey, .e)
+    Do $$$AssertEquals(e.hasIssuer, 0, "entry still has no issuer")
+    // 2: a good issuer is stored, then a bad attempt must not remove it
+    Set tSC = ##class(OPCUA.Security.Trust).AddIssuer(..#URL, ..Hex(..Fx()_"myCA.crt.der"), ..Hex(..Fx()_"myCA.crl"), .x2)
+    Do $$$AssertStatusOK(tSC, "the real issuer is accepted")
+    Set tSC = ##class(OPCUA.Security.Trust).AddIssuer(..#URL, ..Hex(..Fx()_"myCA.crt.der"), tHexCrl, .x3)
+    Do $$$AssertTrue($$$ISERR(tSC), "bad CRL refused again")
+    Do $$$AssertEquals(..TrustDirCount(), 2, "the good issuer is still there")
+    Do $$$AssertEquals(..CountFiles(##class(OPCUA.Security.Store).ServerDir(tKey, "crl")), 1, "and its CRL")
+    Set tSC = ##class(OPCUA.Security.Trust).Pin(..#URL, .fps, .td, .cd, .h)
+    Do $$$AssertStatusOK(tSC, "Pin still works")
+    // scratch is cleaned up and never sits inside a trust or crl directory
+    Do $$$AssertEquals(..CountFiles(td), 2, "no scratch files in trusted/")
 }
 
 Method TestChangedDetected()
