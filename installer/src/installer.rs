@@ -88,6 +88,9 @@ pub struct RemoteFile {
     pub sha256: String,
     #[serde(default)]
     pub crypto: bool,
+    /// The installer recorded writing exactly this content.
+    #[serde(default)]
+    pub owned: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -122,12 +125,26 @@ impl Verification {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum FileAction {
     Upload,
     Reuse,
     /// An existing crypto library different from ours: kept, never replaced.
     KeepExisting,
+    /// A different existing file the user must confirm replacing: usually the copy an earlier
+    /// version of this tool installed (`owned`). `existing` is its SHA-256; the server replaces
+    /// only that exact file and keeps it beside the new one as a backup.
+    Replace {
+        existing: String,
+        owned: bool,
+    },
+}
+
+impl FileAction {
+    /// Whether the file is streamed to the server.
+    pub fn uploads(&self) -> bool {
+        matches!(self, FileAction::Upload | FileAction::Replace { .. })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -371,10 +388,11 @@ impl<'a> Installer<'a> {
                                         FileAction::Reuse
                                     }
                                     Some(r) if r.exists && r.crypto => FileAction::KeepExisting,
-                                    Some(r) if r.exists => {
-                                        block("Native library conflict", format!("{} already exists with different content (SHA-256 {}). It was not replaced. Replace it with the supplied file during a maintenance window (IRIS may have it loaded), then retry.", r.path, r.sha256));
-                                        FileAction::Reuse
-                                    }
+                                    // Confirmed on its own screen before the review.
+                                    Some(r) if r.exists => FileAction::Replace {
+                                        existing: r.sha256.clone(),
+                                        owned: r.owned,
+                                    },
                                     _ => FileAction::Upload,
                                 };
                                 files.push((a, action, dest));
@@ -388,7 +406,7 @@ impl<'a> Installer<'a> {
         }
 
         let uploads: Vec<&(Artifact, FileAction, String)> =
-            files.iter().filter(|f| f.1 == FileAction::Upload).collect();
+            files.iter().filter(|f| f.1.uploads()).collect();
         if !uploads.is_empty() && !info.bin_writable {
             // Built-in files are written out so there is something on this machine to copy.
             let list = uploads
@@ -423,7 +441,8 @@ impl<'a> Installer<'a> {
     }
 
     /// Stream one file into IRIS's bin directory in chunks, then verify and move it into place.
-    pub fn install_file(&self, a: &Artifact) -> Result<String, String> {
+    /// `replace` is the SHA-256 of the existing file the user confirmed replacing.
+    pub fn install_file(&self, a: &Artifact, replace: Option<&str>) -> Result<String, String> {
         let bytes = &a.bytes;
         let engine = base64::engine::general_purpose::STANDARD;
         for (i, chunk) in bytes.chunks(CHUNK).enumerate() {
@@ -436,8 +455,15 @@ impl<'a> Installer<'a> {
                 ],
             )?;
         }
-        let v = self.call_ok("CommitFile", &[json!(a.name), json!(a.sha256)])?;
-        Ok(v["action"].as_str().unwrap_or("installed").to_string())
+        let v = self.call_ok(
+            "CommitFile",
+            &[json!(a.name), json!(a.sha256), json!(replace.unwrap_or(""))],
+        )?;
+        let action = v["action"].as_str().unwrap_or("installed");
+        Ok(match v["backup"].as_str() {
+            Some(b) => format!("{action}, previous copy kept as {b}"),
+            None => action.to_string(),
+        })
     }
 
     /// Upload the console into the directory IRIS serves it from, then create its web

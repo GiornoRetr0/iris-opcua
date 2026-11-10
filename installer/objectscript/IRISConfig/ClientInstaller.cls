@@ -8,7 +8,9 @@ Include %occInclude
 /// <tt>message</tt> and step-specific fields, and never throws. Arguments arrive as
 /// SQL parameters and are validated here; nothing is ever evaluated as code.
 /// Inspection procedures change nothing. Mutating procedures refuse to run without
-/// the installer privileges, and never modify a resource this class did not create.
+/// the installer privileges, and never modify a resource this class did not create. The one
+/// exception is a native file the user confirmed replacing (<method>CommitFile</method>), which is
+/// kept as a backup rather than deleted.
 ///
 /// Console files are written only into the directory <method>PrepareUi</method> claimed, and
 /// pruning only ever deletes inside it.
@@ -149,8 +151,13 @@ ClassMethod StageChunk(pName As %String, pB64 As %String(MAXLEN=""), pFirst As %
 }
 
 /// Verify the staged file against <var>pSha</var> and move it into place.
-/// An identical existing file is reused; a different existing file is never overwritten.
-ClassMethod CommitFile(pName As %String, pSha As %String) As %String(MAXLEN="") [ SqlProc ]
+/// An identical existing file is reused. A different existing file is replaced only when
+/// <var>pReplaceSha</var> is its exact SHA-256 (the copy the user confirmed replacing, so a file that
+/// changed since is still refused), and never for a crypto library. The old file is renamed to
+/// <tt>name.&lt;sha12&gt;.old</tt> beside it rather than deleted: renaming works even while IRIS has the
+/// library loaded (on Windows too), and the backup restores the previous version by hand.
+/// Processes that already loaded the old library keep using it until they restart.
+ClassMethod CommitFile(pName As %String, pSha As %String, pReplaceSha As %String = "") As %String(MAXLEN="") [ SqlProc ]
 {
 	Set r = ..Result("commit")
 	Try {
@@ -166,16 +173,35 @@ ClassMethod CommitFile(pName As %String, pSha As %String) As %String(MAXLEN="") 
 			Set r.message = "Upload of "_pName_" is corrupt (SHA-256 "_got_", expected "_pSha_"). Retry the installation."
 			Quit
 		}
+		Set backup = ""
 		If ##class(%File).Exists(final) {
-			Do ##class(%File).Delete(staged)
-			If ..FileSha(final) = pSha { Set r.action = "reuse" Do r.%Set("ok", 1, "boolean") Quit }
-			Set r.action = "conflict"
-			Set r.message = final_" already exists with different content. It was not replaced. "_$Select(..IsCrypto(pName):"Crypto libraries are never replaced.", 1:"Replace it during a maintenance window, then retry.")
+			Set old = ..FileSha(final)
+			If old = pSha { Do ##class(%File).Delete(staged) Set r.action = "reuse" Do r.%Set("ok", 1, "boolean") Quit }
+			Set pReplaceSha = $ZConvert(pReplaceSha, "L")
+			If (pReplaceSha = "") || (pReplaceSha '= old) || ..IsCrypto(pName) {
+				Do ##class(%File).Delete(staged)
+				Set r.action = "conflict"
+				Set r.message = final_" already exists with different content (SHA-256 "_old_"). It was not replaced. "_$Select(..IsCrypto(pName):"Crypto libraries are never replaced.", pReplaceSha'="":"It changed after you confirmed replacing it; check the files again.", 1:"Replace it during a maintenance window, then retry.")
+				Quit
+			}
+			Set backup = ..BackupPath(final, old)
+			If '##class(%File).Rename(final, backup) {
+				Do ##class(%File).Delete(staged)
+				Set r.message = "Could not move the existing "_final_" aside to "_backup_", so it was not replaced. Stop IRIS, rename or remove it by hand, start IRIS, then retry."
+				Quit
+			}
+		}
+		If '##class(%File).Rename(staged, final) {
+			Set r.message = "Could not move "_staged_" to "_final_"."
+			If backup '= "" {
+				If ##class(%File).Rename(backup, final) { Set r.message = r.message_" The previous file was put back." }
+				Else { Set r.message = r.message_" The previous file is at "_backup_"; rename it back to "_final_" before starting IRIS again." }
+			}
 			Quit
 		}
-		If '##class(%File).Rename(staged, final) { Set r.message = "Could not move "_staged_" to "_final_"." Quit }
 		Set ^IRISConfig.ClientInstaller("file", pName) = pSha
-		Set r.action = "installed"
+		Set r.action = $Select(backup '= "":"replaced", 1:"installed")
+		Set:backup'="" r.backup = backup
 		Do r.%Set("ok", 1, "boolean")
 	} Catch e { Do ..Fail(r, e) }
 	Quit r.%ToJSON()
@@ -545,6 +571,18 @@ ClassMethod LibraryFile() As %String [ Internal, Private ]
 ClassMethod StagingPath(pName As %String) As %String [ Internal, Private ]
 {
 	Quit $System.Util.BinaryDirectory()_".opcua-setup-"_pName_".part"
+}
+
+/// Where <method>CommitFile</method> moves a replaced file: beside it, named by its hash, so
+/// replacing the same version twice reuses the name. A leftover that cannot be deleted (still
+/// loaded by a process that has not restarted) gets a numbered name instead.
+ClassMethod BackupPath(pFinal As %String, pSha As %String) As %String [ Internal, Private ]
+{
+	Set base = pFinal_"."_$Extract(pSha, 1, 12), path = base_".old", n = 1
+	While ##class(%File).Exists(path) && '##class(%File).Delete(path) {
+		Set n = n + 1, path = base_"-"_n_".old"
+	}
+	Quit path
 }
 
 ClassMethod FileSha(pPath As %String) As %String [ Internal, Private ]
