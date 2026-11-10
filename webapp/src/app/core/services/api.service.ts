@@ -15,6 +15,13 @@ import {
   CreateSchemaResult,
   SchemaValidation,
   CredentialsEntry,
+  isManaged,
+  IdentityStatus,
+  CreateIdentityRequest,
+  ImportIdentityRequest,
+  UseIdentityFilesRequest,
+  ServerCertificateReview,
+  TrustedServer,
 } from '../models/opcua.models';
 
 interface ApiEnvelope<T> {
@@ -135,11 +142,15 @@ export class ApiService {
       } else if (server.credentials) {
         body['credentials'] = server.credentials;
       }
-      if (server.certPath) body['certPath'] = server.certPath;
-      if (server.keyPath) body['keyPath'] = server.keyPath;
-      if (server.trustDir) body['trustDir'] = server.trustDir;
-      if (server.crlDir) body['crlDir'] = server.crlDir;
-      if (server.clientURI) body['clientURI'] = server.clientURI;
+      // A managed Sign & Encrypt profile sends no certificate fields: IRIS supplies
+      // its own identity and trust store.
+      if (!isManaged(server)) {
+        if (server.certPath) body['certPath'] = server.certPath;
+        if (server.keyPath) body['keyPath'] = server.keyPath;
+        if (server.trustDir) body['trustDir'] = server.trustDir;
+        if (server.crlDir) body['crlDir'] = server.crlDir;
+        if (server.clientURI) body['clientURI'] = server.clientURI;
+      }
       return body;
     }
 
@@ -243,6 +254,60 @@ export class ApiService {
     return this.http
       .put<ApiEnvelope<{ id: string; username: string }>>(`${this.baseUrl}/credentials/${encodeURIComponent(id)}`, body, { headers: this.headers })
       .pipe(timeout(15000), map(unwrap), catchError((err) => this.fail(err)));
+  }
+
+  // ── Managed Sign & Encrypt: the IRIS client identity and trusted servers ──
+
+  private securityBody<T>(method: 'post' | 'delete', endpoint: string, body?: unknown, timeoutMs = 30000): Observable<T> {
+    return this.http
+      .request<ApiEnvelope<T>>(method, `${this.baseUrl}${endpoint}`, { headers: this.headers, body })
+      .pipe(timeout(timeoutMs), map(unwrap), catchError((err) => this.fail(err)));
+  }
+
+  getIdentity(): Observable<IdentityStatus> {
+    return this.request<IdentityStatus>('get', '/security/identity');
+  }
+
+  createIdentity(body: CreateIdentityRequest): Observable<IdentityStatus> {
+    return this.securityBody<IdentityStatus>('post', '/security/identity', body);
+  }
+
+  importIdentity(body: ImportIdentityRequest): Observable<IdentityStatus> {
+    return this.securityBody<IdentityStatus>('post', '/security/identity/import', body);
+  }
+
+  useIdentityFiles(body: UseIdentityFilesRequest): Observable<IdentityStatus> {
+    return this.securityBody<IdentityStatus>('post', '/security/identity/files', body);
+  }
+
+  /** The public client certificate, as a file. A blob request, so the JWT interceptor applies. */
+  downloadClientCertificate(format: 'der' | 'pem'): Observable<Blob> {
+    return this.http
+      .get(`${this.baseUrl}/security/identity/certificate`, { params: { format }, responseType: 'blob' })
+      .pipe(timeout(15000), catchError((err) => this.fail(err)));
+  }
+
+  listTrustedServers(): Observable<TrustedServer[]> {
+    return this.request<TrustedServer[]>('get', '/security/servers');
+  }
+
+  inspectServer(url: string): Observable<ServerCertificateReview> {
+    return this.securityBody<ServerCertificateReview>('post', '/security/servers/inspect', { url });
+  }
+
+  trustServer(url: string, fingerprint: string, label?: string): Observable<ServerCertificateReview> {
+    const body: Record<string, string> = { url, fingerprint };
+    if (label) body['label'] = label;
+    return this.securityBody<ServerCertificateReview>('post', '/security/servers/trust', body);
+  }
+
+  /** Hex (uppercase) CA certificate and revocation list for a CA-signed server. */
+  addServerIssuer(url: string, caCertificate: string, crl: string): Observable<ServerCertificateReview> {
+    return this.securityBody<ServerCertificateReview>('post', '/security/servers/issuer', { url, caCertificate, crl });
+  }
+
+  removeTrustedServer(key: string): Observable<unknown> {
+    return this.securityBody<unknown>('delete', `/security/servers/${encodeURIComponent(key)}`);
   }
 
   deploy(params: Record<string, any>, server?: ServerProfile): Observable<DeployResult> {

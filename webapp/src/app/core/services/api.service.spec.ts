@@ -3,7 +3,7 @@ import { HttpErrorResponse, provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ApiService, apiErrorMessage } from './api.service';
 import { ConfigService } from './config.service';
-import { ServerProfile } from '../models/opcua.models';
+import { ServerProfile, isManaged } from '../models/opcua.models';
 import { signal } from '@angular/core';
 import { AuthService } from './auth.service';
 
@@ -251,5 +251,78 @@ describe('ApiService OPC UA credentials', () => {
     const update = http.expectOne('/api/credentials/OPCUA%20plc');
     expect(update.request.method).toBe('PUT');
     expect(update.request.body).toEqual({ username: 'opc2' });
+  });
+});
+
+/** Managed Sign & Encrypt: IRIS owns the identity, so the console sends no certificate fields. */
+describe('ApiService managed security', () => {
+  let http: HttpTestingController;
+  let api: ApiService;
+  const certFields = ['certPath', 'keyPath', 'trustDir', 'crlDir', 'clientURI'];
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: ConfigService, useValue: { hosted: false, get: () => ({ apiBaseUrl: '/api', apiUsername: 'u' }) } },
+        authStub(),
+      ],
+    });
+    http = TestBed.inject(HttpTestingController);
+    api = TestBed.inject(ApiService);
+  });
+
+  afterEach(() => http.verify());
+
+  it('a managed profile sends no certificate fields', () => {
+    api.test(server({ securityMode: 3, clientURI: 'urn:ignored', trustDir: '/t' })).subscribe();
+    const body = http.expectOne('/api/test').request.body;
+    expect(body.securityMode).toBe(3);
+    for (const f of certFields) expect(f in body).withContext(f).toBeFalse();
+  });
+
+  it('a manual profile keeps its certificate fields', () => {
+    const s = server({ securityMode: 3, certPath: '/c', keyPath: '/k', trustDir: '/t', crlDir: '/r', clientURI: 'urn:x' });
+    api.test(s).subscribe();
+    const body = http.expectOne('/api/test').request.body;
+    expect(body.certPath).toBe('/c');
+    expect(body.keyPath).toBe('/k');
+    expect(body.trustDir).toBe('/t');
+    expect(body.crlDir).toBe('/r');
+    expect(body.clientURI).toBe('urn:x');
+  });
+
+  it('isManaged only for Sign & Encrypt without cert or key path', () => {
+    expect(isManaged(server({ securityMode: 3 }))).toBeTrue();
+    expect(isManaged(server({ securityMode: 1 }))).toBeFalse();
+    expect(isManaged(server({ securityMode: 3, certPath: '/c' }))).toBeFalse();
+  });
+
+  it('downloadClientCertificate requests a blob', () => {
+    let got: Blob | undefined;
+    api.downloadClientCertificate('pem').subscribe((b) => (got = b));
+    const req = http.expectOne('/api/security/identity/certificate?format=pem');
+    expect(req.request.method).toBe('GET');
+    expect(req.request.responseType).toBe('blob');
+    req.flush(new Blob(['x']));
+    expect(got).toBeDefined();
+  });
+
+  it('getIdentity unwraps the envelope', () => {
+    let got: any;
+    api.getIdentity().subscribe((i) => (got = i));
+    http.expectOne('/api/security/identity').flush({ status: 'ok', data: { configured: false, ready: false, errors: [], warnings: [] } });
+    expect(got.configured).toBeFalse();
+  });
+
+  it('trust, issuer and remove use the documented routes and bodies', () => {
+    api.trustServer('opc.tcp://s:4840', 'AB', 'plc').subscribe();
+    expect(http.expectOne('/api/security/servers/trust').request.body).toEqual({ url: 'opc.tcp://s:4840', fingerprint: 'AB', label: 'plc' });
+    api.addServerIssuer('opc.tcp://s:4840', 'CA', 'CRL').subscribe();
+    expect(http.expectOne('/api/security/servers/issuer').request.body).toEqual({ url: 'opc.tcp://s:4840', caCertificate: 'CA', crl: 'CRL' });
+    api.removeTrustedServer('opc.tcp://s:4840').subscribe();
+    const del = http.expectOne((r) => r.method === 'DELETE');
+    expect(del.request.url).toBe('/api/security/servers/opc.tcp%3A%2F%2Fs%3A4840');
   });
 });
