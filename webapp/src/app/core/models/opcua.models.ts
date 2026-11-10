@@ -170,7 +170,7 @@ export interface IdentityStatus {
   daysLeft?: number;
   errors: IdentityIssue[];
   warnings: IdentityIssue[];
-  candidates?: { certPath: string; keyPath: string; clientURI?: string; notAfter?: string }[];
+  candidates?: { certPath: string; keyPath: string; clientURI: string; fingerprint: string; notAfter: string; ready: boolean }[];
   impact?: IdentityImpact;
   advanced?: { certPath: string; keyPath: string; storeRoot: string };
 }

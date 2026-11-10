@@ -33,6 +33,7 @@ describe('SecurityTabComponent', () => {
     api.listTrustedServers.and.returnValue(of([]));
     api.createIdentity.and.returnValue(of(configured()));
     api.importIdentity.and.returnValue(of(configured()));
+    api.useIdentityFiles.and.returnValue(of(configured()));
     await TestBed.configureTestingModule({
       imports: [SecurityTabComponent],
       providers: [
@@ -76,15 +77,105 @@ describe('SecurityTabComponent', () => {
     expect(el().textContent).toContain('Expires in 12 days');
   });
 
-  it('Replace lists the impact and posts replace with the current fingerprint', async () => {
+  const openReplace = () => {
+    button('Replace…')!.click();
+    fixture.detectChanges();
+  };
+  const confirmDialog = () => {
+    const dialog = el().querySelector('app-confirm-dialog')!;
+    (Array.from(dialog.querySelectorAll('button')).find((b) => b.textContent!.trim() === 'Replace') as HTMLButtonElement).click();
+  };
+
+  it('Replace offers the routes, lists the impact and posts replace with the current fingerprint and URI', async () => {
     await create(configured());
-    button('Replace')!.click();
+    openReplace();
+    expect(el().querySelector('app-confirm-dialog')).toBeNull();
+    button('Create new certificate')!.click();
     fixture.detectChanges();
     const dialog = el().querySelector('app-confirm-dialog')!;
-    expect(dialog.textContent).toContain('OPCUA · PLC · opc.tcp://plc:4840');
-    expect(dialog.textContent).toContain('Each of these servers must approve the new certificate before these connections work again.');
-    (Array.from(dialog.querySelectorAll('button')).find((b) => b.textContent!.includes('Replace')) as HTMLButtonElement).click();
-    expect(api.createIdentity).toHaveBeenCalledWith(jasmine.objectContaining({ replace: true, currentFingerprint: 'AA:BB:CC' }));
+    const detail = dialog.querySelector('p')!;
+    // The detail is one string with line breaks; the dialog must render them.
+    expect(detail.classList).toContain('whitespace-pre-line');
+    expect(detail.textContent!.split('\n')).toContain('OPCUA · PLC · opc.tcp://plc:4840');
+    expect(detail.textContent).toContain('Each of these servers must approve the new certificate before these connections work again.');
+    confirmDialog();
+    expect(api.createIdentity).toHaveBeenCalledWith({ clientURI: 'urn:iris:opcua-client', replace: true, currentFingerprint: 'AA:BB:CC' });
+  });
+
+  it('a Client URI edited under Advanced wins on replace', async () => {
+    await create(configured());
+    openReplace();
+    fixture.componentInstance.clientURI.set('urn:new');
+    button('Create new certificate')!.click();
+    fixture.detectChanges();
+    confirmDialog();
+    expect(api.createIdentity).toHaveBeenCalledWith(jasmine.objectContaining({ clientURI: 'urn:new', replace: true }));
+  });
+
+  it('replaces with files already on IRIS behind the same confirmation', async () => {
+    await create(configured());
+    openReplace();
+    fixture.componentInstance.certPath.set('/a.der');
+    fixture.componentInstance.keyPath.set('/a.key');
+    api.useIdentityFiles.and.returnValue(of(configured()));
+    fixture.componentInstance.useFiles();
+    fixture.detectChanges();
+    expect(api.useIdentityFiles).not.toHaveBeenCalled();
+    confirmDialog();
+    expect(api.useIdentityFiles).toHaveBeenCalledWith({ certPath: '/a.der', keyPath: '/a.key', replace: true, currentFingerprint: 'AA:BB:CC' });
+  });
+
+  it('replaces with an uploaded pair behind the same confirmation, then holds nothing', async () => {
+    await create(configured());
+    openReplace();
+    button('Use existing certificate')!.click();
+    fixture.detectChanges();
+    const c = fixture.componentInstance;
+    await c.onFile('cert', { target: { files: [new File([new Uint8Array([1, 2])], 'c.der')] } } as unknown as Event);
+    await c.onFile('key', { target: { files: [new File([new Uint8Array([0xab, 0xcd])], 'k.der')] } } as unknown as Event);
+    c.submitImport();
+    fixture.detectChanges();
+    expect(api.importIdentity).not.toHaveBeenCalled();
+    confirmDialog();
+    expect(api.importIdentity).toHaveBeenCalledWith({ certificate: '0102', key: 'ABCD', replace: true, currentFingerprint: 'AA:BB:CC' });
+    expect(c.heldUpload()).toBe('');
+  });
+
+  it('on a 409 reloads the identity so the next confirmation uses the new fingerprint', async () => {
+    await create(configured());
+    api.createIdentity.and.returnValues(
+      throwError(() => new HttpErrorResponse({ status: 409, error: { status: 'error', error: 'The identity changed' } })),
+      of(configured())
+    );
+    api.getIdentity.and.returnValue(of(configured({ fingerprint: 'DD:EE', impact: { pipelines: [], servers: [{ key: 'z', url: 'opc.tcp://z', label: 'Z' }] } })));
+    openReplace();
+    button('Create new certificate')!.click();
+    fixture.detectChanges();
+    confirmDialog();
+    fixture.detectChanges();
+    expect(el().textContent).toContain('The identity changed');
+    expect(api.getIdentity).toHaveBeenCalledTimes(2);
+    expect(el().querySelector('app-confirm-dialog')).toBeNull();
+    openReplace();
+    button('Create new certificate')!.click();
+    fixture.detectChanges();
+    expect(el().querySelector('app-confirm-dialog')!.textContent).toContain('Z · opc.tcp://z');
+    confirmDialog();
+    expect(api.createIdentity.calls.mostRecent().args[0]).toEqual(jasmine.objectContaining({ currentFingerprint: 'DD:EE' }));
+  });
+
+  it('offers Use it only for a ready candidate', async () => {
+    const cand = { certPath: '/c', keyPath: '/k', clientURI: 'urn:old', fingerprint: 'F', notAfter: '2020-01-01', ready: false };
+    await create({ configured: false, ready: false, errors: [], warnings: [], candidates: [cand] });
+    expect(el().textContent).toContain('urn:old');
+    expect(button('Use it')).toBeUndefined();
+  });
+
+  it('offers Use it for a ready candidate', async () => {
+    const cand = { certPath: '/c', keyPath: '/k', clientURI: 'urn:ok', fingerprint: 'F', notAfter: '2030-01-01', ready: true };
+    await create({ configured: false, ready: false, errors: [], warnings: [], candidates: [cand] });
+    button('Use it')!.click();
+    expect(api.useIdentityFiles).toHaveBeenCalledWith({ certPath: '/c', keyPath: '/k' });
   });
 
   it('warns about sending a key over plain http to a remote host', async () => {
@@ -101,22 +192,39 @@ describe('SecurityTabComponent', () => {
     expect(el().textContent).not.toContain('This sends the private key');
   });
 
-  it('clears the file inputs and keeps key material out of the DOM after import', async () => {
+  async function pickPair(c: SecurityTabComponent) {
+    await c.onFile('cert', { target: { files: [new File([new Uint8Array([1, 2])], 'c.der')] } } as unknown as Event);
+    await c.onFile('key', { target: { files: [new File([new Uint8Array([0xab, 0xcd])], 'k.der')] } } as unknown as Event);
+  }
+
+  it('holds the key only until the request is sent, and the DOM never shows it', async () => {
     await create({ configured: false, ready: false, errors: [], warnings: [] });
     button('Use existing certificate')!.click();
     fixture.detectChanges();
-    expect(el().querySelectorAll('input[type=file]').length).toBe(3);
-    const cert = new File([new Uint8Array([1, 2])], 'c.der');
-    const key = new File([new Uint8Array([0xab, 0xcd])], 'k.der');
-    await fixture.componentInstance.pickFile('cert', cert);
-    await fixture.componentInstance.pickFile('key', key);
-    await fixture.componentInstance.importPair();
+    const c = fixture.componentInstance;
+    await pickPair(c);
+    expect(c.heldUpload()).toContain('ABCD');
+    c.submitImport();
     fixture.detectChanges();
     expect(api.importIdentity).toHaveBeenCalledWith(jasmine.objectContaining({ certificate: '0102', key: 'ABCD' }));
+    expect(c.heldUpload()).toBe('');
     expect(el().innerHTML).not.toContain('ABCD');
-    for (const i of Array.from(el().querySelectorAll('input[type=file]')) as HTMLInputElement[]) {
-      expect(i.value).toBe('');
-    }
-    expect(fixture.componentInstance.hasPickedFiles()).toBeFalse();
+    for (const i of Array.from(el().querySelectorAll('input[type=file]')) as HTMLInputElement[]) expect(i.value).toBe('');
+    expect(JSON.stringify(c.status())).not.toContain('ABCD');
+  });
+
+  it('scrubs the key and password when the import fails', async () => {
+    await create({ configured: false, ready: false, errors: [], warnings: [] });
+    api.importIdentity.and.returnValue(throwError(() => new HttpErrorResponse({ status: 400, error: { status: 'error', error: 'Key does not match' } })));
+    button('Use existing certificate')!.click();
+    fixture.detectChanges();
+    const c = fixture.componentInstance;
+    await pickPair(c);
+    c.pfxPassword.set('s3cret');
+    c.submitImport();
+    fixture.detectChanges();
+    expect(el().textContent).toContain('Key does not match');
+    expect(c.heldUpload()).toBe('');
+    expect(el().innerHTML).not.toContain('s3cret');
   });
 });

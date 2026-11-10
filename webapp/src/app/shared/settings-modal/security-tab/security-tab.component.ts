@@ -74,7 +74,7 @@ const labelCls = 'block text-[10px] font-bold text-on-surface-variant uppercase 
             <div class="flex flex-wrap gap-3 pt-2">
               <button type="button" (click)="download('der')" class="px-4 py-2 text-sm font-semibold rounded-lg border border-outline-variant/30 text-primary hover:bg-primary/5">Download certificate (DER)</button>
               <button type="button" (click)="download('pem')" class="px-4 py-2 text-sm font-semibold rounded-lg border border-outline-variant/30 text-primary hover:bg-primary/5">Download certificate (PEM)</button>
-              <button type="button" (click)="askReplace(createNew)" class="px-4 py-2 text-sm font-semibold rounded-lg text-error hover:bg-error-container/30">Replace…</button>
+              <button type="button" (click)="startReplace()" class="px-4 py-2 text-sm font-semibold rounded-lg text-error hover:bg-error-container/30">Replace…</button>
             </div>
           </div>
         } @else {
@@ -84,8 +84,13 @@ const labelCls = 'block text-[10px] font-bold text-on-surface-variant uppercase 
           </div>
           @for (c of st.candidates ?? []; track c.certPath) {
             <div class="p-3 rounded-lg bg-tertiary-fixed text-on-tertiary-fixed flex items-center justify-between gap-3 text-sm">
-              <span>A certificate was found on IRIS: {{ c.clientURI || c.certPath }}@if (c.notAfter) { · expires {{ c.notAfter }}}</span>
-              <button type="button" (click)="useCandidate(c.certPath, c.keyPath)" class="font-semibold underline shrink-0">Use it</button>
+              <span>
+                A certificate was found on IRIS: {{ c.clientURI || c.certPath }}@if (c.notAfter) { · expires {{ c.notAfter }}}
+                @if (!c.ready) { <span class="block text-xs">It cannot be used as it is (expired, unreadable, or the key does not match).</span> }
+              </span>
+              @if (c.ready) {
+                <button type="button" (click)="useCandidate(c.certPath, c.keyPath)" class="font-semibold underline shrink-0">Use it</button>
+              }
             </div>
           }
           <div class="flex flex-wrap gap-3">
@@ -96,7 +101,21 @@ const labelCls = 'block text-[10px] font-bold text-on-surface-variant uppercase 
           </div>
         }
 
-        @if (!st.configured && showImport()) {
+        @if (st.configured && replacing()) {
+          <div class="p-4 rounded-xl border border-outline-variant/20 space-y-4">
+            <h4 class="text-sm font-semibold text-on-surface">Replace the client identity</h4>
+            <p class="text-sm text-on-surface-variant">Choose how to get the new certificate. You will be asked to confirm before anything changes.</p>
+            <div class="flex flex-wrap gap-3">
+              <button type="button" (click)="createNew()" [disabled]="busy()"
+                      class="px-4 py-2 bg-primary text-on-primary text-sm font-semibold rounded-lg disabled:opacity-60">Create new certificate</button>
+              <button type="button" (click)="showImport.set(!showImport())"
+                      class="px-4 py-2 text-primary text-sm font-semibold rounded-lg border border-outline-variant/30 hover:bg-primary/5">Use existing certificate</button>
+              <button type="button" (click)="cancelReplace()" class="px-4 py-2 text-sm text-on-surface-variant">Cancel</button>
+            </div>
+            <p class="text-xs text-on-surface-variant">To use files already on IRIS, open Advanced below.</p>
+          </div>
+        }
+        @if ((!st.configured || replacing()) && showImport()) {
           <ng-container *ngTemplateOutlet="importForm" />
         }
 
@@ -110,12 +129,12 @@ const labelCls = 'block text-[10px] font-bold text-on-surface-variant uppercase 
         <details class="text-sm text-on-surface-variant">
           <summary class="cursor-pointer font-semibold">Advanced</summary>
           <div class="mt-4 space-y-5">
-            @if (!st.configured) {
+            @if (!st.configured || replacing()) {
               <div>
                 <label [class]="labelCls" for="sec-client-uri">Client URI</label>
                 <input id="sec-client-uri" type="text" [class]="inputCls" placeholder="urn:iris:opcua-client"
                        [ngModel]="clientURI()" (ngModelChange)="clientURI.set($event)">
-                <p class="text-xs mt-1 ml-1">Used for a newly created certificate. Leave empty for the default.</p>
+                <p class="text-xs mt-1 ml-1">Used for a newly created certificate. @if (st.configured) { Defaults to the current one. } @else { Leave empty for the default. }</p>
               </div>
               <div class="space-y-2">
                 <p class="font-semibold">Use files already on IRIS</p>
@@ -126,7 +145,8 @@ const labelCls = 'block text-[10px] font-bold text-on-surface-variant uppercase 
                 <button type="button" (click)="useFiles()" [disabled]="!canUseFiles() || busy()"
                         class="px-4 py-2 text-sm font-semibold rounded-lg border border-outline-variant/30 text-primary disabled:opacity-50">Validate and use</button>
               </div>
-            } @else if (st.advanced) {
+            }
+            @if (st.configured && st.advanced) {
               <dl class="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1.5">
                 <dt>Certificate file</dt><dd class="font-mono text-xs break-all">{{ st.advanced.certPath }}</dd>
                 <dt>Key file</dt><dd class="font-mono text-xs break-all">{{ st.advanced.keyPath }}</dd>
@@ -233,9 +253,43 @@ export class SecurityTabComponent implements OnInit {
   pending = signal<(() => void) | null>(null);
 
   // Picked files, kept as hex only until the request is sent.
+  /** Test hook: the held upload, to prove nothing lingers. */
+  heldUpload(): string {
+    const p = this.picked();
+    return p.cert + p.key + p.pfx + this.pfxPassword();
+  }
+
   private picked = signal<Record<Slot, string>>({ cert: '', key: '', pfx: '' });
 
-  readonly createNew = () => this.run(this.api.createIdentity({ clientURI: this.clientURI().trim() || undefined, ...this.guard() }), 'Identity created on IRIS.');
+  /** True while the user is choosing how to replace the configured identity. */
+  replacing = signal(false);
+
+  /**
+   * Create a new certificate. A replacement keeps the current Client URI unless the
+   * user edited it under Advanced: servers know IRIS by that URI.
+   */
+  readonly createNew = () => {
+    const go = () => {
+      const typed = this.clientURI().trim();
+      const uri = typed || this.status()?.clientURI || undefined;
+      this.run(this.api.createIdentity({ clientURI: uri, ...this.guard() }), 'Identity created on IRIS.');
+    };
+    if (this.status()?.configured) this.askReplace(go);
+    else go();
+  };
+
+  startReplace(): void {
+    this.clientURI.set(this.status()?.clientURI ?? '');
+    this.error.set('');
+    this.message.set('');
+    this.replacing.set(true);
+  }
+
+  cancelReplace(): void {
+    this.replacing.set(false);
+    this.showImport.set(false);
+    this.scrub();
+  }
 
   canUseFiles = computed(() => !!this.certPath().trim() && !!this.keyPath().trim());
   canImport = computed(() => {
@@ -322,11 +376,15 @@ export class SecurityTabComponent implements OnInit {
         this.status.set(st);
         this.message.set(done);
         this.showImport.set(false);
+        this.replacing.set(false);
         this.loadTrusted();
       },
       error: (err) => {
         this.busy.set(false);
         this.error.set(apiErrorMessage(err));
+        // 409: the identity changed under us. The fingerprint and the list of what is
+        // affected are stale, so reload them; the user confirms again against the new list.
+        if (err instanceof HttpErrorResponse && err.status === 409) this.refresh();
       },
     });
   }
@@ -341,10 +399,11 @@ export class SecurityTabComponent implements OnInit {
     action?.();
   }
 
-  onFile(slot: Slot, ev: Event): void {
+  onFile(slot: Slot, ev: Event): Promise<void> {
     const file = (ev.target as HTMLInputElement).files?.[0];
-    if (file) void this.pickFile(slot, file);
-    else this.picked.update((p) => ({ ...p, [slot]: '' }));
+    if (file) return this.pickFile(slot, file);
+    this.picked.update((p) => ({ ...p, [slot]: '' }));
+    return Promise.resolve();
   }
 
   async pickFile(slot: Slot, file: File): Promise<void> {
@@ -378,7 +437,10 @@ export class SecurityTabComponent implements OnInit {
   }
 
   useFiles(): void {
-    this.run(this.api.useIdentityFiles({ certPath: this.certPath().trim(), keyPath: this.keyPath().trim(), ...this.guard() }), 'Using the files on IRIS.');
+    const go = () =>
+      this.run(this.api.useIdentityFiles({ certPath: this.certPath().trim(), keyPath: this.keyPath().trim(), ...this.guard() }), 'Using the files on IRIS.');
+    if (this.status()?.configured) this.askReplace(go);
+    else go();
   }
 
   copyFingerprint(): void {
