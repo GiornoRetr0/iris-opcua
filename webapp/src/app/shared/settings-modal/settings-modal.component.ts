@@ -2,8 +2,24 @@ import { Component, inject, signal, output, input, OnInit } from '@angular/core'
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ConfigService } from '../../core/services/config.service';
-import { ApiService, apiErrorMessage } from '../../core/services/api.service';
-import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
+import { firstValueFrom } from 'rxjs';
+import { ApiService, apiErrorMessage, InlineLogin } from '../../core/services/api.service';
+import { CredentialsEntry, ServerProfile } from '../../core/models/opcua.models';
+
+/**
+ * A credentials entry being created or changed for one server, saved to IRIS when
+ * the user saves. `edit` changes the server's current entry; an empty password then
+ * keeps the stored one.
+ */
+interface CredentialsDraft {
+  mode: 'new' | 'edit';
+  id: string;
+  username: string;
+  password: string;
+}
+
+/** The select's value for "New credentials…": not a valid credentials ID. */
+const NEW_CREDENTIALS = ' new';
 
 @Component({
   selector: 'app-settings-modal',
@@ -178,30 +194,72 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
                            class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
                            placeholder="opc.tcp://localhost:4840">
                   </div>
-                  <div>
-                    <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Username</label>
-                    <input type="text" [(ngModel)]="editingServer()!.username" autocomplete="off"
-                           class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
-                  </div>
-                  <div>
-                    <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Password</label>
-                    <!-- A bullet *placeholder* made an empty field and a filled one
-                         pixel-identical: both showed bullets. Empty now looks empty and
-                         says so; a set password is stated rather than mimed, with a
-                         Change button that clears the field for re-entry. -->
-                    @if (serverPasswordSet()) {
-                      <div class="flex items-center gap-2 w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5">
-                        <span class="material-symbols-outlined text-base text-tertiary">key</span>
-                        <span class="text-sm text-on-surface flex-1">Password set</span>
-                        <button type="button" (click)="clearServerPassword()"
-                                class="text-xs font-semibold text-primary hover:underline">Change</button>
+                  <!-- The username and password live in an IRIS credentials entry,
+                       never in this browser. The server stores only the entry's ID;
+                       deploy puts the same ID in the pipeline, so changing the entry
+                       here changes it for every pipeline that uses it. -->
+                  <div class="md:col-span-2">
+                    <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Credentials</label>
+                    <select [ngModel]="credentialsChoice()" (ngModelChange)="chooseCredentials($event)"
+                            class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all appearance-none cursor-pointer">
+                      <option value="">Anonymous (no username)</option>
+                      @for (c of credentialOptions(); track c.id) {
+                        <option [value]="c.id">{{ c.id }}{{ c.username ? ' — ' + c.username : '' }}</option>
+                      }
+                      <option [value]="NEW">New credentials…</option>
+                    </select>
+                    @if (credentialsError()) {
+                      <p class="flex items-start gap-1.5 text-[11px] text-error mt-1" role="alert">
+                        <span class="material-symbols-outlined text-sm shrink-0">error</span>
+                        <span>Could not list credentials: {{ credentialsError() }}</span>
+                      </p>
+                    }
+                    @if (!draft() && selectedEntry(); as entry) {
+                      <div class="flex items-center gap-2 mt-2 text-[11px] text-on-surface-muted">
+                        <span class="material-symbols-outlined text-sm text-tertiary">key</span>
+                        <span class="flex-1">
+                          Stored in IRIS as user <strong class="font-semibold text-on-surface">{{ entry.username }}</strong>.
+                          {{ usageText(entry) }}
+                        </span>
+                        <button type="button" (click)="editCredentials(entry)"
+                                class="text-xs font-semibold text-primary hover:underline shrink-0">Change</button>
                       </div>
-                    } @else {
-                      <input type="password" [(ngModel)]="editingServer()!.password" autocomplete="off"
-                             placeholder="No password set"
-                             class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
                     }
                   </div>
+                  @if (draft(); as d) {
+                    @if (d.mode === 'new') {
+                      <div class="md:col-span-2">
+                        <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Credentials ID</label>
+                        <input type="text" [(ngModel)]="d.id" (ngModelChange)="clearSaveError()" autocomplete="off"
+                               class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm font-mono focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
+                        <p class="text-[11px] text-on-surface-muted mt-1">
+                          The entry's name in IRIS (Interoperability &gt; Configure &gt; Credentials). Letters, digits, '.', '-' and '_'.
+                        </p>
+                      </div>
+                    }
+                    <div>
+                      <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Username</label>
+                      <input type="text" [(ngModel)]="d.username" (ngModelChange)="clearSaveError()" autocomplete="off"
+                             class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
+                    </div>
+                    <div>
+                      <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Password</label>
+                      <input type="password" [(ngModel)]="d.password" autocomplete="new-password"
+                             [placeholder]="d.mode === 'edit' ? 'Leave empty to keep the current one' : 'No password'"
+                             class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
+                    </div>
+                    <p class="md:col-span-2 -mt-3 flex items-start gap-1.5 text-[11px] text-on-surface-muted">
+                      <span class="material-symbols-outlined text-sm shrink-0">info</span>
+                      <span class="flex-1">
+                        Saved in IRIS when you save, not in this browser.
+                        @if (d.mode === 'edit' && draftEntry(); as entry) { {{ usageText(entry) }} }
+                      </span>
+                      <button type="button" (click)="discardDraft()"
+                              class="text-xs font-semibold text-primary hover:underline shrink-0">
+                        {{ d.mode === 'edit' ? 'Keep as is' : 'Cancel' }}
+                      </button>
+                    </p>
+                  }
                 </div>
               </section>
 
@@ -333,9 +391,9 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
           <p class="px-8 pb-4 -mt-4 flex items-start gap-1.5 text-[11px] text-on-surface-muted">
             <span class="material-symbols-outlined text-sm shrink-0">info</span>
             <span>
-              These settings are stored in this browser only, including any passwords.
-              They do not follow you to another machine, and anyone using this browser
-              profile can see them.
+              These settings are stored in this browser only, including the IRIS API
+              password. They do not follow you to another machine. OPC UA usernames and
+              passwords are stored in IRIS credentials, never here.
             </span>
           </p>
 
@@ -378,9 +436,9 @@ import { AppConfig, ServerProfile } from '../../core/models/opcua.models';
                       class="flex-1 sm:flex-none px-6 py-2.5 text-on-surface-variant text-sm font-semibold rounded-lg hover:bg-surface-variant transition-all">
                 Cancel
               </button>
-              <button (click)="saveAll()"
-                      class="flex-1 sm:flex-none px-8 py-2.5 bg-gradient-to-br from-primary to-primary-container text-on-primary text-sm font-semibold rounded-lg shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-[0.98] transition-all">
-                Save Changes
+              <button (click)="saveAll()" [disabled]="saving()"
+                      class="flex-1 sm:flex-none px-8 py-2.5 bg-gradient-to-br from-primary to-primary-container text-on-primary text-sm font-semibold rounded-lg shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50">
+                {{ saving() ? 'Saving…' : 'Save Changes' }}
               </button>
             </div>
           </div>
@@ -411,16 +469,15 @@ export class SettingsModalComponent implements OnInit {
    */
   testFailed = signal(false);
 
-  /**
-   * Which passwords were already set when the modal opened.
-   *
-   * Tracked rather than read live off the form, so that pressing Change reveals an
-   * empty field to type into instead of flipping straight back to "Password set".
-   * A last-updated date would need a storage-shape change (see the plan's
-   * §Decisions); the set/unset distinction is the finding.
-   */
-  private revealedServerPasswords = signal<Set<string>>(new Set());
+  /** The gateway password's Change button: an empty field to type into. */
   private revealedGatewayPassword = signal(false);
+
+  readonly NEW = NEW_CREDENTIALS;
+  /** IRIS credentials entries, from GET /credentials. */
+  credentialsList = signal<CredentialsEntry[]>([]);
+  credentialsError = signal('');
+  /** Unsaved credentials per server ID. */
+  drafts = signal<Record<string, CredentialsDraft>>({});
 
   // Server list (mutable copies for editing)
   servers = signal<ServerProfile[]>([]);
@@ -447,6 +504,105 @@ export class SettingsModalComponent implements OnInit {
     if (svrs.length > 0) {
       this.selectServer(svrs[0]);
     }
+    this.loadCredentials();
+  }
+
+  loadCredentials(): void {
+    this.api.listCredentials().subscribe({
+      next: (list) => {
+        this.credentialsList.set(list);
+        this.credentialsError.set('');
+      },
+      error: (err) => this.credentialsError.set(apiErrorMessage(err, 'Request failed')),
+    });
+  }
+
+  // --- Credentials of the server being edited ---
+
+  draft(): CredentialsDraft | null {
+    const server = this.editingServer();
+    return (server && this.drafts()[server.id]) || null;
+  }
+
+  /** What the select shows: the draft's choice while one is open. */
+  credentialsChoice(): string {
+    const d = this.draft();
+    if (d) return d.mode === 'new' ? NEW_CREDENTIALS : d.id;
+    return this.editingServer()?.credentials || '';
+  }
+
+  /**
+   * The list, plus the server's own ID if the list lacks it (it failed to load, or
+   * the entry was deleted in the Portal), so the select never silently shows another.
+   */
+  credentialOptions(): CredentialsEntry[] {
+    const list = this.credentialsList();
+    const id = this.editingServer()?.credentials;
+    if (id && !this.findEntry(id)) return [...list, { id, username: '', usedBy: [], pipeline: '' }];
+    return list;
+  }
+
+  selectedEntry(): CredentialsEntry | undefined {
+    const id = this.editingServer()?.credentials;
+    return id ? this.findEntry(id) : undefined;
+  }
+
+  draftEntry(): CredentialsEntry | undefined {
+    const d = this.draft();
+    return d ? this.findEntry(d.id) : undefined;
+  }
+
+  private findEntry(id: string): CredentialsEntry | undefined {
+    const lower = id.toLowerCase();
+    return this.credentialsList().find((c) => c.id.toLowerCase() === lower);
+  }
+
+  usageText(entry: CredentialsEntry): string {
+    const n = entry.usedBy.length;
+    let text = n === 0 ? 'No pipeline uses it.' : `Used by ${n === 1 ? 'pipeline' : n + ' pipelines'}: ${entry.usedBy.join(', ')}. Changes apply to ${n === 1 ? 'it' : 'all of them'} on their next connect.`;
+    if (entry.pipeline) text += ` Made for pipeline ${entry.pipeline}, and deleted with it.`;
+    return text;
+  }
+
+  chooseCredentials(value: string): void {
+    const server = this.editingServer();
+    if (!server) return;
+    this.clearSaveError();
+    if (value === NEW_CREDENTIALS) {
+      this.setDraft(server.id, { mode: 'new', id: this.suggestId(server), username: '', password: '' });
+      return;
+    }
+    this.setDraft(server.id, null);
+    server.credentials = value;
+  }
+
+  editCredentials(entry: CredentialsEntry): void {
+    const server = this.editingServer();
+    if (server) this.setDraft(server.id, { mode: 'edit', id: entry.id, username: entry.username, password: '' });
+  }
+
+  discardDraft(): void {
+    const server = this.editingServer();
+    if (server) this.setDraft(server.id, null);
+    this.clearSaveError();
+  }
+
+  private setDraft(serverId: string, d: CredentialsDraft | null): void {
+    this.drafts.update((all) => {
+      const next = { ...all };
+      if (d) next[serverId] = d;
+      else delete next[serverId];
+      return next;
+    });
+  }
+
+  /** "OPCUA-" plus the server's name or host, as the Portal would read it cleanly. */
+  private suggestId(server: ServerProfile): string {
+    const host = server.url.match(/:\/\/([^:/]+)/)?.[1] || '';
+    const base = ('OPCUA-' + (server.name || host || 'Server')).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 50);
+    let id = base;
+    for (let n = 2; this.findEntry(id); n++) id = `${base.slice(0, 47)}-${n}`;
+    return id;
   }
 
   ngOnInit(): void {
@@ -474,8 +630,7 @@ export class SettingsModalComponent implements OnInit {
       name: '',
       url: '',
       securityMode: 1,
-      username: '',
-      password: '',
+      credentials: '',
       certPath: '',
       keyPath: '',
       trustDir: '',
@@ -512,7 +667,14 @@ export class SettingsModalComponent implements OnInit {
     // Temporarily save gateway settings so API base URL is current
     this.configService.save(this.gatewayForm);
 
-    this.api.test(server).subscribe({
+    // An unsaved username and password are tested as typed, for this request only.
+    // A change that keeps the stored password tests with the stored entry.
+    const d = this.drafts()[server.id];
+    let login: InlineLogin | undefined;
+    if (d && (d.mode === 'new' || d.password)) login = { username: d.username, password: d.password };
+    const target = d?.mode === 'edit' && !login ? { ...server, credentials: d.id } : server;
+
+    this.api.test(target, login).subscribe({
       next: (result) => {
         this.testing.set(false);
         if (result.connected) {
@@ -539,20 +701,6 @@ export class SettingsModalComponent implements OnInit {
    * beside the button while the user fixes the thing it complains about reads as
    * the app not noticing.
    */
-  /** A server password counts as set only if it has a value and has not been revealed for editing. */
-  serverPasswordSet(): boolean {
-    const server = this.editingServer();
-    if (!server) return false;
-    return !!server.password && !this.revealedServerPasswords().has(server.id);
-  }
-
-  clearServerPassword(): void {
-    const server = this.editingServer();
-    if (!server) return;
-    server.password = '';
-    this.revealedServerPasswords.update((s) => new Set(s).add(server.id));
-  }
-
   gatewayPasswordSet(): boolean {
     return !!this.gatewayForm.apiPassword && !this.revealedGatewayPassword();
   }
@@ -566,7 +714,10 @@ export class SettingsModalComponent implements OnInit {
     if (this.saveError()) this.saveError.set('');
   }
 
-  saveAll(): void {
+  saving = signal(false);
+
+  async saveAll(): Promise<void> {
+    if (this.saving()) return;
     const all = this.servers();
     const invalid = all.filter(s => !s.url);
     if (invalid.length) {
@@ -579,6 +730,34 @@ export class SettingsModalComponent implements OnInit {
       return;
     }
     this.saveError.set('');
+
+    // Credentials first: a server is saved pointing at an entry only once IRIS has it.
+    // The API address may have just changed, so it is saved before calling it.
+    this.configService.save(this.gatewayForm);
+    this.saving.set(true);
+    try {
+      for (const server of all) {
+        const d = this.drafts()[server.id];
+        if (!d) continue;
+        const name = server.name || 'Untitled server';
+        if (!d.username) throw new Error(`${name}: credentials need a username.`);
+        try {
+          const saved = d.mode === 'new'
+            ? await firstValueFrom(this.api.createCredentials(d.id, d.username, d.password))
+            : await firstValueFrom(this.api.updateCredentials(d.id, d.username, d.password));
+          server.credentials = saved.id;
+          this.setDraft(server.id, null);
+        } catch (err) {
+          throw new Error(`${name}: ${apiErrorMessage(err, 'Could not save its credentials')}`);
+        }
+      }
+    } catch (err: any) {
+      this.saving.set(false);
+      this.saveError.set(err.message);
+      this.loadCredentials();
+      return;
+    }
+    this.saving.set(false);
 
     const validServers = all;
     // Auto-name untitled servers
@@ -595,8 +774,6 @@ export class SettingsModalComponent implements OnInit {
       // Keep legacy fields synced with first server for backward compat
       serverUrl: validServers[0]?.url || '',
       securityMode: validServers[0]?.securityMode || 1,
-      username: validServers[0]?.username || '',
-      password: validServers[0]?.password || '',
       certPath: validServers[0]?.certPath || '',
       keyPath: validServers[0]?.keyPath || '',
       trustDir: validServers[0]?.trustDir || '',

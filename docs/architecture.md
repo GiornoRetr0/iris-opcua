@@ -298,6 +298,9 @@ The Angular web app (the OPC UA console) communicates with IRIS through a REST A
 | `/pipelines/rebind` | POST | Change a pipeline's device list |
 | `/pipelines/toggle` | POST | Start/stop a pipeline — the only route that starts collection |
 | `/pipelines/delete` | POST | Delete a pipeline (keeps its schema) |
+| `/credentials` | GET | IRIS credentials entries: ID, username, the items using each; never a password |
+| `/credentials` | POST | Create an entry `{id, username, password}` (409 if the ID is taken) |
+| `/credentials/:id` | PUT | Change an entry's username or password; an empty password keeps the stored one |
 
 The two halves are deliberately separate: `/schemas` creates a reusable device *type*, and `/deploy` binds concrete devices to one. A schema can exist with no pipeline, and several pipelines can share one schema.
 
@@ -359,7 +362,7 @@ without the envelope, as "Sign-in failed" and opens Settings.
 
 `OPCUA.REST.ClientManager` is a helper that creates a fresh OPC UA client for each REST request:
 
-1. `ExtractConnectionParams()` -- pulls `url`, `securityMode`, `username`, `password`, cert paths from the request JSON
+1. `ExtractConnectionParams()` -- pulls `url`, `securityMode` and cert paths from the request JSON. The login comes from `credentials`, an IRIS credentials entry ID read on the server (what the console sends for a saved server), or from inline `username`/`password` used for that request only (the console's Test Connection of an unsaved login); both is a 400
 2. `Connect()` -- creates an `OPCUA.Client`, configures security, connects to the server
 3. Returns the client by reference so the service class can use it
 4. `Disconnect()` -- safely closes the connection (swallows errors since the request is done)

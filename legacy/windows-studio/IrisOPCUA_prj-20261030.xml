@@ -6270,7 +6270,7 @@ to nothing; guessing "leaf" wrongly hides a subtree, which is worse.]]></Descrip
 Manages per-request OPC UA client lifecycle for REST endpoints.
 Creates a connected client, executes work, then disconnects.</Description>
 <IncludeCode>OPCUA.Constants,%occInclude</IncludeCode>
-<TimeChanged>67873,33287.998812407</TimeChanged>
+<TimeChanged>67884,64842.766210801</TimeChanged>
 <TimeCreated>67873,33287.998812407</TimeCreated>
 
 <Method name="Connect">
@@ -6320,9 +6320,16 @@ Safely disconnect a client, ignoring errors.</Description>
 </Method>
 
 <Method name="ExtractConnectionParams">
-<Description>
+<Description><![CDATA[
 Extract common connection parameters from a JSON request body.
-Returns URL by reference. Other params are optional with defaults.</Description>
+Returns URL by reference. Other params are optional with defaults.
+
+The session's username and password come from <tt>credentials</tt>, the ID of an
+IRIS credentials entry, read here on the server (what the console sends for a
+saved server; see <class>OPCUA.REST.CredentialsService</class>), or from
+<tt>username</tt> and <tt>password</tt> sent inline, which are used for this
+request only and never stored (the console's test of an unsaved entry). Neither
+means anonymous. Both is a 400.]]></Description>
 <ClassMethod>1</ClassMethod>
 <FormalSpec>pBody:%DynamicObject,*pURL:%String,*pSecurityMode:%Integer,*pUsername:%String,*pPassword:%String,*pCertPath:%String,*pKeyPath:%String,*pTrustDir:%String,*pCrlDir:%String,*pClientURI:%String</FormalSpec>
 <ReturnType>%Status</ReturnType>
@@ -6333,10 +6340,17 @@ Returns URL by reference. Other params are optional with defaults.</Description>
 	}
 	set tSecVal = pBody.%Get("securityMode")
 	set pSecurityMode = $Select(tSecVal="":1, +tSecVal=0:1, 1:+tSecVal)
-	set tUser = pBody.%Get("username")
-	set pUsername = $Select(tUser="":"", 1:tUser)
-	set tPass = pBody.%Get("password")
-	set pPassword = $Select(tPass="":"", 1:tPass)
+	set tCredId = pBody.%Get("credentials")
+	if tCredId '= "" {
+		if pBody.%Get("username") '= "" {
+			Quit ##class(OPCUA.REST.Error).BadRequest("Send either 'credentials' (an existing credentials ID) or 'username' and 'password', not both.")
+		}
+		set tSC = ##class(OPCUA.REST.DeployService).ReadCredentials(tCredId, .pUsername, .pPassword)
+		Quit:$$$ISERR(tSC) tSC
+	} else {
+		set pUsername = pBody.%Get("username")
+		set pPassword = pBody.%Get("password")
+	}
 	set tCert = pBody.%Get("certPath")
 	set pCertPath = $Select(tCert="":"", 1:tCert)
 	set tKey = pBody.%Get("keyPath")
@@ -6409,6 +6423,175 @@ Returns a %DynamicObject with connected status and response time in ms.</Descrip
 </Class>
 
 
+<Class name="OPCUA.REST.CredentialsService">
+<Description><![CDATA[
+IRIS credentials entries (<tt>Ens.Config.Credentials</tt>) for the console's OPC UA
+servers: the one place an OPC UA password is stored. A saved server in the console
+holds only the entry's ID and sends it as <tt>credentials</tt>;
+<method>OPCUA.REST.ClientManager.ExtractConnectionParams</method> reads the username
+and password here on the server, and deploy puts the same ID in the pipeline's
+Credentials setting. So the console, and every pipeline bound to the same server,
+share one entry, and the browser never holds the password.
+
+No method returns a password. Every one needs %Ens_Credentials (R to list, W to
+create or change), as the Management Portal's credentials page does.]]></Description>
+<IncludeCode>%occInclude</IncludeCode>
+<TimeChanged>67884,64857.107782036</TimeChanged>
+<TimeCreated>67884,64842.78722595</TimeCreated>
+
+<Parameter name="IdMax">
+<Description><![CDATA[
+<tt>Ens.Config.Credentials.SystemName</tt>'s MAXLEN.]]></Description>
+<Default>50</Default>
+</Parameter>
+
+<Method name="List">
+<Description><![CDATA[
+Every credentials entry in this namespace, sorted by ID:
+<tt>[{id, username, usedBy: ["Item (Production)", ...], pipeline}]</tt>.
+<tt>pipeline</tt> names the pipeline deploy made the entry for (deleted with it),
+or is "" for an entry anyone else made.]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>*pResult:%DynamicArray</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	set pResult = []
+	#dim tSC As %Status = $$$OK
+	Try {
+		if '$System.Security.Check(##class(OPCUA.REST.DeployService).#CredentialsResource, "R") {
+			set tSC = ##class(OPCUA.REST.DeployService).NoCredentialsAccess("list credentials", "R")
+			Quit
+		}
+		set tSC = ##class(OPCUA.REST.DeployService).CredentialsUsage(.tUsage)
+		Quit:$$$ISERR(tSC)
+		// Embedded SQL: no SQL privilege needed, as for the console's other queries.
+		&sql(DECLARE cCredList CURSOR FOR
+			SELECT SystemName, Username INTO :tId, :tUser
+			FROM Ens_Config.Credentials ORDER BY SystemName)
+		&sql(OPEN cCredList)
+		if SQLCODE < 0 {
+			set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to query Ens_Config.Credentials", $$$ERROR($$$SQLError, SQLCODE, $Get(%msg)))
+			Quit
+		}
+		for {
+			&sql(FETCH cCredList)
+			Quit:SQLCODE=100
+			if SQLCODE < 0 {
+				set tSC = ##class(OPCUA.REST.Error).Make(500, "Failed to query Ens_Config.Credentials", $$$ERROR($$$SQLError, SQLCODE, $Get(%msg)))
+				Quit
+			}
+			set tUsed = []
+			set tLower = $ZConvert(tId, "L"), k = ""
+			for {
+				set k = $Order(tUsage(tLower, k))
+				Quit:k=""
+				do tUsed.%Push(k)
+			}
+			do pResult.%Push({"id": (tId), "username": (tUser), "usedBy": (tUsed), "pipeline": ($Get(^OPCUA.OwnedCredentials(tId)))})
+		}
+		&sql(CLOSE cCredList)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+		&sql(CLOSE cCredList)
+	}
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="Create">
+<Description><![CDATA[
+Create an entry. Body: <tt>{id, username, password}</tt>.
+400 for an unusable ID or no username, 409 if the ID is taken (in any case, as Ens
+matches IDs), 403 without %Ens_Credentials:W. The password may be empty.]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pBody:%DynamicObject,*pResult:%DynamicObject</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	set pResult = {}
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tId = pBody.%Get("id"), tUser = pBody.%Get("username")
+		set tSC = ..ValidateId(tId)
+		Quit:$$$ISERR(tSC)
+		if tUser = "" { set tSC = ##class(OPCUA.REST.Error).BadRequest("Credentials need a username.") Quit }
+		if '##class(OPCUA.REST.DeployService).CanWriteCredentials() {
+			set tSC = ##class(OPCUA.REST.DeployService).NoCredentialsAccess("create credentials '"_tId_"'", "W")
+			Quit
+		}
+		set tTaken = ##class(OPCUA.REST.DeployService).FindCredentialsId(tId)
+		if tTaken '= "" {
+			set tSC = ##class(OPCUA.REST.Error).Conflict("Credentials '"_tTaken_"' already exist. Choose them from the list, or use another ID.")
+			Quit
+		}
+		set tSC = ##class(Ens.Config.Credentials).SetCredential(tId, tUser, pBody.%Get("password"), 0)
+		if $$$ISERR(tSC) { set tSC = ##class(OPCUA.REST.Error).Make(500, "Could not create credentials '"_tId_"'", tSC) Quit }
+		set pResult.id = tId, pResult.username = tUser
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="Update">
+<Description><![CDATA[
+Change entry <var>pId</var> (matched in any case). Body: <tt>{username, password}</tt>.
+An absent or empty password keeps the stored one; an absent username keeps it too.
+Pipelines using the entry read it on their next connect.
+404 if there is no such entry, 403 without %Ens_Credentials:W.]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pId:%String,pBody:%DynamicObject,*pResult:%DynamicObject</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	set pResult = {}
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tId = ##class(OPCUA.REST.DeployService).FindCredentialsId(pId)
+		if tId = "" { set tSC = ##class(OPCUA.REST.Error).NotFound("Credentials '"_pId_"' do not exist in namespace "_$Namespace_".") Quit }
+		if '##class(OPCUA.REST.DeployService).CanWriteCredentials() {
+			set tSC = ##class(OPCUA.REST.DeployService).NoCredentialsAccess("change credentials '"_tId_"'", "W")
+			Quit
+		}
+		if pBody.%IsDefined("username") && (pBody.%Get("username") = "") {
+			set tSC = ##class(OPCUA.REST.Error).BadRequest("Credentials need a username.")
+			Quit
+		}
+		set tCred = ##class(Ens.Config.Credentials).%OpenId(tId, 4, .tSC)
+		if '$IsObject(tCred) { set tSC = ##class(OPCUA.REST.Error).Make(500, "Cannot open credentials '"_tId_"'", tSC) Quit }
+		set:pBody.%IsDefined("username") tCred.Username = pBody.%Get("username")
+		// Not setting Password leaves the stored one: Ens writes it only when set.
+		set:pBody.%Get("password")'="" tCred.Password = pBody.%Get("password")
+		set tSC = tCred.%Save()
+		if $$$ISERR(tSC) { set tSC = ##class(OPCUA.REST.Error).Make(500, "Could not save credentials '"_tId_"'", tSC) Quit }
+		set pResult.id = tId, pResult.username = tCred.Username
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="ValidateId">
+<Description><![CDATA[
+400 unless <var>pId</var> is 1 to 50 letters, digits, '.', '-' or '_' (what
+<method>OPCUA.REST.DeployService.CredentialsId</method> produces, so IDs read cleanly
+in the Portal), and not <tt>none</tt>, which means "no credentials" to Ens.]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pId:%String</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	if (pId = "") || ($Length(pId) > ..#IdMax) || ($ZStrip(pId, "*AN", ".-_") '= "") {
+		Quit ##class(OPCUA.REST.Error).BadRequest("Use a credentials ID of 1 to "_..#IdMax_" letters, digits, '.', '-' or '_'.")
+	}
+	if $ZConvert(pId, "L") = "none" {
+		Quit ##class(OPCUA.REST.Error).BadRequest("'none' means no credentials; choose another ID.")
+	}
+	Quit $$$OK
+]]></Implementation>
+</Method>
+</Class>
+
+
 <Class name="OPCUA.REST.DeployService">
 <Description><![CDATA[
 Bind devices to an existing device schema: add a business service item to the
@@ -6426,7 +6609,7 @@ real table is a decision of its own, so it is left to an explicit start
 (<method>OPCUA.REST.PipelineService.Toggle</method>, or the Portal) once the
 operator has looked the pipeline over.]]></Description>
 <IncludeCode>%occInclude</IncludeCode>
-<TimeChanged>67873,35387.337759334</TimeChanged>
+<TimeChanged>67884,64842.795959626</TimeChanged>
 <TimeCreated>67873,33288.014794072</TimeCreated>
 
 <Parameter name="ProductionClass">
@@ -6793,8 +6976,10 @@ refuses the second with 409, as it does for any taken ID.]]></Description>
 <Method name="ResolveCredentials">
 <Description><![CDATA[
 Check the body's credentials choice, and return in <var>pCheckBody</var> the
-body the coverage check connects with: the caller's own, or, for an existing
-entry, a copy carrying that entry's username and password.
+body the coverage check connects with. That is the caller's own body: an
+existing entry's <tt>credentials</tt> ID is resolved by
+<method>OPCUA.REST.ClientManager.ExtractConnectionParams</method>, like every
+other connect the console makes.
 
 400 if <tt>credentials</tt> names no entry, or comes with a <tt>username</tt>
 too. 403 if this IRIS account may not read the entry, or (with a
@@ -6815,12 +7000,8 @@ too. 403 if this IRIS account may not read the entry, or (with a
 	if pBody.%Get("username") '= "" {
 		Quit ##class(OPCUA.REST.Error).BadRequest("Send either 'credentials' (an existing credentials ID) or 'username' and 'password', not both.")
 	}
-	set tSC = ..ReadCredentials(tCredId, .tUser, .tPassword)
-	Quit:$$$ISERR(tSC) tSC
-	set pCheckBody = {}.%FromJSON(pBody.%ToJSON())
-	do pCheckBody.%Set("username", tUser)
-	do pCheckBody.%Set("password", tPassword)
-	Quit $$$OK
+	// Fail here, before anything connects, on an unknown or unreadable entry.
+	Quit ..ReadCredentials(tCredId, .tUser, .tPassword)
 ]]></Implementation>
 </Method>
 
@@ -6962,14 +7143,36 @@ existing entry is a 409.]]></Description>
 The items, in any production of this namespace, whose Credentials setting
 names entry <var>pId</var> (in any case), as "Item (Production)" joined with
 ", " in <var>pUsers</var>; "" when none. Any failure is an error, so a caller
-never treats an entry as unused on a guess. Embedded SQL, which checks no SQL
-privilege.]]></Description>
+never treats an entry as unused on a guess.]]></Description>
 <ClassMethod>1</ClassMethod>
 <FormalSpec>pId:%String,*pUsers:%String</FormalSpec>
 <Private>1</Private>
 <ReturnType>%Status</ReturnType>
 <Implementation><![CDATA[
 	set pUsers = "", tLower = $ZConvert(pId, "L")
+	set tSC = ..CredentialsUsage(.tUsage)
+	Quit:$$$ISERR(tSC) tSC
+	set k = ""
+	for {
+		set k = $Order(tUsage(tLower, k))
+		Quit:k=""
+		set pUsers = pUsers_$Select(pUsers="":"", 1:", ")_k
+	}
+	Quit $$$OK
+]]></Implementation>
+</Method>
+
+<Method name="CredentialsUsage">
+<Description><![CDATA[
+Every Credentials setting of every item in every production of this namespace,
+in one pass: <var>pUsage</var>(lower-cased entry ID, "Item (Production)") = "".
+Any failure is an error, so a caller never treats an entry as unused on a guess.
+Embedded SQL, which checks no SQL privilege.]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>*pUsage</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	kill pUsage
 	#dim tSC As %Status = $$$OK
 	Try {
 		&sql(DECLARE cCredProd CURSOR FOR SELECT ID INTO :tProdClass FROM Ens_Config.Production)
@@ -6994,8 +7197,8 @@ privilege.]]></Description>
 				set tItem = tProd.Items.GetAt(i)
 				for j=1:1:tItem.Settings.Count() {
 					set tS = tItem.Settings.GetAt(j)
-					if (tS.Name = "Credentials") && ($ZConvert(tS.Value, "L") = tLower) {
-						set pUsers = pUsers_$Select(pUsers="":"", 1:", ")_tItem.Name_" ("_tProdClass_")"
+					if (tS.Name = "Credentials") && (tS.Value '= "") {
+						set pUsage($ZConvert(tS.Value, "L"), tItem.Name_" ("_tProdClass_")") = ""
 					}
 				}
 			}
@@ -7464,7 +7667,7 @@ REST dispatch handler for OPC UA adapter endpoints.
 Routes requests to service classes and formats consistent JSON responses.</Description>
 <IncludeCode>%occInclude</IncludeCode>
 <Super>%CSP.REST</Super>
-<TimeChanged>67873,35574.756571538</TimeChanged>
+<TimeChanged>67884,64842.779080357</TimeChanged>
 <TimeCreated>67873,33288.024208689</TimeCreated>
 
 <Parameter name="HandleCorsRequest">
@@ -7546,8 +7749,8 @@ POST with a JSON body is what the webapp uses, and the only practical way to
 pass a nested payload such as a schema's column list. GET with query
 parameters is kept because it makes an endpoint testable from a browser or
 curl without composing a body.
-`/schemas` is the exception: it uses real verbs, GET/POST/DELETE meaning
-list/create/delete on the same URL.</Description>
+`/schemas` and `/credentials` are the exceptions: they use real verbs
+(GET list, POST create, and DELETE or PUT on one item's URL).</Description>
 <XMLNamespace>http://www.intersystems.com/urlmap</XMLNamespace>
 <Data><![CDATA[
 <Routes>
@@ -7569,6 +7772,9 @@ list/create/delete on the same URL.</Description>
   <Route Url="/schemas/:name/validate" Method="POST" Call="SchemasValidate" />
   <Route Url="/schemas/:name" Method="GET" Call="SchemasGet" />
   <Route Url="/schemas/:name" Method="DELETE" Call="SchemasDelete" />
+  <Route Url="/credentials" Method="GET" Call="CredentialsList" />
+  <Route Url="/credentials" Method="POST" Call="CredentialsCreate" />
+  <Route Url="/credentials/:id" Method="PUT" Call="CredentialsUpdate" />
 </Routes>
 ]]></Data>
 </XData>
@@ -7845,6 +8051,59 @@ Dry run a device binding: report which columns resolve per device.</Description>
 		do tBody.%Set("name", $ZConvert(pName, "I", "URL"))
 		set tSC = ##class(OPCUA.REST.SchemaService).Validate(tBody, .tResult)
 		Quit:$$$ISERR(tSC)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit ..Respond(tSC, $Get(tResult))
+]]></Implementation>
+</Method>
+
+<Method name="CredentialsList">
+<Description>
+List IRIS credentials entries: IDs, usernames and users, never passwords.</Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ##class(OPCUA.REST.CredentialsService).List(.tResult)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit ..Respond(tSC, $Get(tResult))
+]]></Implementation>
+</Method>
+
+<Method name="CredentialsCreate">
+<Description>
+Create an IRIS credentials entry for an OPC UA server.</Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+		set tSC = ##class(OPCUA.REST.CredentialsService).Create(tBody, .tResult)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit ..Respond(tSC, $Get(tResult))
+]]></Implementation>
+</Method>
+
+<Method name="CredentialsUpdate">
+<Description>
+Change an IRIS credentials entry's username or password.</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pId:%String</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+		set tSC = ##class(OPCUA.REST.CredentialsService).Update($ZConvert(pId, "I", "URL"), tBody, .tResult)
 	} Catch (e) {
 		set tSC = e.AsStatus()
 	}

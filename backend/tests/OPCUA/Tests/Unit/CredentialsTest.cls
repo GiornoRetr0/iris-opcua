@@ -305,11 +305,14 @@ Method TestCredentialsIdCaseInsensitive()
 
 	set tSC = ##class(OPCUA.REST.DeployService).ResolveCredentials({"credentials": ($ZConvert(tLower, "U"))}, .tCheck)
 	do $$$AssertStatusOK(tSC, "credentials in another case resolve")
-	do $$$AssertEquals(tCheck.username, "clientuser", "and carry the entry's username")
+	set tSC = ##class(OPCUA.REST.ClientManager).ExtractConnectionParams({"url": "opc.tcp://x:4840", "credentials": ($ZConvert(tLower, "U"))}, .tURL, .tMode, .tUser, .tPass)
+	do $$$AssertStatusOK(tSC, "connect params resolve them")
+	do $$$AssertEquals(tUser, "clientuser", "and carry the entry's username")
 	for tNone = "none", "NONE" {
 		set tSC = ##class(OPCUA.REST.DeployService).ResolveCredentials({"credentials": (tNone)}, .tCheck)
 		do $$$AssertStatusOK(tSC, "'"_tNone_"' means no credentials, as in Ens")
-		do $$$AssertEquals(tCheck.username, "", "'"_tNone_"' connects anonymously")
+		set tSC = ##class(OPCUA.REST.ClientManager).ExtractConnectionParams({"url": "opc.tcp://x:4840", "credentials": (tNone)}, .tURL, .tMode, .tUser, .tPass)
+		do $$$AssertTrue($$$ISOK(tSC) && (tUser = ""), "'"_tNone_"' connects anonymously")
 	}
 }
 

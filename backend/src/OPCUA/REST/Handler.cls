@@ -68,8 +68,8 @@ ClassMethod Login(skipRights As %Boolean = 1) As %Status
 /// pass a nested payload such as a schema's column list. GET with query
 /// parameters is kept because it makes an endpoint testable from a browser or
 /// curl without composing a body.
-/// `/schemas` is the exception: it uses real verbs, GET/POST/DELETE meaning
-/// list/create/delete on the same URL.
+/// `/schemas` and `/credentials` are the exceptions: they use real verbs
+/// (GET list, POST create, and DELETE or PUT on one item's URL).
 XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
 {
 <Routes>
@@ -91,6 +91,9 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/schemas/:name/validate" Method="POST" Call="SchemasValidate" />
   <Route Url="/schemas/:name" Method="GET" Call="SchemasGet" />
   <Route Url="/schemas/:name" Method="DELETE" Call="SchemasDelete" />
+  <Route Url="/credentials" Method="GET" Call="CredentialsList" />
+  <Route Url="/credentials" Method="POST" Call="CredentialsCreate" />
+  <Route Url="/credentials/:id" Method="PUT" Call="CredentialsUpdate" />
 </Routes>
 }
 
@@ -308,6 +311,46 @@ ClassMethod SchemasValidate(pName As %String) As %Status
 		do tBody.%Set("name", $ZConvert(pName, "I", "URL"))
 		set tSC = ##class(OPCUA.REST.SchemaService).Validate(tBody, .tResult)
 		Quit:$$$ISERR(tSC)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit ..Respond(tSC, $Get(tResult))
+}
+
+/// List IRIS credentials entries: IDs, usernames and users, never passwords.
+ClassMethod CredentialsList() As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ##class(OPCUA.REST.CredentialsService).List(.tResult)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit ..Respond(tSC, $Get(tResult))
+}
+
+/// Create an IRIS credentials entry for an OPC UA server.
+ClassMethod CredentialsCreate() As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+		set tSC = ##class(OPCUA.REST.CredentialsService).Create(tBody, .tResult)
+	} Catch (e) {
+		set tSC = e.AsStatus()
+	}
+	Quit ..Respond(tSC, $Get(tResult))
+}
+
+/// Change an IRIS credentials entry's username or password.
+ClassMethod CredentialsUpdate(pId As %String) As %Status
+{
+	#dim tSC As %Status = $$$OK
+	Try {
+		set tSC = ..GetRequestParams(.tBody)
+		Quit:$$$ISERR(tSC)
+		set tSC = ##class(OPCUA.REST.CredentialsService).Update($ZConvert(pId, "I", "URL"), tBody, .tResult)
 	} Catch (e) {
 		set tSC = e.AsStatus()
 	}

@@ -344,8 +344,10 @@ ClassMethod CredentialsId(pItemName As %String) As %String
 Parameter CredentialsIdMax = 50;
 
 /// Check the body's credentials choice, and return in <var>pCheckBody</var> the
-/// body the coverage check connects with: the caller's own, or, for an existing
-/// entry, a copy carrying that entry's username and password.
+/// body the coverage check connects with. That is the caller's own body: an
+/// existing entry's <tt>credentials</tt> ID is resolved by
+/// <method>OPCUA.REST.ClientManager.ExtractConnectionParams</method>, like every
+/// other connect the console makes.
 ///
 /// 400 if <tt>credentials</tt> names no entry, or comes with a <tt>username</tt>
 /// too. 403 if this IRIS account may not read the entry, or (with a
@@ -364,12 +366,8 @@ ClassMethod ResolveCredentials(pBody As %DynamicObject, Output pCheckBody As %Dy
 	if pBody.%Get("username") '= "" {
 		Quit ##class(OPCUA.REST.Error).BadRequest("Send either 'credentials' (an existing credentials ID) or 'username' and 'password', not both.")
 	}
-	set tSC = ..ReadCredentials(tCredId, .tUser, .tPassword)
-	Quit:$$$ISERR(tSC) tSC
-	set pCheckBody = {}.%FromJSON(pBody.%ToJSON())
-	do pCheckBody.%Set("username", tUser)
-	do pCheckBody.%Set("password", tPassword)
-	Quit $$$OK
+	// Fail here, before anything connects, on an unknown or unreadable entry.
+	Quit ..ReadCredentials(tCredId, .tUser, .tPassword)
 }
 
 /// The username and password in credentials entry <var>pId</var>, for a connect
@@ -477,11 +475,28 @@ ClassMethod CreateOwnedCredentials(pId As %String, pItemName As %String, pUserna
 /// The items, in any production of this namespace, whose Credentials setting
 /// names entry <var>pId</var> (in any case), as "Item (Production)" joined with
 /// ", " in <var>pUsers</var>; "" when none. Any failure is an error, so a caller
-/// never treats an entry as unused on a guess. Embedded SQL, which checks no SQL
-/// privilege.
+/// never treats an entry as unused on a guess.
 ClassMethod CredentialsUsers(pId As %String, Output pUsers As %String) As %Status [ Private ]
 {
 	set pUsers = "", tLower = $ZConvert(pId, "L")
+	set tSC = ..CredentialsUsage(.tUsage)
+	Quit:$$$ISERR(tSC) tSC
+	set k = ""
+	for {
+		set k = $Order(tUsage(tLower, k))
+		Quit:k=""
+		set pUsers = pUsers_$Select(pUsers="":"", 1:", ")_k
+	}
+	Quit $$$OK
+}
+
+/// Every Credentials setting of every item in every production of this namespace,
+/// in one pass: <var>pUsage</var>(lower-cased entry ID, "Item (Production)") = "".
+/// Any failure is an error, so a caller never treats an entry as unused on a guess.
+/// Embedded SQL, which checks no SQL privilege.
+ClassMethod CredentialsUsage(Output pUsage) As %Status
+{
+	kill pUsage
 	#dim tSC As %Status = $$$OK
 	Try {
 		&sql(DECLARE cCredProd CURSOR FOR SELECT ID INTO :tProdClass FROM Ens_Config.Production)
@@ -506,8 +521,8 @@ ClassMethod CredentialsUsers(pId As %String, Output pUsers As %String) As %Statu
 				set tItem = tProd.Items.GetAt(i)
 				for j=1:1:tItem.Settings.Count() {
 					set tS = tItem.Settings.GetAt(j)
-					if (tS.Name = "Credentials") && ($ZConvert(tS.Value, "L") = tLower) {
-						set pUsers = pUsers_$Select(pUsers="":"", 1:", ")_tItem.Name_" ("_tProdClass_")"
+					if (tS.Name = "Credentials") && (tS.Value '= "") {
+						set pUsage($ZConvert(tS.Value, "L"), tItem.Name_" ("_tProdClass_")") = ""
 					}
 				}
 			}
