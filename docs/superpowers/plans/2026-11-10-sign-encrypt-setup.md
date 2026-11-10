@@ -19,7 +19,7 @@
 - Manual connections (`certPath`/`keyPath` set, or adapter `PublicCertificate`/`PrivateKey` set) behave exactly as today.
 - No runtime use of `/bin/sh` or an `openssl` executable. Tests may use the container's `openssl` for fixtures.
 - Changed pinned certificate message, verbatim: `Server certificate changed—review and approve the replacement.`
-- Generated identity: RSA 2048, SHA-256, 3650 days, extensions copied from `demo/certgen/secuac.config`; SAN `URI:<ClientURI>` + `DNS:<hostname>`.
+- Generated identity: RSA 2048, SHA-256, 3650 days, extensions copied from `demo/certgen/secuac.config`; SAN `URI:<ClientURI>` + `DNS:<hostname>`. The self-signed identity also carries keyUsage `keyCertSign`, because open62541 1.2.1's verifier requires it for trusted self-signed certificates (verified in connector 0e03174).
 - Default Client URI: `urn:<hostname>:InterSystems:IRIS:<instance>:OPCUA`, lowercased, allowlist `^[a-z0-9:._-]+$`.
 - Expiry warning threshold: 30 days.
 - `/security/*` requires `%Admin_Secure:USE`; otherwise 403.

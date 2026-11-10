@@ -403,16 +403,16 @@ const NEW_CREDENTIALS = ' new';
             @if (activeTab() === 'servers' && editingServer()) {
               <!-- The result belongs next to the control that produced it. It used to
                    appear only in the sidebar widget, in the opposite corner. -->
-              <div class="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:w-auto min-w-0">
+              <div class="flex flex-col gap-2 w-full sm:flex-1 min-w-0">
                 <button (click)="testServerConnection()"
                         [disabled]="testing()"
-                        class="flex items-center gap-2 px-5 py-2.5 text-primary text-sm font-semibold rounded-lg hover:bg-primary/5 transition-all border border-outline-variant/30 w-full sm:w-auto disabled:opacity-50 shrink-0">
+                        class="flex items-center gap-2 px-5 py-2.5 text-primary text-sm font-semibold rounded-lg hover:bg-primary/5 transition-all border border-outline-variant/30 w-full sm:w-auto sm:self-start disabled:opacity-50 shrink-0">
                   <span class="material-symbols-outlined text-xl"
                         [class.animate-spin]="testing()">{{ testing() ? 'progress_activity' : 'network_check' }}</span>
                   {{ testing() ? 'Testing…' : 'Test Connection' }}
                 </button>
                 @if (testStatus() && !testing()) {
-                  <p class="flex items-start gap-1.5 text-xs font-medium max-w-xs min-w-0"
+                  <p class="flex items-start gap-1.5 text-xs font-medium min-w-0"
                      [class]="testFailed() ? 'text-error' : 'text-tertiary'">
                     <span class="material-symbols-outlined text-sm shrink-0">
                       {{ testFailed() ? 'error' : 'check_circle' }}
@@ -424,7 +424,7 @@ const NEW_CREDENTIALS = ' new';
             } @else {
               <div></div>
             }
-            <div class="flex items-center gap-3 w-full sm:w-auto">
+            <div class="flex items-center gap-3 w-full sm:w-auto shrink-0">
               <!-- The error belongs at the control that was pressed. Putting it in
                    the sidebar widget instead is the mistake F5 is about. -->
               @if (saveError()) {

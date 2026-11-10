@@ -149,6 +149,17 @@ Method OnInit() As %Status
 
 		do ..ApplyLogFile()
 		set tSC = ##class(OPCUA.Security.Connection).Setup(..Client,..URL,..SecurityMode,..ClientURI,..PublicCertificate,..PrivateKey,..TrustListDir,..RevocationListDir,.tManaged,"")
+		if $$$ISERR(tSC) && $get(tManaged) {
+			// Not trusted yet (or no identity, or no issuer): the refusal happened before
+			// any native call, so stay fail-closed but keep the item alive. Connect()
+			// runs Setup again on every attempt and the item starts reporting on its own
+			// once the server is reviewed and trusted.
+			set tRefusal = $SYSTEM.Status.GetErrorText(tSC)
+			$$$LOGWARNING("OPCUA managed Sign & Encrypt is not ready, will retry: "_tRefusal)
+			set ..LastDiagError = tRefusal
+			set ..ManagedRetry = 1
+			set tSC = $$$OK
+		}
 		Quit:$$$ISERR(tSC)
 
 	} catch (e) {
@@ -208,7 +219,14 @@ Method Connect() As %Status [ Private ]
 
 			if $$$ISERR(tSC) {
 
-				$$$LOGERROR("Error encountered while resetting client [c.c] : "_$SYSTEM.Status.GetErrorText(tSC))
+				// A managed client that could not be set up must not be connected on the
+				// next attempt as it stands (rebuilt, but without its pin): set it up again.
+				if $get(tManaged) set ..ManagedRetry = 1
+				set tErrText = $SYSTEM.Status.GetErrorText(tSC)
+				if '$get(tManaged) || (tErrText '= ..LastDiagError) {
+					set ..LastDiagError = tErrText
+					$$$LOGERROR("Error encountered while resetting client [c.c] : "_tErrText)
+				}
 				Quit
 
 			} else {
@@ -245,12 +263,12 @@ Method Connect() As %Status [ Private ]
 				// diagnosis that differs from the one already logged is written.
 				set tErrText = $SYSTEM.Status.GetErrorText(tSC)
 				if (..LastDiagKey = "") || (tErrText '= ..LastDiagError) || (($ZH - ..LastDiagTime) > 60) {
-				set ..LastDiagTime = $ZH, ..LastDiagError = tErrText
-				set tDiag = ##class(OPCUA.Security.Diagnose).Run(..URL, tSC)
-				if ##class(OPCUA.Security.Diagnose).IsNew(..LastDiagKey, tDiag, .tKey) {
-					set ..LastDiagKey = tKey
-					$$$LOGWARNING("OPCUA managed Sign & Encrypt connection failed ("_tDiag.category_"): "_tDiag.message_$select(tDiag.clientFingerprint'="":" IRIS client certificate fingerprint: "_tDiag.clientFingerprint, 1:""))
-				}
+					set ..LastDiagTime = $ZH, ..LastDiagError = tErrText
+					set tDiag = ##class(OPCUA.Security.Diagnose).Run(..URL, tSC)
+					if ##class(OPCUA.Security.Diagnose).IsNew(..LastDiagKey, tDiag, .tKey) {
+						set ..LastDiagKey = tKey
+						$$$LOGWARNING("OPCUA managed Sign & Encrypt connection failed ("_tDiag.category_"): "_tDiag.message_$select(tDiag.clientFingerprint'="":" IRIS client certificate fingerprint: "_tDiag.clientFingerprint, 1:""))
+					}
 				}
 			} elseif ..LastDiagKey '= "" {
 				set ..LastDiagKey = ""

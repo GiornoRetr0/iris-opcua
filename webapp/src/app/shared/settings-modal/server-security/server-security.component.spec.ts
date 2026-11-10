@@ -17,7 +17,7 @@ const cert = (sha: string, over = {}) => ({
 const review = (over: Partial<ServerCertificateReview> = {}): ServerCertificateReview => ({
   url: 'opc.tcp://plc:4840', key: 'k', offersSignAndEncrypt: true, policies: [], applicationUri: 'urn:plc',
   certificate: cert('11:22:33:44'), identity: { uriMatches: true, hostMatches: true, problems: [] },
-  trusted: false, pinnedFingerprint: '', changed: false, needsIssuer: false, issuerName: '', ...over,
+  trusted: false, pinnedFingerprint: '', changed: false, needsIssuer: false, hasIssuer: false, issuerName: '', ...over,
 });
 
 const profile = (over: Partial<ServerProfile> = {}): ServerProfile => ({
@@ -134,7 +134,7 @@ describe('ServerSecurityComponent', () => {
   });
 
   it('asks for the CA and CRL when the server needs an issuer, and sends them as hex', async () => {
-    await create({ rev: review({ trusted: true, needsIssuer: true, issuerName: 'CN=Plant CA' }) });
+    await create({ rev: review({ trusted: true, needsIssuer: true, hasIssuer: false, issuerName: 'CN=Plant CA' }) });
     button('Review certificate')!.click();
     fixture.detectChanges();
     expect(el().textContent).toContain('CN=Plant CA');
@@ -146,6 +146,40 @@ describe('ServerSecurityComponent', () => {
     api.addServerIssuer.and.returnValue(of(review({ trusted: true })));
     button('Add issuer')!.click();
     expect(api.addServerIssuer).toHaveBeenCalledWith('opc.tcp://plc:4840', '0102', 'AB');
+  });
+
+  it('a trusted CA-signed server whose issuer is added is ready', async () => {
+    await create({ rev: review({ trusted: true, needsIssuer: true, hasIssuer: true, issuerName: 'CN=Plant CA' }) });
+    expect(el().textContent).toContain('Trusted · expires 2030-01-01');
+    expect(button('Review certificate')).toBeUndefined();
+    expect(el().textContent).not.toContain('Add issuer');
+  });
+
+  it('a CA-signed server that is not trusted yet says so and offers no issuer form before Trust', async () => {
+    await create({ rev: review({ trusted: false, needsIssuer: true, hasIssuer: false, issuerName: 'CN=Plant CA' }) });
+    expect(el().textContent).toContain('Not trusted yet');
+    expect(el().textContent).not.toContain('Trusted, but its issuer is missing');
+    expect(button('Add issuer')).toBeUndefined();
+    button('Review certificate')!.click();
+    fixture.detectChanges();
+    expect(button('Trust this server')).toBeTruthy();
+    expect(button('Add issuer')).toBeUndefined();
+  });
+
+  it('a trusted CA-signed server without its issuer asks for it right away', async () => {
+    await create({ rev: review({ trusted: true, needsIssuer: true, hasIssuer: false, issuerName: 'CN=Plant CA' }) });
+    expect(el().textContent).toContain('Trusted, but its issuer is missing');
+    expect(button('Add issuer')).toBeTruthy();
+  });
+
+  it('a refusal made by IRIS reads as not tried yet, with its own message', async () => {
+    const test: ConnectionTestResult = {
+      url: 'u', connected: false, responseTimeMs: 1,
+      security: { managed: true, identityReady: true, serverTrusted: false, diagnosis: { category: 'notTrusted', message: 'IRIS does not trust this OPC UA server yet.' } },
+    };
+    await create({ test, rev: review({ trusted: false }) });
+    expect(el().textContent).toContain('Not tried yet. IRIS does not trust this OPC UA server yet.');
+    expect(button('Download IRIS certificate')).toBeUndefined();
   });
 
   it('shows an inspect failure with the server message', async () => {

@@ -215,8 +215,18 @@ const labelCls = 'block text-[10px] font-bold text-on-surface-variant uppercase 
         title="Replace the client identity?"
         [detail]="replaceDetail()"
         confirmLabel="Replace"
+        icon="key"
         (confirmed)="confirmReplace()"
         (cancelled)="dismissReplace()" />
+    }
+    @if (stopping(); as s) {
+      <app-confirm-dialog
+        [title]="'Stop trusting ' + (s.label || s.url) + '?'"
+        detail="Pipelines and Node Explorer using this server will refuse to connect until it is reviewed and trusted again."
+        confirmLabel="Stop trusting"
+        icon="gpp_bad"
+        (confirmed)="confirmStopTrusting()"
+        (cancelled)="stopping.set(null)" />
     }
   `,
 })
@@ -473,7 +483,17 @@ export class SecurityTabComponent implements OnInit {
     });
   }
 
+  /** The server whose Stop trusting awaits confirmation. */
+  stopping = signal<TrustedServer | null>(null);
+
   stopTrusting(s: TrustedServer): void {
+    this.stopping.set(s);
+  }
+
+  confirmStopTrusting(): void {
+    const s = this.stopping();
+    this.stopping.set(null);
+    if (!s) return;
     this.api.removeTrustedServer(s.key).subscribe({
       next: () => this.loadTrusted(),
       error: (err) => this.error.set(apiErrorMessage(err)),

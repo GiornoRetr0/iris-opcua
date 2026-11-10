@@ -203,7 +203,8 @@ ClassMethod ListServers() As %DynamicArray
     For {
         Set k = $Order(@g@("servers", k), 1, raw)
         Quit:k=""
-        Do arr.%Push({}.%FromJSON(raw))
+        // One corrupt entry must not hide the others.
+        Try { Do arr.%Push({}.%FromJSON(raw)) } Catch {}
     }
     Quit arr
 }

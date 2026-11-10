@@ -98,7 +98,9 @@ already ships beside it on every platform:
   keyUsage digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment,
   extendedKeyUsage clientAuth + serverAuth, SHA-256 signature. Copy the extension
   set from `demo/certgen/secuac.config`, which the certified server already
-  accepts. Writes key and certificate as DER.
+  accepts. Writes key and certificate as DER. The generated certificate also
+  carries keyUsage `keyCertSign`: open62541 1.2.1's verifier requires it for a
+  trusted self-signed certificate (verified in connector 0e03174).
 - **Inspect certificate:** subject, issuer, notBefore/notAfter, SAN URIs and DNS
   names, SHA-256 fingerprint, self-signed?, CA?, key type and bits.
 - **Check pair:** does this key belong to this certificate.

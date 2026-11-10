@@ -264,4 +264,35 @@ describe('SecurityTabComponent', () => {
     expect(api.importIdentity).not.toHaveBeenCalled();
     expect(c.heldUpload()).toBe('');
   });
+
+  it('Stop trusting asks first, says what happens, and calls the API only once confirmed', async () => {
+    await create(configured());
+    api.listTrustedServers.and.returnValue(of([{ key: 'k1', url: 'opc.tcp://plc:4840', label: 'PLC' }]));
+    api.removeTrustedServer.and.returnValue(of(undefined as never));
+    fixture.componentInstance['loadTrusted']();
+    fixture.detectChanges();
+    button('Stop trusting')!.click();
+    fixture.detectChanges();
+    expect(api.removeTrustedServer).not.toHaveBeenCalled();
+    const dialog = el().querySelector('app-confirm-dialog')!;
+    expect(dialog.textContent).toContain('Pipelines and Node Explorer using this server will refuse to connect until it is reviewed and trusted again.');
+    const cancel = Array.from(dialog.querySelectorAll('button')).find((b) => /cancel/i.test(b.textContent!)) as HTMLButtonElement;
+    cancel.click();
+    fixture.detectChanges();
+    expect(api.removeTrustedServer).not.toHaveBeenCalled();
+    expect(el().querySelector('app-confirm-dialog')).toBeNull();
+    button('Stop trusting')!.click();
+    fixture.detectChanges();
+    (Array.from(el().querySelector('app-confirm-dialog')!.querySelectorAll('button')).find((b) => b.textContent!.trim() === 'Stop trusting') as HTMLButtonElement).click();
+    expect(api.removeTrustedServer).toHaveBeenCalledOnceWith('k1');
+  });
+
+  it('the Replace dialog does not show the delete icon', async () => {
+    await create(configured());
+    openReplace();
+    button('Create new certificate')!.click();
+    fixture.detectChanges();
+    const icon = el().querySelector('app-confirm-dialog .material-symbols-outlined')!;
+    expect(icon.textContent!.trim()).toBe('key');
+  });
 });

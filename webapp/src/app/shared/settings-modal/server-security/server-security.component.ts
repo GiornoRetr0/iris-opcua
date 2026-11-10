@@ -13,6 +13,9 @@ const inputCls =
 const labelCls = 'block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1';
 const btnCls = 'px-4 py-2 text-sm font-semibold rounded-lg border border-outline-variant/30 text-primary hover:bg-primary/5 disabled:opacity-50';
 
+/** Diagnoses of a refusal made by IRIS itself, before the server was contacted. */
+const REFUSALS = ['noIdentity', 'identityInvalid', 'notTrusted', 'issuerMissing'];
+
 /**
  * Sign & Encrypt readiness for one server profile: IRIS's own identity, the server's
  * certificate, and whether the server has approved IRIS. A profile that still has
@@ -94,7 +97,7 @@ const btnCls = 'px-4 py-2 text-sm font-semibold rounded-lg border border-outline
               </div>
             </div>
 
-            @if (current() && (reviewing() || (current()!.needsIssuer && !current()!.changed))) {
+            @if (current() && (reviewing() || issuerDue())) {
               @let r = current()!;
               <div class="p-4 rounded-lg border border-outline-variant/20 space-y-3">
                 @if (!r.offersSignAndEncrypt) {
@@ -127,7 +130,7 @@ const btnCls = 'px-4 py-2 text-sm font-semibold rounded-lg border border-outline
                     {{ r.changed ? 'Approve replacement' : 'Trust this server' }}
                   </button>
                 }
-                @if (r.needsIssuer) {
+                @if (issuerDue()) {
                   <div class="space-y-2 pt-2 border-t border-outline-variant/10">
                     <p class="text-sm text-on-surface">This certificate was issued by <span class="font-semibold">{{ r.issuerName }}</span>. Add that issuer's certificate and revocation list.</p>
                     <label [class]="labelCls" for="iss-ca">CA certificate</label>
@@ -252,7 +255,13 @@ export class ServerSecurityComponent {
 
   serverOk(): boolean {
     const r = this.current();
-    return !!r && r.trusted && !r.changed && !r.needsIssuer;
+    return !!r && r.trusted && !r.changed && (!r.needsIssuer || r.hasIssuer);
+  }
+
+  /** The server is trusted, CA-signed, and its issuer is still to be added. */
+  issuerDue(): boolean {
+    const r = this.current();
+    return !!r && r.trusted && !r.changed && r.needsIssuer && !r.hasIssuer;
   }
 
   serverText(): string {
@@ -262,7 +271,8 @@ export class ServerSecurityComponent {
     if (!r) return this.server().url ? 'Not checked yet' : 'Enter the server URL first';
     if (this.serverOk()) return `Trusted · expires ${r.certificate.notAfter}`;
     if (r.changed) return 'Not trusted until you approve the new certificate';
-    if (r.needsIssuer) return 'Trusted, but its issuer is missing';
+    if (!r.trusted) return 'Not trusted yet';
+    if (this.issuerDue()) return 'Trusted, but its issuer is missing';
     return 'Not trusted yet';
   }
 
@@ -283,6 +293,8 @@ export class ServerSecurityComponent {
     const d = t.security.diagnosis;
     if (!d) return { ok: false, text: t.error || 'The connection failed.' };
     if (d.category === 'clientNotApproved') return { ok: false, text: d.message, fingerprint: d.clientFingerprint };
+    // IRIS refused before contacting the server: the steps above come first.
+    if (REFUSALS.includes(d.category)) return { ok: false, text: `Not tried yet. ${d.message}` };
     return { ok: false, text: d.message };
   }
 

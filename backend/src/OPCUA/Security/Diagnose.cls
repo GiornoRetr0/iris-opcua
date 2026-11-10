@@ -55,6 +55,19 @@ ClassMethod Decide(pErrorText As %String, pDiscovery As %DynamicObject, pPinnedF
     Quit ..Result("other", tErr)
 }
 
+/// Pure. Names a refusal of <method>OPCUA.Security.Connection.Resolve</method> (raised
+/// before any native call): noIdentity, identityInvalid, notTrusted or issuerMissing;
+/// anything else (e.g. a URL without a host) is "other". The message is the refusal's own text.
+ClassMethod ClassifyRefusal(pRefusal As %Status) As %DynamicObject
+{
+    Set tMsg = ##class(OPCUA.REST.Error).Text(pRefusal)
+    If $Find(tMsg, "No IRIS client identity is set up") Quit ..Result("noIdentity", tMsg)
+    If $Find(tMsg, "The IRIS client identity is not usable") Quit ..Result("identityInvalid", tMsg)
+    If tMsg = ##class(OPCUA.Security.Trust).#NotTrusted Quit ..Result("notTrusted", tMsg)
+    If $Find(tMsg, "Add that CA certificate and its revocation list") Quit ..Result("issuerMissing", tMsg)
+    Quit ..Result("other", tMsg)
+}
+
 /// Discovers the server afresh (mode 1, used for GetEndpoints only, never for a session)
 /// and classifies <var>pFailure</var>.
 ClassMethod Run(pURL As %String, pFailure As %Status) As %DynamicObject

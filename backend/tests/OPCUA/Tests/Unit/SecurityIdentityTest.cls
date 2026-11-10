@@ -174,4 +174,19 @@ Method TestActiveRefusesWhenNotSetUp()
 	do $$$AssertTrue(##class(OPCUA.REST.Error).Message(tSC) [ "The IRIS client identity is not usable: ", "not usable")
 }
 
+/// Impact names each trusted server by its real store key, and one corrupt entry is
+/// skipped rather than breaking the whole answer.
+Method TestImpactServersKeyedAndTolerant()
+{
+	set tURL = "opc.tcp://impact-srv:4840"
+	set tKey = ##class(OPCUA.Security.Store).ServerKey(tURL)
+	do ##class(OPCUA.Security.Store).SaveServer(tKey, {"url": (tURL), "label": "Impact", "fingerprint": "AA:BB"})
+	set ^OPCUA.Tests.IdentityUnit("servers", "corrupt") = "{not json"
+	set tSC = ##class(OPCUA.Security.Identity).Impact(.tImpact)
+	do $$$AssertStatusOK(tSC, "Impact answers despite a corrupt entry")
+	do $$$AssertEquals(tImpact.servers.%Size(), 1, "the corrupt entry is skipped")
+	do $$$AssertEquals(tImpact.servers.%Get(0).key, tKey, "the key is the store key, not blank")
+	do $$$AssertEquals(tImpact.servers.%Get(0).url, tURL, "url")
+}
+
 }

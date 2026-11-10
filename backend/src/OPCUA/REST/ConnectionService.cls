@@ -51,7 +51,7 @@ ClassMethod Test(pBody As %DynamicObject, Output pResult As %DynamicObject) As %
 			set pResult.error = ##class(OPCUA.REST.Error).Text(tSC)
 			if tManaged {
 				if $$$ISERR(tRefusal) {
-					set tSecurity.diagnosis = {"category": "other", "message": (pResult.error)}
+					set tSecurity.diagnosis = ##class(OPCUA.Security.Diagnose).ClassifyRefusal(tRefusal)
 				} else {
 					set tSecurity.diagnosis = ##class(OPCUA.Security.Diagnose).Run(tURL, tSC)
 				}

@@ -62,6 +62,27 @@ describe('SettingsModalComponent security readiness', () => {
     expect(c.editingServer()!.securityMode).toBe(3);
   });
 
+  it('a long test message wraps under the button and cannot push Save out of the modal', async () => {
+    const f = create();
+    f.detectChanges();
+    const c = f.componentInstance;
+    c.editingServer()!.securityMode = 3;
+    const long = 'The OPC UA server has not approved IRIS certificate yet. '.repeat(6);
+    api.test.and.returnValue(of({ url: 'u', connected: false, responseTimeMs: 4, security: { managed: true, identityReady: true, serverTrusted: true, diagnosis: { category: 'network', message: long } } }));
+    await c.testServerConnection();
+    f.detectChanges();
+    const el = f.nativeElement as HTMLElement;
+    const msg = el.querySelector('span.break-words')!.closest('p')!;
+    expect(msg.className).not.toContain('max-w-xs');
+    expect(msg.className).toContain('min-w-0');
+    const left = msg.parentElement!;
+    expect(left.className).toContain('sm:flex-1');
+    expect(left.className).toContain('min-w-0');
+    expect(left.className).toContain('flex-col');
+    const save = Array.from(el.querySelectorAll('button')).find((b) => b.textContent!.includes('Save Changes'))!;
+    expect(save.parentElement!.className).toContain('shrink-0');
+  });
+
   it('opens the Security tab for this server from Set up identity', () => {
     const f = create();
     f.detectChanges();

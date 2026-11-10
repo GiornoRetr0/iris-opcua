@@ -230,4 +230,31 @@ Method TestClassifyOther()
     Do $$$AssertEquals(r.message, "BadUserAccessDenied", "the original error text")
 }
 
+Method TestClassifyRefusal()
+{
+    Set tNoId = ##class(OPCUA.Security.Diagnose).ClassifyRefusal($$$ERROR($$$GeneralError, "No IRIS client identity is set up. Open Settings to create one."))
+    Do $$$AssertEquals(tNoId.category, "noIdentity", "no identity")
+    Set tBad = ##class(OPCUA.Security.Diagnose).ClassifyRefusal($$$ERROR($$$GeneralError, "The IRIS client identity is not usable: expired"))
+    Do $$$AssertEquals(tBad.category, "identityInvalid", "invalid identity")
+    Set tNT = ##class(OPCUA.Security.Diagnose).ClassifyRefusal($$$ERROR($$$GeneralError, ##class(OPCUA.Security.Trust).#NotTrusted))
+    Do $$$AssertEquals(tNT.category, "notTrusted", "not trusted")
+    Do $$$AssertEquals(tNT.message, ##class(OPCUA.Security.Trust).#NotTrusted, "message without the status prefix")
+    Set tIss = ##class(OPCUA.Security.Diagnose).ClassifyRefusal($$$ERROR($$$GeneralError, "This server's certificate was issued by CN=myCA. Add that CA certificate and its revocation list before connecting."))
+    Do $$$AssertEquals(tIss.category, "issuerMissing", "issuer missing")
+    Set tOth = ##class(OPCUA.Security.Diagnose).ClassifyRefusal($$$ERROR($$$GeneralError, "The server address has no host name."))
+    Do $$$AssertEquals(tOth.category, "other", "anything else")
+}
+
+Method TestResolveRefusalsClassify()
+{
+    Set tSC = ##class(OPCUA.Security.Connection).Resolve("opc.tcp://noid:4840", 3, "", "", "", "", "", .a, .p, .h, .m)
+    Do $$$AssertEquals(##class(OPCUA.Security.Diagnose).ClassifyRefusal(tSC).category, "noIdentity", "no identity yet")
+    Quit:'..MakeIdentity()
+    Set tSC = ##class(OPCUA.Security.Connection).Resolve("opc.tcp://never:4840", 3, "", "", "", "", "", .a, .p, .h, .m)
+    Do $$$AssertEquals(##class(OPCUA.Security.Diagnose).ClassifyRefusal(tSC).category, "notTrusted", "untrusted")
+    Do ..Seed("opc.tcp://needsca2:4840", 1, "server.der")
+    Set tSC = ##class(OPCUA.Security.Connection).Resolve("opc.tcp://needsca2:4840", 3, "", "", "", "", "", .a, .p, .h, .m)
+    Do $$$AssertEquals(##class(OPCUA.Security.Diagnose).ClassifyRefusal(tSC).category, "issuerMissing", "no issuer")
+}
+
 }

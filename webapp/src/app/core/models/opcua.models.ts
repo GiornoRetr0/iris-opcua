@@ -132,7 +132,8 @@ export interface ConnectionTestResult {
 
 export type SecurityDiagnosisCategory =
   | 'network' | 'noSecureEndpoint' | 'serverChanged' | 'hostMismatch'
-  | 'uriInvalid' | 'timeInvalid' | 'clientNotApproved' | 'other';
+  | 'uriInvalid' | 'timeInvalid' | 'clientNotApproved'
+  | 'noIdentity' | 'identityInvalid' | 'notTrusted' | 'issuerMissing' | 'other';
 
 export interface SecurityDiagnosis {
   category: SecurityDiagnosisCategory;
@@ -199,7 +200,10 @@ export interface ServerCertificateReview {
   trusted: boolean;
   pinnedFingerprint: string;
   changed: boolean;
+  /** The certificate is CA-signed, so an issuer certificate and CRL are required. */
   needsIssuer: boolean;
+  /** An issuer certificate and CRL have been added. */
+  hasIssuer: boolean;
   issuerName: string;
   previous?: CertificateSummary;
 }

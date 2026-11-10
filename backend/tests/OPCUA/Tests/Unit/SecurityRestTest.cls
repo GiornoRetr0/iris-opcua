@@ -201,6 +201,7 @@ Method TestConnectionTestManagedRefused()
 	do $$$AssertEquals(tRes.security.identityReady, 0, "no identity")
 	do $$$AssertEquals(tRes.security.serverTrusted, 0, "not trusted")
 	do $$$AssertTrue(tRes.security.diagnosis.message [ "No IRIS client identity", "diagnosis names the cause")
+	do $$$AssertEquals(tRes.security.diagnosis.category, "noIdentity", "category")
 	do $$$AssertEquals(tRes.error, tRes.security.diagnosis.message, "same text as error")
 	do $$$AssertEquals(tRes.%IsDefined("securityMode"), 0, "no securityMode echoed on failure")
 
@@ -219,6 +220,7 @@ Method TestConnectionTestManagedUntrusted()
 	do $$$AssertEquals(tRes.security.identityReady, 1, "identity ready")
 	do $$$AssertEquals(tRes.security.serverTrusted, 0, "server not trusted")
 	do $$$AssertEquals(tRes.security.diagnosis.message, ##class(OPCUA.Security.Trust).#NotTrusted, "not-trusted message")
+	do $$$AssertEquals(tRes.security.diagnosis.category, "notTrusted", "category")
 }
 
 /// The request's key, pkcs12 and password values never reach the event log text.

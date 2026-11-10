@@ -272,11 +272,15 @@ ClassMethod Impact(Output pImpact As %DynamicObject) As %Status
 	While $ListNext(tNames, tPtr, tNs) {
 		Do ..CollectPipelines(tNs, pImpact.pipelines)
 	}
-	Set tServers = ##class(OPCUA.Security.Store).ListServers()
-	Set it = tServers.%GetIterator()
-	While it.%GetNext(.k, .v) {
-		Do pImpact.servers.%Push({"key": (v.key), "url": (v.url), "label": (v.label)})
-	}
+	Try {
+		Set tServers = ##class(OPCUA.Security.Store).ListServers()
+		Set it = tServers.%GetIterator()
+		While it.%GetNext(.k, .v) {
+			Try {
+				Do pImpact.servers.%Push({"key": (##class(OPCUA.Security.Store).ServerKey(v.url)), "url": (v.url), "label": (v.label)})
+			} Catch {}
+		}
+	} Catch {}
 	Quit $$$OK
 }
 
