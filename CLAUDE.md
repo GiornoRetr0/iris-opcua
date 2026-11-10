@@ -38,6 +38,12 @@ printf 'zn "OPCUA"\n<your commands>\nhalt\n' | docker exec -i iris-opcua-iris-1 
 printf 'zn "OPCUA"\nw ##class(OPCUA.Tests.Runner).Offline()\nhalt\n' | docker exec -i iris-opcua-iris-1 iris session iris
 printf 'zn "OPCUA"\nw ##class(OPCUA.Tests.Runner).Live()\nhalt\n'    | docker exec -i iris-opcua-iris-1 iris session iris
 
+# Managed Sign & Encrypt end to end (needs the full stack up): resets certified-server,
+# runs OPCUA.Tests.Live.SecureE2ETest phases around a host-side `docker cp` approval,
+# curl-checks the /security HTTP surface, then cleans up. Exits non-zero on any failure.
+# (Single class/method: w ##class(OPCUA.Tests.Runner).Run("Pkg.Class[:TestMethod]").)
+./demo/iris/secure-e2e.sh
+
 # Check production status
 printf 'zn "OPCUA"\ndo ##class(Ens.Director).GetProductionStatus(.p,.s) write p," ",s,!\nhalt\n' | docker exec -i iris-opcua-iris-1 iris session iris
 

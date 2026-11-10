@@ -6,7 +6,10 @@ RUN apt-get update -y && \
     rm -rf /var/lib/apt/lists/* && \
     mkdir -p /usr/irissys/uac/certs/trustdir /usr/irissys/uac/certs/crldir && \
     mkdir -p /usr/irissys/mgr/opcua /usr/irissys/mgr/opcua/opcuaenstemp /usr/irissys/mgr/opcua/opcuasecondary && \
-    chown -R 51773:51773 /usr/irissys/mgr/opcua
+    chown -R 51773:51773 /usr/irissys/mgr/opcua && \
+    mkdir -p /usr/irissys/mgr/opcua-pki && \
+    chown 51773:51773 /usr/irissys/mgr/opcua-pki && \
+    chmod 0700 /usr/irissys/mgr/opcua-pki
 
 USER irisowner
 

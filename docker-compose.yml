@@ -20,6 +20,11 @@ services:
     ports:
       - "51793:1972"     # superserver (vanilla IRIS uses 1972)
       - "52783:52773"    # web server / management portal
+    volumes:
+      # The managed Sign & Encrypt store (client identity, private key, pinned server
+      # certificates). A named volume keeps the identity across image rebuilds; the
+      # first mount copies the image directory's owner (irisowner) and mode (0700).
+      - iris-opcua-pki:/usr/irissys/mgr/opcua-pki
 
   plc:
     hostname: plc
@@ -49,3 +54,6 @@ services:
     init: true
     ports:
       - "10001:4840"
+
+volumes:
+  iris-opcua-pki:

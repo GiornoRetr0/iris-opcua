@@ -152,7 +152,7 @@ ClassMethod BindExistingSchema(pBody As %DynamicObject, Output pResult As %Dynam
 }
 
 /// Ensure the shared production class exists. Creates it on first deploy.
-ClassMethod EnsureProductionExists() As %Status [ Private ]
+ClassMethod EnsureProductionExists() As %Status [ Internal ]
 {
 	if ##class(%Dictionary.ClassDefinition).%ExistsId(..#ProductionClass) {
 		Quit $$$OK

@@ -111,6 +111,59 @@ Method TestInstallerRoleOnly()
 	kill ^IRIS.Temp.OPCUATests("role")
 }
 
+/// The installer's role lacks %Admin_Secure:USE: the certificate endpoints answer 403
+/// and show nothing of the identity, and a managed Sign &amp; Encrypt /test answers from
+/// IRIS's own readiness (or a 403), never by connecting.
+Method TestSecurityForbidden()
+{
+	set tSC = ..CreateUser(.tPassword)
+	do $$$AssertStatusOK(tSC, "throwaway user with only the installer's role")
+	Quit:$$$ISERR(tSC)
+	Try {
+		kill ^IRIS.Temp.OPCUATests("role")
+		job ##class(OPCUA.Tests.Live.ApiRoleTest).SecurityJob(..#User, tPassword, ..URL())::10
+		do $$$AssertTrue($Test, "role job started")
+		for i=1:1:300 { quit:$Data(^IRIS.Temp.OPCUATests("role", "done"))  hang 0.1 }
+		do $$$AssertEquals($Get(^IRIS.Temp.OPCUATests("role", "login")), 1, "job logged in as the throwaway user")
+		do $$$AssertEquals($Get(^IRIS.Temp.OPCUATests("role", "error")), "", "job raised no error")
+		set tGot = $Get(^IRIS.Temp.OPCUATests("role", "identity"))
+		do $$$AssertEquals($ListGet(tGot, 1), 403, "GET /security/identity is a 403 for the role: "_$ListGet(tGot, 2))
+		do $$$AssertTrue($ListGet(tGot, 2) [ "%Admin_Secure", "and names the privilege")
+		do $$$AssertEquals($Get(^IRIS.Temp.OPCUATests("role", "leak")), 0, "nothing of the identity came back")
+		set tGot = $Get(^IRIS.Temp.OPCUATests("role", "managedTest"))
+		do $$$AssertTrue(tGot '= "", "managed /test ran")
+		do $$$AssertTrue(($ListGet(tGot, 1) = 200) || ($ListGet(tGot, 1) = 403), "managed /test is a readiness answer or a 403, not a 500: "_$ListGet(tGot, 1)_" "_$ListGet(tGot, 2))
+		do:($ListGet(tGot, 1) = 200) $$$AssertEquals($Get(^IRIS.Temp.OPCUATests("role", "connected")), 0, "and did not connect")
+	} Catch (e) {
+		do $$$AssertTrue(0, "Exception: "_e.DisplayString())
+	}
+	do ..DropUser()
+	kill ^IRIS.Temp.OPCUATests("role")
+}
+
+/// JOB entry for <method>TestSecurityForbidden</method>: logged in as <var>pUser</var>.
+ClassMethod SecurityJob(pUser As %String, pPassword As %String, pURL As %String)
+{
+	set tKey = $Name(^IRIS.Temp.OPCUATests("role"))
+	try {
+		set tLogin = $System.Security.Login(pUser, pPassword)
+		set @tKey@("login") = tLogin
+		if 'tLogin {
+			set @tKey@("done") = 1
+			Quit
+		}
+		set tSC = ##class(OPCUA.REST.SecurityService).Identity(.tIdentity)
+		do ..Record(tKey, "identity", tSC)
+		set @tKey@("leak") = $Select(tIdentity.%Size() > 0: 1, 1: 0)
+		set tSC = ##class(OPCUA.REST.ConnectionService).Test({"url": (pURL), "securityMode": 3}, .tManaged)
+		do ..Record(tKey, "managedTest", tSC)
+		set:$$$ISOK(tSC) @tKey@("connected") = tManaged.connected
+	} catch e {
+		set @tKey@("error") = e.DisplayString()
+	}
+	set @tKey@("done") = 1
+}
+
 /// JOB entry: log in as <var>pUser</var>, then record $LB(httpCode, text) per step.
 /// A failed login quits the job, so nothing runs with the parent's privileges.
 ClassMethod RoleJob(pUser As %String, pPassword As %String, pProduction As %String, pSchema As %String, pUnused As %String, pPipeline As %String, pURL As %String)
