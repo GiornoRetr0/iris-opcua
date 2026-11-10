@@ -76,6 +76,13 @@ Method MakePair(pName As %String, pURI As %String = "urn:fx:opcua") As %Status
 	Quit ##class(OPCUA.Security.Native).CreateIdentity(d_pName_".crt", d_pName_".key", pURI, "fxhost", "Fixture "_pName)
 }
 
+ClassMethod ReadRaw(pPath As %String) As %String
+{
+	set s = ##class(%Stream.FileBinary).%New()
+	do s.LinkToFile(pPath)
+	Quit s.Read(100000)
+}
+
 Method Fp(pPath As %String) As %String
 {
 	do ##class(OPCUA.Security.Native).InspectCert(pPath, 1, .i)
@@ -113,7 +120,14 @@ Method TestCreateThenReuse()
 	do $$$AssertTrue(##class(%File).Exists(tCert), "cert exists")
 	do $$$AssertTrue(##class(%File).Exists(tKey), "key exists")
 	do $$$AssertEquals(tURI, tStatus.clientURI, "uri")
-	do $$$AssertNotTrue(tStatus3.%ToJSON() [ "PRIVATE KEY", "status has no key")
+	set tJson = tStatus3.%ToJSON()
+	do $$$AssertNotTrue(tJson [ "PRIVATE KEY", "status has no PEM key text")
+	set tBytes = ..ReadRaw(tKey), tHex = ..ReadHex(tKey)
+	do $$$AssertTrue($length(tHex) > 600, "read the key file")
+	do $$$AssertNotTrue(tJson [ $zconvert(tHex, "U"), "no key hex (upper)")
+	do $$$AssertNotTrue(tJson [ $zconvert(tHex, "L"), "no key hex (lower)")
+	do $$$AssertNotTrue(tJson [ $system.Encryption.Base64Encode(tBytes, 1), "no key base64")
+	do $$$AssertNotTrue(tJson [ $extract($zconvert(tHex, "U"), 41, 120), "no fragment of the key hex")
 	do $$$AssertEquals(..OwnFiles(), 2, "two files in own/")
 	// the certificate download
 	do $$$AssertStatusOK(##class(OPCUA.Security.Identity).CertificateBytes("der", .tDer, .tName), "der")
@@ -262,6 +276,71 @@ Method TestUseFilesThenDeleted()
 	do ##class(OPCUA.Security.Identity).Status(.tMis)
 	do $$$AssertEquals(tMis.ready, 0, "not ready")
 	do $$$AssertEquals(tMis.errors.%Get(0).code, "keyMismatch", "keyMismatch")
+}
+
+Method TestUseFilesPemRejected()
+{
+	Quit:..Skipped()
+	set d = ..Base_"fx/"
+	set tRC = ..Openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", d_"x.key.pem", "-out", d_"x.crt.pem", "-days", "30", "-subj", "/CN=pem", "-addext", "subjectAltName=URI:urn:fx:pem")
+	do $$$AssertEquals(tRC, 0, "PEM fixture")
+	Quit:tRC
+	set tExpect = "Use DER files for the certificate and key (IRIS's OPC UA library reads DER only). "_$char(8220)_"Use existing certificate"_$char(8221)_" converts PEM and .pfx for you."
+	set tSC = ##class(OPCUA.Security.Identity).UseFiles(d_"x.crt.pem", d_"x.key.pem", 0, "", .tS)
+	do $$$AssertEquals(##class(OPCUA.REST.Error).HttpCode(tSC), 400, "400")
+	do $$$AssertEquals(##class(OPCUA.REST.Error).Message(tSC), tExpect, "text")
+	do $$$AssertNotTrue(##class(OPCUA.Security.Store).GetIdentity(.c), "nothing configured")
+	// with an identity in place it stays as it was
+	do $$$AssertStatusOK(..MakePair("x2"), "DER fixture")
+	do $$$AssertStatusOK(##class(OPCUA.Security.Identity).UseFiles(d_"x2.crt", d_"x2.key", 0, "", .tOne), "use DER")
+	set tSC = ##class(OPCUA.Security.Identity).UseFiles(d_"x.crt.pem", d_"x.key.pem", 1, tOne.fingerprint, .tS)
+	do $$$AssertEquals(##class(OPCUA.REST.Error).Message(tSC), tExpect, "text on replace")
+	do ##class(OPCUA.Security.Identity).Status(.tAfter)
+	do $$$AssertEquals(tAfter.fingerprint, tOne.fingerprint, "identity unchanged")
+	do $$$AssertEquals(tAfter.ready, 1, "still ready")
+}
+
+Method TestUseFilesManagedRejected()
+{
+	Quit:..Skipped()
+	do $$$AssertStatusOK(##class(OPCUA.Security.Identity).Create("", 0, "", .tOne), "create")
+	do ##class(OPCUA.Security.Identity).Status(.tS1)
+	set tCert = tS1.advanced.certPath, tKey = tS1.advanced.keyPath
+	set tSC = ##class(OPCUA.Security.Identity).UseFiles(tCert, tKey, 1, tOne.fingerprint, .tS)
+	do $$$AssertEquals(##class(OPCUA.REST.Error).HttpCode(tSC), 400, "400")
+	do $$$AssertEquals(##class(OPCUA.REST.Error).Message(tSC), "These files are already managed by IRIS.", "text")
+	do ##class(OPCUA.Security.Identity).Status(.tAfter)
+	do $$$AssertEquals(tAfter.ready, 1, "identity still ready")
+	do $$$AssertEquals(tAfter.fingerprint, tOne.fingerprint, "unchanged")
+	do $$$AssertEquals(..OwnFiles(), 2, "files still in own/")
+}
+
+Method TestSaveFailureLeavesNothingHalfSwapped()
+{
+	Quit:..Skipped()
+	do $$$AssertStatusOK(##class(OPCUA.Security.Identity).Create("", 0, "", .tOne), "create")
+	set tCfgBefore = ^OPCUA.Tests.IdentityLive("identity")
+	set ^%OPCUA.Security.Override("failSave") = 1
+	set tSC = ##class(OPCUA.Security.Identity).Create("", 1, tOne.fingerprint, .tTwo)
+	kill ^%OPCUA.Security.Override("failSave")
+	do $$$AssertTrue($$$ISERR(tSC), "the replacement fails")
+	do $$$AssertEquals(^OPCUA.Tests.IdentityLive("identity"), tCfgBefore, "config unchanged")
+	do $$$AssertEquals(..OwnFiles(), 2, "own/ holds the original pair")
+	do ##class(OPCUA.Security.Identity).Status(.tAfter)
+	do $$$AssertEquals(tAfter.ready, 1, "still ready")
+	do $$$AssertEquals(tAfter.fingerprint, tOne.fingerprint, "same certificate")
+	set tPrev = ##class(OPCUA.Security.Store).Dir("previous")
+	set rs = ##class(%ResultSet).%New("%File:FileSet")
+	do rs.Execute(tPrev, "*")
+	set n = 0
+	while rs.Next() { set n = n + 1 }
+	do $$$AssertEquals(n, 0, "no previous/ entry left")
+	// and the staging area is gone
+	set rs = ##class(%ResultSet).%New("%File:FileSet")
+	do rs.Execute(##class(OPCUA.Security.Store).Root()_"staging", "*")
+	set n = 0
+	while rs.Next() { set n = n + 1 }
+	do $$$AssertEquals(n, 0, "no staging left")
 }
 
 Method TestReplaceKeepsPrevious()

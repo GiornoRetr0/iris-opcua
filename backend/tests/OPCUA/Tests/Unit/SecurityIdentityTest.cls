@@ -149,6 +149,8 @@ Method TestReplaceStaleFingerprint()
 	do $$$AssertNotTrue(##class(%File).DirectoryExists("/tmp/opcua-identity-unit-"_$job_"/own"), "no files written")
 }
 
+/// Structure only (files missing); SecurityIdentityLiveTest.TestCreateThenReuse checks a parsed identity
+/// against the key file's hex and base64.
 Method TestStatusNeverHasKey()
 {
 	do ..Configure()

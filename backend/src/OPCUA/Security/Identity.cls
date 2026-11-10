@@ -400,7 +400,37 @@ ClassMethod UseFiles(pCertPath As %String, pKeyPath As %String, pReplace As %Boo
 	If (pCertPath = "") || (pKeyPath = "") Quit ##class(OPCUA.REST.Error).BadRequest("Give the path of the certificate and of its private key.")
 	Set tSC = ..GuardReplace(pReplace, pCurrentFp)
 	Quit:$$$ISERR(tSC) tSC
+	// Files in own/ or previous/ are moved by Adopt; referencing them would break the identity.
+	If ..IsManaged(pCertPath) || ..IsManaged(pKeyPath) Quit ##class(OPCUA.REST.Error).BadRequest("These files are already managed by IRIS.")
+	// open62541 reads DER only: a DER structure starts with 0x30 (SEQUENCE).
+	If '..IsDER(pCertPath) || '..IsDER(pKeyPath) {
+		Quit ##class(OPCUA.REST.Error).BadRequest("Use DER files for the certificate and key (IRIS's OPC UA library reads DER only). "_$Char(8220)_"Use existing certificate"_$Char(8221)_" converts PEM and .pfx for you.")
+	}
 	Quit ..Adopt("files", "", pCertPath, pKeyPath, pReplace, .pStatus)
+}
+
+/// Whether the path lies inside the store's own/ or previous/ directory.
+ClassMethod IsManaged(pPath As %String) As %Boolean [ Private ]
+{
+	Set tNorm = ##class(%File).NormalizeFilename(pPath)
+	For tWhich = "own", "previous" {
+		Set tDir = ##class(OPCUA.Security.Store).Dir(tWhich)
+		If (tDir '= "") && ($Extract(tNorm, 1, $Length(tDir)) = tDir) Quit
+		Set tDir = ""
+	}
+	Quit tDir '= ""
+}
+
+/// Whether the file starts with the DER SEQUENCE tag. A missing file passes here
+/// (Adopt reports it as unreadable).
+ClassMethod IsDER(pPath As %String) As %Boolean [ Private ]
+{
+	If '##class(%File).Exists(pPath) Quit 1
+	Set tStream = ##class(%Stream.FileBinary).%New()
+	Set tSC = tStream.LinkToFile(pPath)
+	If $$$ISERR(tSC) Quit 1
+	Set tByte = tStream.Read(1)
+	Quit (tByte '= "") && ($Ascii(tByte) = 48)
 }
 
 /// Creates the staging directory under the store root (0700 like the rest).
@@ -445,6 +475,7 @@ ClassMethod Adopt(pSource As %String, pStage As %String, pCert As %String, pKey 
 	Set tSC = ..MoveOwnAside(tOwn, .tPrev, .tMoved)
 	If $$$ISERR(tSC) {
 		Do ..RestoreOwn(tMoved)
+		If tPrev '= "" Do ##class(%File).RemoveDirectory(tPrev)
 		Quit tSC
 	}
 	// 2. move the new pair in
@@ -462,7 +493,18 @@ ClassMethod Adopt(pSource As %String, pStage As %String, pCert As %String, pKey 
 	Set tNow = ..NowUTC()
 	Set tCfg = {"source": (pSource), "certPath": (tCertPath), "keyPath": (tKeyPath), "clientURI": (..FirstUri(tInfo)), "fingerprint": (tInfo.sha256), "created": (tNow)}
 	If tHadOld && pReplace Set tCfg.replaced = tNow
-	Do ##class(OPCUA.Security.Store).SaveIdentity(tCfg)
+	Set tSaved = 1
+	Try {
+		// test hook: ^%OPCUA.Security.Override("failSave") makes the write fail
+		If $Get(^%OPCUA.Security.Override("failSave")) Throw ##class(%Exception.General).%New("SaveFailed", 5001, , "The identity could not be saved.")
+		Do ##class(OPCUA.Security.Store).SaveIdentity(tCfg)
+	} Catch e {
+		If pSource '= "files" Do ##class(%File).Delete(tCertPath), ##class(%File).Delete(tKeyPath)
+		Do ..RestoreOwn(tMoved)
+		If tPrev '= "" Do ##class(%File).RemoveDirectory(tPrev)
+		Set tSaved = 0
+	}
+	If 'tSaved Quit $$$ERROR($$$GeneralError, "The identity could not be saved; nothing was changed.")
 	Quit ..Status(.pStatus)
 }
 
