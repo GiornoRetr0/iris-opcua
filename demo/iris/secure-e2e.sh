@@ -42,13 +42,16 @@ ok()   { printf 'ok:   %s\n' "$*"; }
 
 server_container() { docker compose ps -q "$SERVER_SERVICE"; }
 
+# Waits for a "listening" line beyond the first $1 ones (default 0). A restarted
+# container keeps its old log, so the caller passes the count from before.
 wait_server_ready() {
-    local id i logs
+    local id i logs n base=${1:-0}
     id=$(server_container)
     for i in $(seq 1 60); do
         # Capture first: with pipefail, grep -q closing the pipe early fails the test.
         logs=$(docker logs "$id" 2>&1)
-        if grep -q 'TCP network layer listening' <<<"$logs"; then return 0; fi
+        n=$(grep -c 'TCP network layer listening' <<<"$logs")
+        if [ "$n" -gt "$base" ]; then return 0; fi
         sleep 0.5
     done
     fail "certified-server did not start listening"
@@ -83,8 +86,14 @@ run_phase() {
 cleanup() {
     local rc=$?
     say "cleanup"
-    iris_cmd 'set ok=##class(OPCUA.Tests.Runner).Run("OPCUA.Tests.Live.SecureE2ETest:TestCleanup") write "E2E-RESULT:",ok,!' \
-        | grep -E 'Summary|FAILED|E2E-RESULT' || true
+    local cout
+    cout=$(iris_cmd 'set ok=##class(OPCUA.Tests.Runner).Run("OPCUA.Tests.Live.SecureE2ETest:TestCleanup") write "E2E-RESULT:",ok,!')
+    grep -E 'Summary|FAILED|E2E-RESULT' <<<"$cout" || true
+    if grep -q '^E2E-RESULT:1' <<<"$cout" && ! grep -Eq 'Summary:.*(failed|skipped)|^FAILED|^SKIPPED' <<<"$cout"; then
+        ok "cleanup phase"
+    else
+        fail "cleanup phase (leftovers may remain)"
+    fi
     iris_cmd 'do ##class(OPCUA.Tests.Live.ApiRoleTest).DropUser()' >/dev/null 2>&1 || true
     docker compose up -d --force-recreate "$SERVER_SERVICE" >/dev/null 2>&1 || echo "WARNING: could not recreate $SERVER_SERVICE"
     docker exec "$IRIS_CONTAINER" rm -rf /tmp/opcua-e2e >/dev/null 2>&1 || true
@@ -111,6 +120,11 @@ command -v python3 >/dev/null || { echo "python3 is needed on the host"; exit 2;
 say "load sources"
 "$script_dir/dev-load.sh" >/dev/null 2>&1 && ok "dev-load" || { fail "dev-load.sh failed"; exit 1; }
 
+say "PKI volume"
+pki=$(docker exec "$IRIS_CONTAINER" stat -c '%U %a' /usr/irissys/mgr/opcua-pki 2>&1)
+[ "$pki" = "irisowner 700" ] && ok "opcua-pki is owned by irisowner, mode 0700" \
+    || { fail "opcua-pki is '$pki', want 'irisowner 700': rebuild the image (docker compose build iris) and recreate the volume (docker compose down; docker volume rm <project>_iris-opcua-pki)"; exit 1; }
+
 say "1. reset certified-server (trust folder = image contents)"
 reset_server || exit 1
 before=$(docker exec "$(server_container)" ls "$TRUSTDIR" | tr '\n' ' ')
@@ -135,7 +149,13 @@ if [ "$reloaded" -eq 1 ]; then
     ok "the server reloaded its trust list by itself (no restart)"
 else
     echo "no reload seen within 5 s: restarting certified-server"
-    docker restart "$server_id" >/dev/null && sleep 1 && wait_server_ready && ok "certified-server restarted"
+    listening=$(docker logs "$server_id" 2>&1 | grep -c 'TCP network layer listening')
+    if docker restart "$server_id" >/dev/null && wait_server_ready "$listening"; then
+        ok "certified-server restarted and listening again"
+    else
+        fail "certified-server restart did not complete"
+        exit 1
+    fi
 fi
 
 run_phase "OPCUA.Tests.Live.SecureE2ETest:TestPhase2"
@@ -184,6 +204,7 @@ say "5. expired identity (no native connect expected)"
 channels_before=$(docker logs "$(server_container)" 2>&1 | grep -c 'Creating a new SecureChannel')
 run_phase "OPCUA.Tests.Live.SecureE2ETest:TestPhase3"
 channels_after=$(docker logs "$(server_container)" 2>&1 | grep -c 'Creating a new SecureChannel')
+[ "$channels_before" -gt 0 ] && ok "the server logged connections earlier ($channels_before), so the counter works" || fail "no SecureChannel lines in the server log: the no-connect check would prove nothing"
 [ "$channels_before" = "$channels_after" ] && ok "the server saw no connection during the expired-identity phase" || fail "the server saw $((channels_after - channels_before)) connection(s) during the expired-identity phase"
 
 exit 0
