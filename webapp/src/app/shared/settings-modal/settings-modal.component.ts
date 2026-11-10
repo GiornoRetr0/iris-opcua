@@ -253,7 +253,7 @@ const NEW_CREDENTIALS = ' new';
                     </div>
                     <div>
                       <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Password</label>
-                      <input type="password" [(ngModel)]="d.password" autocomplete="new-password"
+                      <input type="password" [(ngModel)]="d.password" (ngModelChange)="clearSaveError()" autocomplete="new-password"
                              [placeholder]="d.mode === 'edit' ? 'Leave empty to keep the current one' : 'No password'"
                              class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
                     </div>
@@ -587,6 +587,7 @@ export class SettingsModalComponent implements OnInit {
   chooseCredentials(value: string): void {
     const server = this.editingServer();
     if (!server) return;
+    this.lastTest.set(null);
     this.clearSaveError();
     if (value === NEW_CREDENTIALS) {
       this.setDraft(server.id, { mode: 'new', id: this.suggestId(server), username: '', password: '' });
@@ -761,6 +762,8 @@ export class SettingsModalComponent implements OnInit {
   }
 
   clearSaveError(): void {
+    // Every caller is a field edit; a test result no longer describes the edited profile.
+    this.lastTest.set(null);
     if (this.saveError()) this.saveError.set('');
   }
 

@@ -192,7 +192,15 @@ export class ServerSecurityComponent {
   manual = signal(false);
   identity = signal<IdentityStatus | null>(null);
   identityLoaded = signal(false);
-  current = signal<ServerCertificateReview | null>(null);
+  private review = signal<ServerCertificateReview | null>(null);
+  /**
+   * The review, only while it still describes the profile's URL. Editing the URL
+   * in place does not recreate this component, so a review made for another address
+   * must stop being actionable the moment the address differs.
+   */
+  current = (): ServerCertificateReview | null => (this.checkedUrl === this.server().url ? this.review() : null);
+  /** Bumped by every reset and inspect; a response for an older one is dropped. */
+  private requestId = 0;
   inspecting = signal(false);
   inspectError = signal('');
   reviewing = signal(false);
@@ -211,7 +219,9 @@ export class ServerSecurityComponent {
 
   private reset(s: ServerProfile): void {
     this.manual.set(!isManaged(s));
-    this.current.set(null);
+    this.requestId++;
+    this.inspecting.set(false);
+    this.review.set(null);
     this.reviewing.set(false);
     this.inspectError.set('');
     this.actionError.set('');
@@ -248,16 +258,12 @@ export class ServerSecurityComponent {
   serverText(): string {
     const r = this.current();
     if (this.inspecting()) return 'Checking the server…';
+    if (this.review() && !r) return 'The URL changed — check the server again';
     if (!r) return this.server().url ? 'Not checked yet' : 'Enter the server URL first';
-    if (this.serverStale()) return 'The URL changed — check the server again';
     if (this.serverOk()) return `Trusted · expires ${r.certificate.notAfter}`;
     if (r.changed) return 'Not trusted until you approve the new certificate';
     if (r.needsIssuer) return 'Trusted, but its issuer is missing';
     return 'Not trusted yet';
-  }
-
-  private serverStale(): boolean {
-    return this.checkedUrl !== this.server().url;
   }
 
   canTrust(): boolean {
@@ -283,18 +289,22 @@ export class ServerSecurityComponent {
   inspect(): void {
     const url = this.server().url;
     if (!url) return;
+    const id = ++this.requestId;
     this.inspecting.set(true);
     this.inspectError.set('');
     this.actionError.set('');
+    this.reviewing.set(false);
     this.api.inspectServer(url).subscribe({
       next: (r) => {
+        if (id !== this.requestId) return;
         this.inspecting.set(false);
         this.checkedUrl = url;
-        this.current.set(r);
+        this.review.set(r);
       },
       error: (err) => {
+        if (id !== this.requestId) return;
         this.inspecting.set(false);
-        this.current.set(null);
+        this.review.set(null);
         this.inspectError.set(apiErrorMessage(err, 'Could not inspect the server'));
       },
     });
@@ -302,11 +312,12 @@ export class ServerSecurityComponent {
 
   trust(): void {
     const r = this.current();
-    if (!r) return;
+    if (!r || !this.canTrust()) return;
     this.busy.set(true);
     this.actionError.set('');
-    this.api.trustServer(this.server().url, r.certificate.sha256, this.server().name || undefined).subscribe({
-      next: (next) => { this.busy.set(false); this.current.set(next); },
+    // The URL the review was made for, which is the profile's (current() checks).
+    this.api.trustServer(this.checkedUrl, r.certificate.sha256, this.server().name || undefined).subscribe({
+      next: (next) => { this.busy.set(false); if (this.checkedUrl === this.server().url) this.review.set(next); },
       error: (err) => { this.busy.set(false); this.actionError.set(apiErrorMessage(err)); },
     });
   }
@@ -324,11 +335,12 @@ export class ServerSecurityComponent {
   }
 
   addIssuer(): void {
+    if (!this.current() || !this.canAddIssuer()) return;
     const { ca, crl } = this.issuer();
     this.busy.set(true);
     this.actionError.set('');
-    this.api.addServerIssuer(this.server().url, ca, crl).subscribe({
-      next: (next) => { this.busy.set(false); this.scrubIssuer(); this.current.set(next); },
+    this.api.addServerIssuer(this.checkedUrl, ca, crl).subscribe({
+      next: (next) => { this.busy.set(false); this.scrubIssuer(); if (this.checkedUrl === this.server().url) this.review.set(next); },
       error: (err) => { this.busy.set(false); this.actionError.set(apiErrorMessage(err)); },
     });
   }

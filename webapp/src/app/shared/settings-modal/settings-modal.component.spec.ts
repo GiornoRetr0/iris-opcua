@@ -75,4 +75,33 @@ describe('SettingsModalComponent security readiness', () => {
     expect(c.returnTo()).toBe('s1');
     expect((f.nativeElement as HTMLElement).textContent).toContain('Return to PLC');
   });
+
+  it('clears the last test result when the URL or credentials are edited', async () => {
+    const f = create();
+    f.detectChanges();
+    const c = f.componentInstance;
+    c.editingServer()!.securityMode = 3;
+    api.test.and.returnValue(of({ url: 'u', connected: true, responseTimeMs: 4, security: { managed: true, identityReady: true, serverTrusted: true } }));
+    await c.testServerConnection();
+    expect(c.lastTest()).not.toBeNull();
+    f.detectChanges();
+    const url = (f.nativeElement as HTMLElement).querySelector('input[placeholder="opc.tcp://localhost:4840"]') as HTMLInputElement;
+    url.value = 'opc.tcp://other:4840';
+    url.dispatchEvent(new Event('input'));
+    expect(c.lastTest()).toBeNull();
+    await c.testServerConnection();
+    expect(c.lastTest()).not.toBeNull();
+    c.chooseCredentials('SomeEntry');
+    expect(c.lastTest()).toBeNull();
+  });
+
+  it('keeps the unsecured success text for mode None', async () => {
+    const f = create();
+    f.detectChanges();
+    const c = f.componentInstance;
+    api.test.and.returnValue(of({ url: 'u', connected: true, responseTimeMs: 7 }));
+    await c.testServerConnection();
+    expect(c.testStatus()).toBe('Connected (7ms)');
+    expect(c.lastTest()).toBeNull();
+  });
 });

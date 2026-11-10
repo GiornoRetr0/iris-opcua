@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { HttpErrorResponse } from '@angular/common/http';
-import { of, throwError } from 'rxjs';
+import { of, Subject, throwError } from 'rxjs';
 import { ServerSecurityComponent } from './server-security.component';
 import { ApiService } from '../../../core/services/api.service';
 import { ConnectionTestResult, IdentityStatus, ServerCertificateReview, ServerProfile } from '../../../core/models/opcua.models';
@@ -178,5 +178,36 @@ describe('ServerSecurityComponent', () => {
     await create({ test });
     expect(el().textContent).toContain('Could not reach the server.');
     expect(button('Download IRIS certificate')).toBeUndefined();
+  });
+
+  it('stops offering Trust once the URL is edited after the review', async () => {
+    const server = profile();
+    await create({ rev: review(), server });
+    button('Review certificate')!.click();
+    fixture.detectChanges();
+    expect(button('Trust this server')).toBeTruthy();
+    server.url = 'opc.tcp://other:4840';
+    fixture.detectChanges();
+    expect(button('Trust this server')).toBeUndefined();
+    expect(el().textContent).toContain('The URL changed');
+    fixture.componentInstance.trust();
+    expect(api.trustServer).not.toHaveBeenCalled();
+  });
+
+  it('ignores a late inspect response for the previous server', async () => {
+    const late = new Subject<ServerCertificateReview>();
+    await create({ rev: review({ trusted: true }) });
+    api.inspectServer.and.returnValue(late);
+    fixture.componentInstance.inspect();
+    fixture.componentRef.setInput('server', profile({ id: 's2', url: 'opc.tcp://b:4840' }));
+    fixture.detectChanges();
+    api.inspectServer.and.returnValue(of(review({ url: 'opc.tcp://b:4840', trusted: false, certificate: cert('BB:BB') })));
+    fixture.componentInstance.inspect();
+    late.next(review({ trusted: true, certificate: cert('AA:AA') }));
+    fixture.detectChanges();
+    button('Review certificate')!.click();
+    fixture.detectChanges();
+    expect(el().textContent).toContain('BB:BB');
+    expect(el().textContent).not.toContain('AA:AA');
   });
 });
