@@ -6,11 +6,14 @@ dependencies. The terminal installer (`installer/`) does this for you.
 
 | File | What it is |
 |------|------------|
-| `IrisOPCUA.dll` | The connector, built from the same C++ sources as the Linux `irisopcua.so` |
+| `IrisOPCUA.dll` | The connector (version 0.5.0), built from the same C++ sources as the Linux `irisopcua.so`. It links `libcrypto-1_1-x64.dll` directly for certificate creation, inspection and import, and for server certificate pinning |
 | `open62541.dll` | open62541 v1.2.1, unchanged |
-| `libcrypto-1_1-x64.dll` | OpenSSL 1.1, needed by `open62541.dll` |
+| `libcrypto-1_1-x64.dll` | OpenSSL 1.1, needed by `open62541.dll` and, from 0.5.0, by `IrisOPCUA.dll` itself |
 
 ## libcrypto-1_1-x64.dll
+
+Since 0.5.0 `IrisOPCUA.dll` cannot load without it, so it must be in the `bin`
+directory (IRIS's own copy serves).
 
 IMPORTANT: do not overwrite IRIS's copy of this file if one already exists in the
 `bin` directory. The copy here is only for instances that lack it. The terminal
@@ -26,3 +29,6 @@ libc++ is linked statically, it needs no Visual C++ redistributable of its own.
 
 The previous `IrisOPCUA.dll` was an MSVC build from 2021. It predated
 `zfGetEndpoints` and the change that keeps Bad readings in bulk polls.
+
+From 0.5.0 it also carries the native PKI operations and server certificate
+pinning (`zfSetServerPin`) used by managed Sign & Encrypt.
