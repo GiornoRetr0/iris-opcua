@@ -876,17 +876,130 @@ OPC UA supports two security modes:
 No encryption, no authentication (anonymous). Used for development/testing.
 
 ### SecurityMode 3: Sign & Encrypt
-Mutual TLS -- both client and server verify each other's certificates. Requires:
+Mutual TLS -- both client and server verify each other's certificates. Each side needs
+the other's certificate to be trusted, and the client certificate carries the Client URI
+as a `subjectAltName` URI. There are two ways to supply the client half; SecurityMode is 3
+in both.
 
-- **Client certificate** (DER format) -- our identity card
-- **Private key** (DER format) -- proof we own the certificate
-- **Trust directory** -- folder containing certificates we trust (the server's CA cert goes here)
-- **CRL directory** -- Certificate Revocation Lists (list of revoked certificates)
-- **Client URI** -- must match the `subjectAltName` in our certificate (e.g., `urn:secuac`)
+**Managed (the default).** A connection with `SecurityMode=3` and *no* certificate paths
+uses the instance's default identity and the per-server trust the console maintains.
+Nothing about certificates is typed per server or per pipeline. This is what
+`OPCUA.Security.*` implements (below).
 
-These are passed through `Client.SetupClient()` before connecting. The C++ library handles the actual TLS handshake.
+**Manual.** If `certPath`/`keyPath` are set (REST), or the adapter's `PublicCertificate`/
+`PrivateKey` are set, the connection uses exactly the explicit settings -- client
+certificate (DER), key (DER), trust directory, CRL directory, `ClientURI` -- passed
+through `Client.SetupClient()` as before. `OPCUA.Security` does not touch it. The demo
+`SecureExample` and `demo/certgen/generate.sh` (paths under `/usr/irissys/uac/certs`)
+are the manual path. A connection is managed or manual, never a mix.
 
-For Docker, `demo/certgen/generate.sh` generates all necessary certificates using OpenSSL.
+### Managed Sign & Encrypt (`OPCUA.Security.*`)
+
+**Identity: one per IRIS instance**, shared by every namespace, so a server
+administrator approves an instance once. It is a certificate, a private key and a Client
+URI (default `urn:<hostname>:InterSystems:IRIS:<instance>:OPCUA`, lowercased, allowed
+characters `[a-z0-9:._-]`). Three ways to get one; none runs over an existing identity
+without `replace` plus the current fingerprint (a stale screen gets a 409):
+
+- *Create*: the connector (0.5.0) generates an RSA 2048 key and a self-signed
+  certificate (SHA-256, 3650 days, SAN `URI:<ClientURI>` + `DNS:<hostname>`, extensions
+  copied from `demo/certgen/secuac.config`, plus `keyCertSign` -- without it open62541's
+  verifier treats a self-signed certificate as needing a CRL).
+- *Import*: certificate PEM/DER with a key PEM (PKCS#1/#8, optional passphrase) or DER,
+  or PKCS#12 with its password; normalised to DER and copied into the store. The
+  passphrase lives only for the request. Files over 16 KB are refused (hex over the callin).
+- *Use files on IRIS*: references DER files in place (DER only; files already inside the
+  store are refused). They are re-validated on every status read, so deleting or swapping
+  them turns the status not-ready (`unreadable`, `keyMismatch`) and managed connects refuse.
+
+`OPCUA.Security.Identity.Status` validates on every call. Blocking: unreadable,
+unparseable, key does not match, not yet valid, expired, no SAN URI, non-RSA. Warnings
+(still usable): expires within 30 days, key under 2048 bits, keyUsage missing bits. With
+no identity configured it lists *candidates* (the demo `secuac.*` pair) but never adopts
+one automatically. The `impact` list names every pipeline in every namespace that is
+SecurityMode 3 with no manual paths, plus every trusted server -- what a replacement
+breaks until each server approves the new certificate.
+
+**Store.** Files live under `<manager dir>/opcua-pki/` (instance-wide; 0700 directories
+and 0600 key on Linux; on Windows the key inherits the directory ACL -- unverified):
+`own/` (identity; a replaced one is kept in `previous/`), `servers/<server-key>/trusted/`
+and `crl/`. Configuration is the instance-wide global `^%OPCUA.Security` (IRISSYS,
+visible from every namespace): identity source/paths/URI/fingerprint, one entry per
+trusted server. The root and the global are redirected by `^%OPCUA.Security.Override`, so
+tests never touch the real identity. The private key never appears in a REST response,
+event log, error text, native log or exported global.
+
+**Trust is per server**, keyed by the normalised endpoint URL (lowercase host, explicit
+port, no trailing slash: `opc.tcp://Certified-Server:4840/` and `opc.tcp://certified-server`
+are one server; an IP address is another and must be trusted again).
+
+1. *Inspect*: unsecured discovery (`zfGetEndpoints`) returns the server certificate, its
+   application URI, whether a SignAndEncrypt endpoint exists, and identity problems
+   (application URI or host not in the SAN, expired, self-signed without `keyCertSign`).
+2. *Trust*: the user confirms the SHA-256 fingerprint; IRIS fetches the certificate again
+   itself and stores it only if the fingerprint still matches. Bytes from the browser are
+   never trusted. A changed certificate on a pinned server is never accepted silently:
+   the console shows old and new side by side and needs explicit approval.
+3. *CA-issued servers* (the demo `certified-server`, issued by `myCA`): trusting the
+   presented certificate is not enough. The user also supplies the issuer certificate and
+   its CRL (`/security/servers/issuer`); IRIS checks the server certificate chains to the
+   CA and the CRL belongs to it, then stores both.
+
+**The empty-trust-list rule.** open62541 1.2.1 installs an *allow-all* verifier when the
+trust list is empty (`ua_pki_openssl.c`). So managed Sign & Encrypt refuses, before any
+native setup call, when the server has no trusted certificate, no pin, or a CA-issued
+certificate without its issuer and CRL (`Trust.Pin`, called from `Connection.Resolve`).
+It never falls back to SecurityMode 1. Anything that builds a trust directory by hand must
+keep this in mind: an empty one trusts everything.
+
+**Pinning.** Every managed connection is pinned to the exact certificate the user
+reviewed. The connector wraps the verifier (`UACPin`, ordinal 52 `zfSetServerPin`):
+normal verification (chain, CRL, expiry) runs first, then the SHA-256 fingerprint must
+equal a pin, then the endpoint host must match the certificate's SAN (SAN only, never
+the CN). The pin is an additional condition, not a replacement: an expired pinned
+certificate is refused. `Connection.Setup` = `Resolve` + `SetupClient` + `SetServerPin`;
+an empty host is refused.
+
+**Approval is external.** The server administrator must trust IRIS's certificate on the
+server; IRIS cannot do that. The console offers the certificate as DER/PEM
+(`GET /security/identity/certificate?format=der|pem`) with its fingerprint. A rejection
+by the server arrives as a bare `BadConnectionClosed`/`BadSecurityChecksFailed`;
+`OPCUA.Security.Diagnose` turns it into a category: `network`, `noSecureEndpoint`,
+`serverChanged` (presented fingerprint differs from the pin; message `Server certificate
+changed—review and approve the replacement.`), `hostMismatch`, `uriInvalid`, `timeInvalid`,
+`clientNotApproved` (carries our fingerprint) or `other`. `/test` returns it in a
+`security` block; the adapters log it once per change at warning level, re-running
+discovery on a retry only if the error text changed or 60 s passed.
+
+**Where it plugs in.** `ClientManager.Connect` (REST) and `Adapter.Common` (both
+SetupClient sites, plus a re-setup on retry after a managed failure so a new pin is
+picked up) call `Connection.Setup`. `POST /deploy` for a managed server writes only
+`SecurityMode=3` to the production item; manual writes the five path settings as before.
+
+**REST** (`OPCUA.REST.SecurityService`; all need `%Admin_Secure:USE`, else 403, so an
+account holding only the installer's `OPCUA_API_<NS>` role cannot use them):
+`GET/POST /security/identity`, `POST /security/identity/import`,
+`POST /security/identity/files`, `GET /security/identity/certificate`,
+`GET /security/servers`, `POST /security/servers/inspect|trust|issuer`,
+`DELETE /security/servers/:key`.
+
+**Console.** *Settings -> OPC UA Security* (identity: create/import/use files, expiry,
+download, replace with impact confirmation) and, per server profile, three readiness rows
+(identity, server certificate reviewed and trusted, IRIS approved by the server).
+
+**Native layer.** Ordinals 48-52 (`zfPkiCreateIdentity`, `zfPkiInspectCert`,
+`zfPkiCheckKeyPair`, `zfPkiNormalise`, `zfSetServerPin`) come with connector 0.5.0, after
+47 `zfGetEndpoints`; `OPCUA.Utils.SupportsPki()` gates on version >= 0.5, because calling
+an ordinal an older library lacks is not a clean failure. They use the OpenSSL 1.1
+libcrypto shipped beside the connector: no `openssl` executable or shell at runtime, so
+it works on Windows.
+
+**Docker demo.** The `iris-opcua-pki` volume keeps `/usr/irissys/mgr/opcua-pki`, so
+rebuilding the image does not regenerate the identity and force every server to approve
+it again. `demo/iris/secure-e2e.sh` runs the approval flow end to end against the
+`certified-server` (trust and pin, `clientNotApproved`, copy the client certificate into
+the server's trust directory, connect, a managed pipeline writes rows, a swapped pin gives
+`serverChanged`), driving test phases with `OPCUA.Tests.Runner.Run(...)`.
 
 ### Who can use the console
 
@@ -914,6 +1027,7 @@ IRIS "globals" are persistent key-value trees (like a hierarchical NoSQL store).
 |--------|--------|---------|----------|
 | `^OPCUA.DataSource(className)` | Projection (on class compile) | Services (on startup) | Config spec: `$LB(name, storageGlobal, specList)` |
 | `^OPCUA.Library.Pathname` | Installer | Utils.Initialize() | Path to the C++ shared library |
+| `^%OPCUA.Security` | `OPCUA.Security.Store` / `Identity` / `Trust` | Security status, `Connection.Resolve` | Instance-wide (IRISSYS): default identity config and one entry per trusted server; never key material |
 
 There is deliberately **no** device-metadata global. An earlier design stored row sources, column masks, absolute node IDs and the nesting spec in `^OPCUA.RowSource`; all of that is now derived — masks and node IDs by browsing at connect time, the nesting spec from the compiled class's storage order. Removing it is what made "add a device" a settings edit rather than a regeneration.
 | `%ZUtilsIrisOpcuaLibraryId` | Utils.Initialize() | Client (every call) | Loaded library handle (process-scoped, not persistent) |
@@ -1079,5 +1193,5 @@ InboundAdapter InboundAdapter   Svc   Svc   Svc    Svc
 | How multi-device (v2) works | `OPCUA/Service/TCPPollingRowSourceService.cls` |
 | How pipelines are managed | `OPCUA/REST/PipelineService.cls` |
 | How the Docker image is set up | `demo/iris/IRISConfig/Installer.cls` |
-| How certificates work | `demo/certgen/certgen.bash`, security settings in `OPCUA/Adapter/Common.cls` |
+| How certificates work | Managed: `backend/src/OPCUA/Security/` (`Connection`, `Identity`, `Trust`, `Diagnose`, `Store`, `Native`) and `REST/SecurityService.cls`. Manual/demo: `demo/certgen/certgen.bash`, security settings in `OPCUA/Adapter/Common.cls` |
 | How the tests are run | `backend/tests/OPCUA/Tests/Runner.cls`: `Offline()` runs `OPCUA.Tests.Unit` (no server, no native library), `Live()` runs `OPCUA.Tests.Live` (docker `plc`, `certified-server`); load first with `demo/iris/dev-load.sh` |

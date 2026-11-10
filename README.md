@@ -139,7 +139,7 @@ ldd /path/to/iris/bin/libopen62541.so.0
 
 Resolve any `not found` dependencies. The Docker image also installs `libmbedtls-dev`; the required packages depend on the target OS. Do not overwrite existing instance libraries without checking compatibility.
 
-On Windows, copy `IrisOPCUA.dll`, `open62541.dll` and `libcrypto-1_1-x64.dll` into the instance's binary directory. The supplied `libcrypto-1_1-x64.dll` is supplemental: **do not overwrite IRIS's existing copy**. `IrisOPCUA.dll` is built from the same sources as the Linux library (see the [Windows notes](backend/native/windows-x64/README.md)). The legacy Studio export does not replace the current REST classes.
+On Windows, copy `IrisOPCUA.dll`, `open62541.dll` and `libcrypto-1_1-x64.dll` into the instance's binary directory. The supplied `libcrypto-1_1-x64.dll` is supplemental: **do not overwrite IRIS's existing copy**. `IrisOPCUA.dll` is built from the same sources as the Linux library (see the [Windows notes](backend/native/windows-x64/README.md)). The legacy Studio export does not replace the current REST classes and predates `OPCUA.Security.*` and the 0.5.0 connector, so it cannot be used for managed Sign & Encrypt.
 
 No native macOS library set is included. On macOS, use the Linux Docker environment. The repository does not yet provide a tested compatibility matrix for client installations.
 
@@ -222,13 +222,16 @@ For temporary development use, you can run `npm start` and edit `webapp/proxy.co
 
 Under **Settings → OPC UA Servers**, add the endpoint and its credentials if required. These belong to the OPC UA server, separately from the IRIS API account.
 
-For **Sign & Encrypt**, provision the following on the IRIS host and enter their paths:
+For **Sign & Encrypt**, the console manages the certificates (you need an IRIS account with `%Admin_Secure:USE`, normally SuperUser level):
 
-- Client certificate and private key in DER format, readable by the IRIS service account. Restrict access to the private key.
-- Trust directory containing the certificates needed to trust the server, and the revocation-list directory required by your certificate configuration.
-- Client application URI matching the URI in the client certificate.
+1. **Settings → OPC UA Security**: create the instance's client identity, import a certificate and key (PEM, DER or PKCS#12), or use existing DER files on the IRIS host. There is one identity per IRIS instance, shared by all namespaces, stored under the instance's `mgr/opcua-pki` directory (back it up).
+2. On the server profile, choose Sign & Encrypt, review the server's certificate (subject, application URI, validity, SHA-256 fingerprint) and trust it. A CA-issued server certificate also needs the CA certificate and its CRL. The connection is then pinned to exactly that certificate; if the server presents a different one, you review and approve the replacement.
+3. **Download IRIS's certificate** (DER or PEM) and have the server administrator trust it on the server. IRIS cannot do this for you; until it is done, Test Connection reports that the server has not approved IRIS's certificate and shows IRIS's fingerprint.
+4. **Test Connection**. Pipelines deployed for that server use the same setup with no certificate settings of their own.
 
-Have the server administrator trust the client certificate as well. The UI offers `None` and `Sign & Encrypt`, identifying `Basic256Sha256` for the latter; verify compatibility with your server. The console accepts filesystem paths and does not upload or provision certificates. Use your organization's certificates for client installations.
+An empty trust list would make the OPC UA stack trust everything, so IRIS refuses to connect when a server has no reviewed certificate; it never falls back to an unencrypted connection.
+
+**Manual configuration** still works: if you give certificate and key paths (DER, readable by the IRIS service account, key access restricted), a trust directory, a CRL directory and a Client URI matching the certificate, the connection uses exactly those, as in the Docker demo (`demo/certgen/generate.sh`). The UI offers `None` and `Sign & Encrypt`, identifying `Basic256Sha256` for the latter; verify compatibility with your server.
 
 Click **Test Connection**, save, then verify browsing and actual collection below.
 

@@ -404,6 +404,60 @@ Method SetupClient(ConnectionTimeout As %Integer = 3000, MessageSecurityMode As 
 	Quit tSC
 }
 
+/// Asks the server at <var>pURL</var> which endpoints it offers, without a session.
+/// <var>pEndpoints</var> is an array of <tt>{url, mode, policyUri, level}</tt> (mode 1 None,
+/// 2 Sign, 3 Sign &amp; Encrypt), <var>pCertHex</var> the server's certificate (hex) and
+/// <var>pAppUri</var> its application URI. Discovery leaves the native client unusable
+/// for a real connect: the caller must run <method>SetupClient</method> again afterwards.
+Method GetEndpoints(pURL As %String, Output pEndpoints As %DynamicArray, Output pCertHex As %String, Output pAppUri As %String) As %Status [ Final ]
+{
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+	Set pEndpoints = [], pCertHex = "", pAppUri = ""
+
+	Try {
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfGetEndpoints,"",$LB(..Handle,pURL))
+		If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+
+		// $LB(0, status, quantity, endpoints, certificateHex, applicationUri)
+		Set tStatus = $ListGet(tRetval,2)
+		If tStatus'=0 {
+			Do ..GetStatusCodeName(.tName, tStatus)
+			Set tSC = $$$ERROR($$$GeneralError, "Endpoint discovery failed: "_$Get(tName, tStatus)) Quit
+		}
+		Set tEndpoints = $ListGet(tRetval,4)
+		Set tPtr = 0
+		While $ListNext(tEndpoints, tPtr, tEp) {
+			Do pEndpoints.%Push({"url": ($ListGet(tEp,1)), "mode": (+$ListGet(tEp,2)), "policyUri": ($ListGet(tEp,3)), "level": (+$ListGet(tEp,4))})
+		}
+		Set pCertHex = $ListGet(tRetval,5)
+		Set pAppUri = $ListGet(tRetval,6)
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	Quit tSC
+}
+
+/// Pins the server's certificate for the next connect: after the normal trust check,
+/// only a certificate whose SHA-256 fingerprint is in <var>pFingerprints</var> is accepted,
+/// and its SAN must cover <var>pHost</var>. Call after <method>SetupClient</method> in Sign
+/// &amp; Encrypt mode and before <method>Connect</method>. An empty host is refused: the
+/// native layer would skip the host check.
+Method SetServerPin(pFingerprints As %List, pHost As %String) As %Status [ Final ]
+{
+	#dim tSC As %Status = $$$OK
+	#dim e As %Exception.AbstractException
+
+	Try {
+		If $Get(pHost)="" Set tSC = $$$ERROR($$$GeneralError, "A pinned server certificate needs the server host name.") Quit
+		Set tRetval=$ZF(-5,%ZUtilsIrisOpcuaLibraryId,$$$zfSetServerPin,"",$LB(..Handle,pFingerprints,pHost))
+		If $List(tRetval,1)'=0 Set tSC=..DecodeError(tRetval) Quit
+	} Catch (e) {
+		Set tSC=e.AsStatus()
+	}
+	Quit tSC
+}
+
 /// This callback method is invoked by the %Close method to provide 
 /// notification that the current object is being closed.
 Method %OnClose() As %Status

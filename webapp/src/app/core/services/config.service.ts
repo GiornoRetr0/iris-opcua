@@ -29,11 +29,6 @@ const DEFAULTS: AppConfig = {
   securityMode: 1,
   apiBaseUrl: '/iris/csp/opcua/api',
   apiUsername: 'SuperUser',
-  certPath: '',
-  keyPath: '',
-  trustDir: '',
-  crlDir: '',
-  clientURI: '',
   autoRefreshInterval: 5,
   servers: [],
 };

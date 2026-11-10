@@ -23,11 +23,38 @@ ClassMethod Live(pURL As %String = "opc.tcp://plc") As %Boolean
     Return ..RunSuite("OPCUA.Tests.Live", pURL)
 }
 
+/// Run one test class, or one method of it, with the same summary and return
+/// contract as Offline() and Live(). Used by demo/iris/secure-e2e.sh to run the
+/// phases of OPCUA.Tests.Live.SecureE2ETest between host-side steps.
+/// @param pClassOrMethod "Package.Class" or "Package.Class:TestMethod",
+///        e.g. "OPCUA.Tests.Live.SecureE2ETest:TestPhase1"
+/// Returns 1 if all pass, 0 if any fail (a class that does not exist is a failure)
+ClassMethod Run(pClassOrMethod As %String) As %Boolean
+{
+    Set tClass = $Piece(pClassOrMethod, ":", 1)
+    Set tMethod = $Piece(pClassOrMethod, ":", 2)
+    Set tPackage = $Piece(tClass, ".", 1, $Length(tClass, ".") - 1)
+    If (tPackage = "") || '##class(%Dictionary.CompiledClass).%ExistsId(tClass) {
+        Write "FAILED: no such test class: ", tClass, !
+        Write !,"Summary: 0 passed, 1 failed",!
+        Return 0
+    }
+    // Tests that only make sense when named explicitly (the end-to-end phases)
+    // look for this flag; Offline() and Live() never set it.
+    Set ^||OPCUA.Tests("explicit") = 1
+    Write !,"=== Running ", pClassOrMethod, " ===",!
+    Set tOK = ..RunSuite(tPackage, "", tClass, tMethod)
+    Kill ^||OPCUA.Tests("explicit")
+    Return tOK
+}
+
 /// Run a test suite package and collect results
 /// @param pPackage The package path (e.g. "OPCUA.Tests.Unit")
 /// @param pURL Optional URL to display
+/// @param pClass Optional: only this class of the package
+/// @param pMethod Optional: only this method of pClass
 /// Returns 1 if all pass, 0 if any fail
-ClassMethod RunSuite(pPackage As %String, pURL As %String = "") As %Boolean [ Internal ]
+ClassMethod RunSuite(pPackage As %String, pURL As %String = "", pClass As %String = "", pMethod As %String = "") As %Boolean [ Internal ]
 {
     // Ensure ^UnitTestRoot is set
     Set ^UnitTestRoot = "/tmp"
@@ -36,7 +63,9 @@ ClassMethod RunSuite(pPackage As %String, pURL As %String = "") As %Boolean [ In
     // nothing is not mistaken for the previous run.
     Set before = $Order(^UnitTest.Result(""), -1)
     Set mgr = ##class(%UnitTest.Manager).%New()
-    Set tSC = mgr.RunTest(pPackage, "/noload/nodelete")
+    Set tSpec = pPackage
+    If pClass '= "" Set tSpec = tSpec_":"_pClass_$Select(pMethod '= "": ":"_pMethod, 1: "")
+    Set tSC = mgr.RunTest(tSpec, "/noload/nodelete")
 
     Set logIndex = $Order(^UnitTest.Result(""), -1)
     If (logIndex = "") || (logIndex = before) {

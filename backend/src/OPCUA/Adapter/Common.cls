@@ -114,6 +114,20 @@ Property ResetClientFlag As %Integer [ Private ];
 
 Property LastReportedError As %Status [ Private ];
 
+/// Set after a failed managed connect: the next attempt sets the client up again so a
+/// changed identity, pin or trust is picked up without restarting the pipeline.
+Property ManagedRetry As %Boolean [ InitialExpression = 0, Private ];
+
+/// Category and server fingerprint of the failure last logged ("" when connected).
+Property LastDiagKey As %String [ Private ];
+
+/// $ZH of the last diagnosis, and the error text it explained: discovery is re-run on a
+/// retry only when the error changed or a minute has passed (a replaced server
+/// certificate yields the same error text).
+Property LastDiagTime As %Numeric [ Private ];
+
+Property LastDiagError As %String(MAXLEN = "") [ Private ];
+
 Property ConnectionRetryEndTime As %TimeStamp [ Private ];
 
 // *** METHODS ***
@@ -134,7 +148,18 @@ Method OnInit() As %Status
 		Quit:$$$ISERR(tSC)
 
 		do ..ApplyLogFile()
-		set tSC = ..Client.SetupClient("",..SecurityMode,..ClientURI,..PublicCertificate,..PrivateKey,..TrustListDir,..RevocationListDir)
+		set tSC = ##class(OPCUA.Security.Connection).Setup(..Client,..URL,..SecurityMode,..ClientURI,..PublicCertificate,..PrivateKey,..TrustListDir,..RevocationListDir,.tManaged,"")
+		if $$$ISERR(tSC) && $get(tManaged) {
+			// Not trusted yet (or no identity, or no issuer): the refusal happened before
+			// any native call, so stay fail-closed but keep the item alive. Connect()
+			// runs Setup again on every attempt and the item starts reporting on its own
+			// once the server is reviewed and trusted.
+			set tRefusal = $SYSTEM.Status.GetErrorText(tSC)
+			$$$LOGWARNING("OPCUA managed Sign & Encrypt is not ready, will retry: "_tRefusal)
+			set ..LastDiagError = tRefusal
+			set ..ManagedRetry = 1
+			set tSC = $$$OK
+		}
 		Quit:$$$ISERR(tSC)
 
 	} catch (e) {
@@ -187,18 +212,26 @@ Method Connect() As %Status [ Private ]
 	
 	try {
 
-		if ..ResetClientFlag '= 0 {
+		if (..ResetClientFlag '= 0) || ..ManagedRetry {
 
 			do ..ApplyLogFile()
-			set tSC = ..Client.SetupClient("",..SecurityMode,..ClientURI,..PublicCertificate,..PrivateKey,..TrustListDir,..RevocationListDir)
+			set tSC = ##class(OPCUA.Security.Connection).Setup(..Client,..URL,..SecurityMode,..ClientURI,..PublicCertificate,..PrivateKey,..TrustListDir,..RevocationListDir,.tManaged,"")
 
 			if $$$ISERR(tSC) {
 
-				$$$LOGERROR("Error encountered while resetting client [c.c] : "_$SYSTEM.Status.GetErrorText(tSC))
+				// A managed client that could not be set up must not be connected on the
+				// next attempt as it stands (rebuilt, but without its pin): set it up again.
+				if $get(tManaged) set ..ManagedRetry = 1
+				set tErrText = $SYSTEM.Status.GetErrorText(tSC)
+				if '$get(tManaged) || (tErrText '= ..LastDiagError) {
+					set ..LastDiagError = tErrText
+					$$$LOGERROR("Error encountered while resetting client [c.c] : "_tErrText)
+				}
 				Quit
 
 			} else {
 
+				set ..ManagedRetry = 0
 				$$$LOGINFO("OPCUA Client reset [c.c]")
 			}
 		}
@@ -221,6 +254,27 @@ Method Connect() As %Status [ Private ]
 		}
 		set tSC = ..Client.Connect(..URL, tUser, tPassword)
 		//Quit:$$$ISERR(tSC)
+		// A managed Sign & Encrypt failure is explained in the event log; the normal
+		// retry schedule is unchanged and nothing falls back to an unsecured mode.
+		if ##class(OPCUA.Security.Connection).IsManaged(..SecurityMode, ..PublicCertificate, ..PrivateKey) {
+			if $$$ISERR(tSC) {
+				set ..ManagedRetry = 1
+				// Discovery costs a round trip, so it is re-run sparingly and only a
+				// diagnosis that differs from the one already logged is written.
+				set tErrText = $SYSTEM.Status.GetErrorText(tSC)
+				if (..LastDiagKey = "") || (tErrText '= ..LastDiagError) || (($ZH - ..LastDiagTime) > 60) {
+					set ..LastDiagTime = $ZH, ..LastDiagError = tErrText
+					set tDiag = ##class(OPCUA.Security.Diagnose).Run(..URL, tSC)
+					if ##class(OPCUA.Security.Diagnose).IsNew(..LastDiagKey, tDiag, .tKey) {
+						set ..LastDiagKey = tKey
+						$$$LOGWARNING("OPCUA managed Sign & Encrypt connection failed ("_tDiag.category_"): "_tDiag.message_$select(tDiag.clientFingerprint'="":" IRIS client certificate fingerprint: "_tDiag.clientFingerprint, 1:""))
+					}
+				}
+			} elseif ..LastDiagKey '= "" {
+				set ..LastDiagKey = ""
+				$$$LOGINFO("OPCUA managed Sign & Encrypt connection recovered")
+			}
+		}
 
 	} catch (e) {
 		set tSC = e.AsStatus()

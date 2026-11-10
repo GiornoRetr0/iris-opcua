@@ -1,3 +1,68 @@
+## Unreleased — Managed Sign & Encrypt (connector 0.5.0, installer 0.5.0)
+
+Sign & Encrypt no longer means generating DER files with OpenSSL, copying them onto the
+IRIS server and typing four paths and a Client URI into every server profile and
+pipeline. IRIS keeps one client identity per instance and a reviewed, pinned
+certificate per server; a SuperUser sets both up in the console.
+
+### Added
+  - Connector 0.5.0 (`irisopcua.so` for linux-amd64 and linux-arm64, `IrisOPCUA.dll`):
+    ordinals 48-52 -- create an RSA 2048 self-signed identity (`keyCertSign` included),
+    inspect a certificate, check a key against a certificate, normalise PEM/DER/PKCS#12
+    to DER, and pin a server certificate with an endpoint host check. Ordinal 47
+    (`zfGetEndpoints`) is now declared and used. `OPCUA.Utils.SupportsPki()` gates the
+    new calls on a 0.5 library. `open62541.dll`, `libcrypto` and `libopen62541` are
+    unchanged.
+  - `OPCUA.Security.*`: `Store` (files under `<manager dir>/opcua-pki/`, config in
+    `^%OPCUA.Security`), `Identity` (create, import, use files on IRIS, validate on every
+    read, replace only with the current fingerprint), `Trust` (inspect, fingerprint-confirmed
+    trust, issuer + CRL for CA-issued servers, per-server pin), `Connection` (resolves a
+    managed connection; used by REST and both adapters), `Diagnose` (categorised failures,
+    including `clientNotApproved` with IRIS's fingerprint), `Native`.
+  - `/security/identity` (GET, POST, `/import`, `/files`, `/certificate?format=der|pem`) and
+    `/security/servers` (GET, `/inspect`, `/trust`, `/issuer`, DELETE `/:key`). They need
+    `%Admin_Secure:USE` (403 otherwise). `POST /test` gains a `security` block for managed
+    connections.
+  - Console: Settings -> OPC UA Security tab (identity, expiry, download as DER/PEM,
+    replace with an impact list) and, on each server profile, three readiness rows
+    (identity, server certificate reviewed and trusted, IRIS approved by the server).
+  - Docker demo: named volume `iris-opcua-pki` for `/usr/irissys/mgr/opcua-pki`;
+    `demo/iris/secure-e2e.sh` runs the approval flow against `certified-server`;
+    `OPCUA.Tests.Runner.Run(...)` runs a single test class or method.
+
+### Changed
+  - `SecurityMode=3` with no certificate paths is now a *managed* connection using the
+    instance identity. `POST /deploy` writes only `SecurityMode=3` for it. Explicit
+    `certPath`/`keyPath`/`trustDir`/`crlDir`/`clientURI` (and the adapters'
+    `PublicCertificate`/`PrivateKey`) still select the manual path, unchanged -- the demo
+    `SecureExample` and existing pipelines keep working.
+  - The console no longer fills in certificate paths or a Client URI when Sign & Encrypt is
+    chosen.
+  - Installer 0.5.0 embeds the 0.5.0 native files and `OPCUA/Security/*`. A differing
+    native library is still replaced only after confirmation; processes that loaded the old
+    one need a restart.
+
+### Security
+  - Managed connections refuse (before any native setup) when the server has no trusted
+    certificate, no pin, or a CA-issued certificate without its issuer and CRL: open62541
+    1.2.1 treats an empty trust list as trust-everything. They never fall back to
+    SecurityMode 1.
+  - Each managed connection is pinned to the reviewed certificate (SHA-256) on top of
+    normal chain, CRL and expiry checks, plus a SAN host check. A replaced server
+    certificate is shown for approval, never accepted silently.
+  - The private key is never returned by the API or written to logs; no `openssl`
+    executable or shell is used at runtime.
+
+### Known limitations
+  - IRIS cannot make the OPC UA server trust it: the server administrator must approve
+    the downloaded certificate.
+  - Server-side rejections reach IRIS as `BadConnectionClosed`; the category is inferred
+    (`clientNotApproved` when the pin and host check out).
+  - Not tested on Windows: the DLL is built, but key-file permissions and the managed flow
+    are on the Windows checklist. `legacy/windows-studio/` predates `OPCUA.Security.*`.
+  - Console accounts holding only the installer's `OPCUA_API_<NS>` role get 403 on
+    `/security/*`.
+
 ## Unreleased — Schema / device decoupling
 
 Creating a schema and choosing which devices to read are now separate operations.

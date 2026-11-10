@@ -50,6 +50,12 @@ ROUTINE OPCUA.Constants [Type=INC]
 #define zfVersion           				44
 #define zfGetUStr           				45
 #define zfSetLogFile                        46
+#define zfGetEndpoints                      47
+#define zfPkiCreateIdentity                 48
+#define zfPkiInspectCert                    49
+#define zfPkiCheckKeyPair                   50
+#define zfPkiNormalise                      51
+#define zfSetServerPin                      52
 
 
 

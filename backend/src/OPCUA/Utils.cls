@@ -204,6 +204,26 @@ ClassMethod AreSimilarOpcuaDisconnectErrors(ErrStr1 As %String, ErrStr2 As %Stri
     #; }
 }
 
+/// True when the native library is loaded and is version 0.5 or later, the first
+/// with the PKI, discovery and pinning entry points. Never throws: without the
+/// library (offline tests, a missing install) the answer is simply no.
+ClassMethod SupportsPki() As %Boolean
+{
+    Try {
+        If '$Data(%ZUtilsIrisOpcuaLibraryId) {
+            If $$$ISERR(..Initialize()) Quit
+        }
+        If $$$ISERR(..GetVersion(.tVersion)) Quit
+        Set tText = $ListGet(tVersion, 2)
+        Set tMajor = +$Piece(tText, ".", 1), tMinor = +$Piece(tText, ".", 2)
+        Quit:tText=""
+        Set tOK = (tMajor > 0) || (tMinor >= 5)
+    } Catch {
+        Set tOK = 0
+    }
+    Quit +$Get(tOK)
+}
+
 ClassMethod GetVersion(Output pOut As %List) As %Status
 {
     #dim tSC as %Status = $$$OK

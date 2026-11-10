@@ -30,7 +30,7 @@ import { CommonModule } from '@angular/common';
           <div class="flex items-start gap-3">
             <div class="p-2 rounded-lg shrink-0"
                  [class]="destructive() ? 'bg-error-container/40 text-error' : 'bg-primary/10 text-primary'">
-              <span class="material-symbols-outlined">{{ destructive() ? 'delete' : 'help' }}</span>
+              <span class="material-symbols-outlined">{{ icon() || (destructive() ? 'delete' : 'help') }}</span>
             </div>
             <div class="min-w-0">
               <h2 class="text-base font-bold text-on-surface">{{ title() }}</h2>
@@ -64,6 +64,8 @@ export class ConfirmDialogComponent {
   confirmLabel = input('Delete');
   cancelLabel = input('Cancel');
   destructive = input(true);
+  /** Material Symbols name; by default a bin when destructive, a question mark otherwise. */
+  icon = input('');
 
   confirmed = output<void>();
   cancelled = output<void>();

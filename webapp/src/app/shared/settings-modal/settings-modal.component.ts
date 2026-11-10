@@ -1,11 +1,13 @@
-import { Component, inject, signal, output, input, OnInit } from '@angular/core';
+import { Component, computed, inject, signal, output, input, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ConfigService } from '../../core/services/config.service';
 import { firstValueFrom } from 'rxjs';
 import { ApiService, apiErrorMessage, InlineLogin, NOT_SIGNED_IN } from '../../core/services/api.service';
 import { AuthService } from '../../core/services/auth.service';
-import { CredentialsEntry, ServerProfile } from '../../core/models/opcua.models';
+import { SecurityTabComponent } from './security-tab/security-tab.component';
+import { ServerSecurityComponent } from './server-security/server-security.component';
+import { ConnectionTestResult, CredentialsEntry, isManaged, ServerProfile } from '../../core/models/opcua.models';
 
 /**
  * A credentials entry being created or changed for one server, saved to IRIS when
@@ -25,7 +27,7 @@ const NEW_CREDENTIALS = ' new';
 @Component({
   selector: 'app-settings-modal',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, SecurityTabComponent, ServerSecurityComponent],
   template: `
     <!-- Modal Overlay -->
     <div class="fixed inset-0 z-[100] flex items-center justify-center bg-[#2e3132]/40 backdrop-blur-sm p-4"
@@ -58,6 +60,12 @@ const NEW_CREDENTIALS = ' new';
                  [class]="activeTab() === 'servers' ? 'bg-primary/10 text-primary font-semibold' : 'text-on-surface-variant hover:bg-surface-variant/50'">
               <span class="material-symbols-outlined text-xl">dns</span>
               <span class="text-sm">OPC UA Servers</span>
+            </div>
+            <div (click)="activeTab.set('security')" (keydown.enter)="activeTab.set('security')" role="button" tabindex="0"
+                 class="flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors"
+                 [class]="activeTab() === 'security' ? 'bg-primary/10 text-primary font-semibold' : 'text-on-surface-variant hover:bg-surface-variant/50'">
+              <span class="material-symbols-outlined text-xl">verified_user</span>
+              <span class="text-sm">OPC UA Security</span>
             </div>
             <div (click)="activeTab.set('gateway')"
                  class="flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors"
@@ -138,10 +146,10 @@ const NEW_CREDENTIALS = ' new';
           <div class="px-8 py-6 border-b border-outline-variant/10 flex justify-between items-center bg-surface-container-lowest sticky top-0 z-10">
             <div>
               <h1 class="text-xl font-semibold text-on-surface">
-                {{ activeTab() === 'servers' ? (editingServer() ? editingServer()!.name || 'New Server' : 'OPC UA Servers') : 'IRIS API Gateway' }}
+                {{ activeTab() === 'servers' ? (editingServer() ? editingServer()!.name || 'New Server' : 'OPC UA Servers') : activeTab() === 'security' ? 'OPC UA Security' : 'IRIS API Gateway' }}
               </h1>
               <p class="text-sm text-on-surface-variant">
-                {{ activeTab() === 'servers' ? 'Configure OPC UA server connections' : 'Configure IRIS API endpoint' }}
+                {{ activeTab() === 'servers' ? 'Configure OPC UA server connections' : activeTab() === 'security' ? 'The certificate IRIS presents to OPC UA servers' : 'Configure IRIS API endpoint' }}
               </p>
             </div>
             <button class="text-on-surface-variant hover:bg-surface-variant p-2 rounded-full transition-colors"
@@ -181,8 +189,8 @@ const NEW_CREDENTIALS = ' new';
                     </select>
                     <p class="text-[11px] text-on-surface-muted mt-1">
                       @if (editingServer()!.securityMode === 3) {
-                        Policy <code class="font-mono">Basic256Sha256</code>. Needs a client
-                        certificate, key and trust list below.
+                        Policy <code class="font-mono">Basic256Sha256</code>. Sign &amp; Encrypt uses this
+                        IRIS instance's client identity.
                       } @else {
                         No message security — traffic is unencrypted and unsigned.
                       }
@@ -245,7 +253,7 @@ const NEW_CREDENTIALS = ' new';
                     </div>
                     <div>
                       <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Password</label>
-                      <input type="password" [(ngModel)]="d.password" autocomplete="new-password"
+                      <input type="password" [(ngModel)]="d.password" (ngModelChange)="clearSaveError()" autocomplete="new-password"
                              [placeholder]="d.mode === 'edit' ? 'Leave empty to keep the current one' : 'No password'"
                              class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
                     </div>
@@ -264,41 +272,10 @@ const NEW_CREDENTIALS = ' new';
                 </div>
               </section>
 
-              <!-- Certificates (if Sign & Encrypt) -->
+              <!-- Sign & Encrypt readiness (managed), or the manual certificate files -->
               @if (editingServer()!.securityMode === 3) {
-                <section>
-                  <header class="mb-4 flex items-center gap-2">
-                    <span class="w-1 h-5 bg-tertiary rounded-full"></span>
-                    <h3 class="text-xs font-bold uppercase tracking-widest text-on-surface-variant">Certificate Configuration</h3>
-                  </header>
-                  <div class="grid grid-cols-1 gap-6">
-                    <div>
-                      <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Client URI (must match certificate)</label>
-                      <input type="text" [(ngModel)]="editingServer()!.clientURI" placeholder="urn:secuac"
-                             class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
-                    </div>
-                    <div>
-                      <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Client Certificate (DER path on IRIS server)</label>
-                      <input type="text" [(ngModel)]="editingServer()!.certPath" placeholder="/usr/irissys/uac/certs/secuac.crt.der"
-                             class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
-                    </div>
-                    <div>
-                      <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Private Key (DER path on IRIS server)</label>
-                      <input type="text" [(ngModel)]="editingServer()!.keyPath" placeholder="/usr/irissys/uac/certs/secuac.key.der"
-                             class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
-                    </div>
-                    <div>
-                      <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Trust List Directory</label>
-                      <input type="text" [(ngModel)]="editingServer()!.trustDir" placeholder="/usr/irissys/uac/certs/trustdir/"
-                             class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
-                    </div>
-                    <div>
-                      <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Revocation List Directory</label>
-                      <input type="text" [(ngModel)]="editingServer()!.crlDir" placeholder="/usr/irissys/uac/certs/crldir/"
-                             class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
-                    </div>
-                  </div>
-                </section>
+                <app-server-security [server]="editingServer()!" [testResult]="lastTest()"
+                                     (setupIdentity)="openSecurity(editingServer()!.id)" />
               }
 
               @if (activeTab() === 'servers' && !editingServer()) {
@@ -319,6 +296,11 @@ const NEW_CREDENTIALS = ' new';
                   <p class="text-sm">Select a server or add a new one</p>
                 </div>
               </div>
+            }
+
+            <!-- Security tab -->
+            @if (activeTab() === 'security') {
+              <app-security-tab [returnTo]="returnToName()" (returned)="returnToServer()" />
             }
 
             <!-- Gateway tab -->
@@ -421,16 +403,16 @@ const NEW_CREDENTIALS = ' new';
             @if (activeTab() === 'servers' && editingServer()) {
               <!-- The result belongs next to the control that produced it. It used to
                    appear only in the sidebar widget, in the opposite corner. -->
-              <div class="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:w-auto min-w-0">
+              <div class="flex flex-col gap-2 w-full sm:flex-1 min-w-0">
                 <button (click)="testServerConnection()"
                         [disabled]="testing()"
-                        class="flex items-center gap-2 px-5 py-2.5 text-primary text-sm font-semibold rounded-lg hover:bg-primary/5 transition-all border border-outline-variant/30 w-full sm:w-auto disabled:opacity-50 shrink-0">
+                        class="flex items-center gap-2 px-5 py-2.5 text-primary text-sm font-semibold rounded-lg hover:bg-primary/5 transition-all border border-outline-variant/30 w-full sm:w-auto sm:self-start disabled:opacity-50 shrink-0">
                   <span class="material-symbols-outlined text-xl"
                         [class.animate-spin]="testing()">{{ testing() ? 'progress_activity' : 'network_check' }}</span>
                   {{ testing() ? 'Testing…' : 'Test Connection' }}
                 </button>
                 @if (testStatus() && !testing()) {
-                  <p class="flex items-start gap-1.5 text-xs font-medium max-w-xs min-w-0"
+                  <p class="flex items-start gap-1.5 text-xs font-medium min-w-0"
                      [class]="testFailed() ? 'text-error' : 'text-tertiary'">
                     <span class="material-symbols-outlined text-sm shrink-0">
                       {{ testFailed() ? 'error' : 'check_circle' }}
@@ -442,7 +424,7 @@ const NEW_CREDENTIALS = ' new';
             } @else {
               <div></div>
             }
-            <div class="flex items-center gap-3 w-full sm:w-auto">
+            <div class="flex items-center gap-3 w-full sm:w-auto shrink-0">
               <!-- The error belongs at the control that was pressed. Putting it in
                    the sidebar widget instead is the mistake F5 is about. -->
               @if (saveError()) {
@@ -471,14 +453,32 @@ export class SettingsModalComponent implements OnInit {
   private api = inject(ApiService);
 
   closed = output<void>();
-  initialTab = input<'servers' | 'gateway'>('servers');
+  initialTab = input<'servers' | 'security' | 'gateway'>('servers');
   /** Why Settings opened by itself, e.g. "Sign-in failed" after a 401. */
   notice = input('');
 
   readonly hosted = this.configService.hosted;
 
-  activeTab = signal<'servers' | 'gateway'>('servers');
+  activeTab = signal<'servers' | 'security' | 'gateway'>('servers');
+  /** Server whose form sent the user to the Security tab, for the "Return to" link. */
+  returnTo = signal<string | null>(null);
+  returnToName = computed(() => this.servers().find((x) => x.id === this.returnTo())?.name ?? '');
+
+  /** Opens the Security tab on behalf of a server form. */
+  openSecurity(serverId: string): void {
+    this.returnTo.set(serverId);
+    this.activeTab.set('security');
+  }
+
+  returnToServer(): void {
+    const server = this.servers().find((x) => x.id === this.returnTo());
+    this.returnTo.set(null);
+    if (server) this.selectServer(server);
+    else this.activeTab.set('servers');
+  }
   testing = signal(false);
+  /** The last test result for the server being edited; cleared when another is selected. */
+  lastTest = signal<ConnectionTestResult | null>(null);
   testStatus = signal('');
   /** Rendered at the Save button — the control the user just pressed. */
   saveError = signal('');
@@ -587,6 +587,7 @@ export class SettingsModalComponent implements OnInit {
   chooseCredentials(value: string): void {
     const server = this.editingServer();
     if (!server) return;
+    this.lastTest.set(null);
     this.clearSaveError();
     if (value === NEW_CREDENTIALS) {
       this.setDraft(server.id, { mode: 'new', id: this.suggestId(server), username: '', password: '' });
@@ -637,6 +638,7 @@ export class SettingsModalComponent implements OnInit {
    * tab out from under someone editing the gateway would be the surprise.
    */
   selectServer(server: ServerProfile, switchTab = true): void {
+    if (this.selectedServerId() !== server.id) this.lastTest.set(null);
     this.selectedServerId.set(server.id);
     // Find mutable reference from our servers list
     const found = this.servers().find(s => s.id === server.id);
@@ -697,13 +699,14 @@ export class SettingsModalComponent implements OnInit {
     this.api.test(target, login).subscribe({
       next: (result) => {
         this.testing.set(false);
+        this.lastTest.set(isManaged(target) ? result : null);
         if (result.connected) {
           this.testFailed.set(false);
-          this.testStatus.set(`Connected (${result.responseTimeMs}ms)`);
+          this.testStatus.set(isManaged(target) ? 'Connected · Sign & Encrypt' : `Connected (${result.responseTimeMs}ms)`);
           this.serverStatuses.update(s => ({ ...s, [server.id]: 'online' }));
         } else {
           this.testFailed.set(true);
-          this.testStatus.set(result.error || 'Connection failed');
+          this.testStatus.set(result.security?.diagnosis?.message || result.error || 'Connection failed');
           this.serverStatuses.update(s => ({ ...s, [server.id]: 'offline' }));
         }
       },
@@ -759,6 +762,8 @@ export class SettingsModalComponent implements OnInit {
   }
 
   clearSaveError(): void {
+    // Every caller is a field edit; a test result no longer describes the edited profile.
+    this.lastTest.set(null);
     if (this.saveError()) this.saveError.set('');
   }
 
@@ -832,14 +837,13 @@ export class SettingsModalComponent implements OnInit {
     setTimeout(() => this.closed.emit(), 500);
   }
 
-  onSecurityModeChange(mode: number): void {
-    const server = this.editingServer();
-    if (!server || mode !== 3) return;
-    if (!server.clientURI) server.clientURI = 'urn:secuac';
-    if (!server.certPath) server.certPath = '/usr/irissys/uac/certs/secuac.crt.der';
-    if (!server.keyPath) server.keyPath = '/usr/irissys/uac/certs/secuac.key.der';
-    if (!server.trustDir) server.trustDir = '/usr/irissys/uac/certs/trustdir/';
-    if (!server.crlDir) server.crlDir = '/usr/irissys/uac/certs/crldir/';
+  /**
+   * A new Sign & Encrypt profile is managed: no certificate paths are filled in, so
+   * IRIS uses its own client identity. The old per-profile defaults are gone on purpose.
+   */
+  onSecurityModeChange(_mode: number): void {
+    this.lastTest.set(null);
+    this.testStatus.set('');
   }
 
   onOverlayClick(event: MouseEvent): void {
