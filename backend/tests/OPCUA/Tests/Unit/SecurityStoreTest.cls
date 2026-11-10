@@ -57,6 +57,9 @@ Method TestValidClientURI()
     Do $$$AssertNotTrue($classmethod(s, "ValidClientURI", "urn:a b"), "space")
     Do $$$AssertNotTrue($classmethod(s, "ValidClientURI", "urn:a;b"), "semicolon")
     Do $$$AssertNotTrue($classmethod(s, "ValidClientURI", ""), "empty")
+    Do $$$AssertNotTrue($classmethod(s, "ValidClientURI", "urn:a"_$Char(10)), "trailing LF")
+    Do $$$AssertNotTrue($classmethod(s, "ValidClientURI", "urn:a"_$Char(13)), "trailing CR")
+    Do $$$AssertNotTrue($classmethod(s, "ValidClientURI", "urn:A"), "uppercase")
 }
 
 Method TestOverrideRoot()
@@ -73,11 +76,38 @@ Method TestOverrideRoot()
 Method TestEnsureDirs()
 {
     Set ^%OPCUA.Security.Override("root") = "/tmp/opcua-pki-test-dirs"
-    Set tSC = ##class(OPCUA.Security.Store).EnsureDirs(##class(OPCUA.Security.Store).ServerDir("abc", "trusted"))
-    Do $$$AssertStatusOK(tSC, "EnsureDirs")
-    Do $$$AssertTrue(##class(%File).DirectoryExists(##class(OPCUA.Security.Store).ServerDir("abc", "trusted")), "trusted dir exists")
+    Set key = "0123456789abcdef"
+    Try {
+        Set dir = ##class(OPCUA.Security.Store).ServerDir(key, "trusted")
+        Set tSC = ##class(OPCUA.Security.Store).EnsureDirs(dir)
+        Do $$$AssertStatusOK(tSC, "EnsureDirs")
+        Do $$$AssertTrue(##class(%File).DirectoryExists(dir), "trusted dir exists")
+        If '$$$isWINDOWS {
+            For d = dir, ##class(%File).ParentDirectoryName(dir), ##class(OPCUA.Security.Store).Dir("servers"), ##class(OPCUA.Security.Store).Root() {
+                Set mode = ##class(%File).Attributes($Extract(d, 1, $Length(d) - 1)) # 512
+                Do $$$AssertEquals(mode, 448, "mode 0700 on "_d)
+            }
+        }
+    } Catch ex {
+        Do $$$AssertFailure("exception: "_ex.DisplayString())
+    }
     Do ##class(%File).RemoveDirectoryTree("/tmp/opcua-pki-test-dirs")
     Kill ^%OPCUA.Security.Override("root")
+}
+
+Method TestKeyAndWhichValidation()
+{
+    Set s = "OPCUA.Security.Store"
+    Do $$$AssertEquals($classmethod(s, "Dir", "../x"), "", "Dir rejects unknown which")
+    Do $$$AssertEquals($classmethod(s, "ServerDir", "0123456789abcdef", "../x"), "", "ServerDir rejects unknown which")
+    For bad = "../x", "0123456789ABCDEF", "0123456789abcde", "0123456789abcdef0", "0123456789abcde"_$Char(10), "" {
+        Do $$$AssertEquals($classmethod(s, "ServerDir", bad, "trusted"), "", "ServerDir rejects key")
+        Do $$$AssertTrue($$$ISERR($classmethod(s, "SaveServer", bad, {"url":"x"})), "SaveServer rejects key")
+        Do $$$AssertTrue($$$ISERR($classmethod(s, "RemoveServer", bad)), "RemoveServer rejects key")
+        Set found = ##class(OPCUA.Security.Store).GetServer(bad, .e)
+        Do $$$AssertNotTrue(found, "GetServer rejects key")
+    }
+    Do $$$AssertNotTrue($Data(^%OPCUA.SecurityTest("servers")), "nothing written")
 }
 
 Method TestConfigRoundTrip()
@@ -93,19 +123,19 @@ Method TestConfigRoundTrip()
     Set found = ##class(OPCUA.Security.Store).GetIdentity(.c)
     Do $$$AssertNotTrue(found, "cleared")
 
-    Do ##class(OPCUA.Security.Store).SaveServer("k1", {"url":"opc.tcp://a:4840","key":"k1","label":"A"})
-    Do ##class(OPCUA.Security.Store).SaveServer("k2", {"url":"opc.tcp://b:4840","key":"k2","label":"B"})
-    Set found = ##class(OPCUA.Security.Store).GetServer("k1", .e)
+    Do ##class(OPCUA.Security.Store).SaveServer("0123456789abcdef", {"url":"opc.tcp://a:4840","key":"0123456789abcdef","label":"A"})
+    Do ##class(OPCUA.Security.Store).SaveServer("fedcba9876543210", {"url":"opc.tcp://b:4840","key":"fedcba9876543210","label":"B"})
+    Set found = ##class(OPCUA.Security.Store).GetServer("0123456789abcdef", .e)
     Do $$$AssertTrue(found, "server found")
     Do $$$AssertEquals(e.label, "A", "label")
     Set l = ##class(OPCUA.Security.Store).ListServers()
     Do $$$AssertEquals(l.%Size(), 2, "two servers")
-    Do ##class(OPCUA.Security.Store).RemoveServer("k1")
-    Set found = ##class(OPCUA.Security.Store).GetServer("k1", .e)
+    Do ##class(OPCUA.Security.Store).RemoveServer("0123456789abcdef")
+    Set found = ##class(OPCUA.Security.Store).GetServer("0123456789abcdef", .e)
     Do $$$AssertNotTrue(found, "removed")
     Set l = ##class(OPCUA.Security.Store).ListServers()
     Do $$$AssertEquals(l.%Size(), 1, "one left")
-    Do ##class(OPCUA.Security.Store).RemoveServer("k2")
+    Do ##class(OPCUA.Security.Store).RemoveServer("fedcba9876543210")
 }
 
 }

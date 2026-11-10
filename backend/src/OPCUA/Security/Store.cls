@@ -31,21 +31,31 @@ ClassMethod Root() As %String
     Quit ##class(%File).NormalizeDirectory($Select(o '= "": o, 1: $System.Util.ManagerDirectory()_"opcua-pki"))
 }
 
-/// pWhich: own | previous | servers
+/// pWhich: own | previous | servers. Anything else is refused (returns "").
 ClassMethod Dir(pWhich As %String) As %String
 {
+    If (pWhich '= "own") && (pWhich '= "previous") && (pWhich '= "servers") Quit ""
     Quit ##class(%File).NormalizeDirectory(..Root()_pWhich)
 }
 
-/// pWhich: trusted | crl
+/// A server key is exactly what ServerKey() produces.
+ClassMethod ValidServerKey(pKey As %String) As %Boolean
+{
+    Quit $Match(pKey, "^[0-9a-f]{16}\z")
+}
+
+/// pWhich: trusted | crl. An invalid key or pWhich returns "" (never a path).
 ClassMethod ServerDir(pKey As %String, pWhich As %String) As %String
 {
+    If '..ValidServerKey(pKey) Quit ""
+    If (pWhich '= "trusted") && (pWhich '= "crl") Quit ""
     Quit ##class(%File).NormalizeDirectory(..Dir("servers")_pKey_"/"_pWhich)
 }
 
-/// Create pPath (and parents); 0700 on non-Windows.
+/// Create pPath (and parents); 0700 on non-Windows. Fails if any chmod fails.
 ClassMethod EnsureDirs(pPath As %String) As %Status
 {
+    If $Get(pPath) = "" Quit $$$ERROR($$$GeneralError, "No directory given")
     Set root = ..Root()
     Set path = ##class(%File).NormalizeDirectory(pPath)
     If '##class(%File).DirectoryExists(path) {
@@ -54,14 +64,17 @@ ClassMethod EnsureDirs(pPath As %String) As %Status
         }
     }
     If $$$isWINDOWS Quit $$$OK
-    // Tighten the root and every created level below it.
+    // Tighten every level from path up to and including the root.
     Set cur = path
-    While (cur '= "") && (cur '= root) && ($Extract(cur, 1, $Length(root)) = root) {
-        Set sc = ##class(%File).SetAttributes($Extract(cur, 1, $Length(cur) - 1), 448)  // 0700
-        If $$$ISERR(sc) Quit
+    While (cur '= "") && ($Extract(cur, 1, $Length(root)) = root) {
+        If '##class(%File).SetAttributes($Extract(cur, 1, $Length(cur) - 1), 448, .rc) {
+            Quit
+        }
+        Set rc = ""
+        If cur = root Quit
         Set cur = ##class(%File).ParentDirectoryName(cur)
     }
-    If root '= "", ##class(%File).DirectoryExists(root) Do ##class(%File).SetAttributes($Extract(root, 1, $Length(root) - 1), 448)
+    If $Get(rc) '= "" Quit $$$ERROR($$$GeneralError, "Cannot set mode 0700 on "_cur_" (code "_rc_")")
     Quit $$$OK
 }
 
@@ -130,7 +143,7 @@ ClassMethod Clean(pText As %String) As %String [ Private ]
 
 ClassMethod ValidClientURI(pURI As %String) As %Boolean
 {
-    Quit $Match(pURI, "^[A-Za-z0-9:._-]+$") && (pURI [ ":") && ($Length(pURI) <= 255)
+    Quit $Match(pURI, "^[a-z0-9:._-]+\z") && (pURI [ ":") && ($Length(pURI) <= 255)
 }
 
 ClassMethod GetIdentity(Output pCfg As %DynamicObject) As %Boolean
@@ -158,6 +171,7 @@ ClassMethod ClearIdentity()
 ClassMethod GetServer(pKey As %String, Output pEntry As %DynamicObject) As %Boolean
 {
     Set pEntry = ""
+    If '..ValidServerKey(pKey) Quit 0
     Set g = ..Global()
     Set raw = $Get(@g@("servers", pKey))
     If raw = "" Quit 0
@@ -165,16 +179,20 @@ ClassMethod GetServer(pKey As %String, Output pEntry As %DynamicObject) As %Bool
     Quit 1
 }
 
-ClassMethod SaveServer(pKey As %String, pEntry As %DynamicObject)
+ClassMethod SaveServer(pKey As %String, pEntry As %DynamicObject) As %Status
 {
+    If '..ValidServerKey(pKey) Quit $$$ERROR($$$GeneralError, "Invalid server key")
     Set g = ..Global()
     Set @g@("servers", pKey) = pEntry.%ToJSON()
+    Quit $$$OK
 }
 
-ClassMethod RemoveServer(pKey As %String)
+ClassMethod RemoveServer(pKey As %String) As %Status
 {
+    If '..ValidServerKey(pKey) Quit $$$ERROR($$$GeneralError, "Invalid server key")
     Set g = ..Global()
     Kill @g@("servers", pKey)
+    Quit $$$OK
 }
 
 ClassMethod ListServers() As %DynamicArray
