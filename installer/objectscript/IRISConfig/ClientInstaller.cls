@@ -304,7 +304,7 @@ ClassMethod CreateApp(pPath As %String, pNS As %String) As %String(MAXLEN="") [ 
 		Set p("AutheEnabled") = 32
 		Set p("Resource") = res
 		$$$ThrowOnError(##class(Security.Applications).Create(pPath, .p))
-		Set ^IRISConfig.ClientInstaller("app", $ZConvert(pPath, "U")) = pNS
+		Do ..Claim("app", pPath, pNS)
 		Set r.action = "created", r.resource = res
 		Do r.%Set("ok", 1, "boolean")
 	} Catch e { Do ..Fail(r, e) }
@@ -340,7 +340,7 @@ ClassMethod PrepareUi(pPath As %String, pNS As %String) As %String(MAXLEN="") [ 
 			Set r.message = "Directory "_dir_" already holds files this installer did not put there. It was not touched; choose another console path."
 			Quit
 		}
-		Set ^IRISConfig.ClientInstaller("ui", $ZConvert(pPath, "U")) = dir
+		Do ..Claim("ui", pPath, dir)
 		If '##class(%File).DirectoryExists(dir) && '##class(%File).CreateDirectoryChain(dir) { Set r.message = "Could not create "_dir_". IRIS needs write access to its csp directory." Quit }
 		Do r.%Set("ok", 1, "boolean")
 	} Catch e { Do ..Fail(r, e) }
@@ -446,7 +446,7 @@ ClassMethod CreateUiApp(pPath As %String, pNS As %String) As %String(MAXLEN="") 
 		Set p("ServeFilesTimeout") = 0
 		Set p("IsNameSpaceDefault") = 0
 		$$$ThrowOnError(##class(Security.Applications).Create(pPath, .p))
-		Set ^IRISConfig.ClientInstaller("app", $ZConvert(pPath, "U")) = pNS
+		Do ..Claim("app", pPath, pNS)
 		Set r.action = "created"
 		Do r.%Set("ok", 1, "boolean")
 	} Catch e { Do ..Fail(r, e) }
@@ -683,7 +683,7 @@ ClassMethod DescribeApp(pPath As %String, pNS As %String) As %DynamicObject [ In
 	Do d.%Set("enabled", +$Get(p("Enabled")), "boolean")
 	Do d.%Set("passwordAuth", $ZBoolean(+$Get(p("AutheEnabled")), 32, 1) = 32, "boolean")
 	Do d.%Set("unauthenticated", $ZBoolean(+$Get(p("AutheEnabled")), 64, 1) = 64, "boolean")
-	Do d.%Set("owned", $Data(^IRISConfig.ClientInstaller("app", $ZConvert(pPath, "U"))) > 0, "boolean")
+	Do d.%Set("owned", ..Claimed("app", pPath) '= "", "boolean")
 	If ($ZConvert(d.namespace, "U") '= pNS) || (d.dispatchClass '= ..#DispatchClass) {
 		Set d.state = "conflict"
 		Set d.reason = "Web application "_pPath_" already exists for "_d.namespace_$Select(d.dispatchClass'="":" ("_d.dispatchClass_")", 1:"")_". It was not changed; choose another path."
@@ -699,7 +699,7 @@ ClassMethod DescribeUi(pPath As %String, pNS As %String) As %DynamicObject [ Int
 {
 	Set dir = ..UiDir(pPath)
 	Set d = {"path":(pPath), "directory":(dir), "state":"missing", "reason":""}
-	Do d.%Set("owned", $Get(^IRISConfig.ClientInstaller("ui", $ZConvert(pPath, "U"))) = dir, "boolean")
+	Do d.%Set("owned", ..Claimed("ui", pPath) = dir, "boolean")
 	If '##class(Security.Applications).Exists(pPath) {
 		If 'd.owned && ##class(%File).DirectoryExists(dir) && '..DirEmpty(dir) {
 			Set d.state = "conflict", d.reason = "Directory "_dir_" already holds other files. It was not touched; choose another console path."
@@ -718,11 +718,41 @@ ClassMethod DescribeUi(pPath As %String, pNS As %String) As %DynamicObject [ Int
 	Quit d
 }
 
+/// What this installer recorded for web application <var>pPath</var> under <var>pKind</var>
+/// ("app": its namespace, "ui": its console directory), or "". Web application names are
+/// case-insensitive, so records are keyed by the upper-cased path; installers up to 0.2.0 keyed
+/// them by the path as typed, so such a record is found in any case. Changes nothing.
+ClassMethod Claimed(pKind As %String, pPath As %String) As %String [ Internal, Private ]
+{
+	Set key = $ZConvert(pPath, "U")
+	If $Data(^IRISConfig.ClientInstaller(pKind, key))#2 Quit ^IRISConfig.ClientInstaller(pKind, key)
+	Set k = ""
+	For {
+		Set k = $Order(^IRISConfig.ClientInstaller(pKind, k))
+		Quit:k=""
+		If $ZConvert(k, "U") = key Return ^IRISConfig.ClientInstaller(pKind, k)
+	}
+	Quit ""
+}
+
+/// Record <var>pValue</var> for <var>pPath</var> under the upper-cased key, dropping any record of
+/// the same path in another case (see <method>Claimed</method>).
+ClassMethod Claim(pKind As %String, pPath As %String, pValue As %String) [ Internal, Private ]
+{
+	Set key = $ZConvert(pPath, "U"), k = ""
+	For {
+		Set k = $Order(^IRISConfig.ClientInstaller(pKind, k))
+		Quit:k=""
+		Kill:(k '= key)&&($ZConvert(k, "U") = key) ^IRISConfig.ClientInstaller(pKind, k)
+	}
+	Set ^IRISConfig.ClientInstaller(pKind, key) = pValue
+}
+
 /// Staging and committing console files needs a directory <method>PrepareUi</method> claimed.
 ClassMethod UiReady(pPath As %String, r As %DynamicObject) As %Boolean [ Internal, Private ]
 {
 	If '..ValidAppPath(pPath) { Set r.message = "Invalid web application path '"_pPath_"'." Quit 0 }
-	If $Get(^IRISConfig.ClientInstaller("ui", $ZConvert(pPath, "U"))) '= ..UiDir(pPath) { Set r.message = "The console directory for "_pPath_" was not prepared by this installer." Quit 0 }
+	If ..Claimed("ui", pPath) '= ..UiDir(pPath) { Set r.message = "The console directory for "_pPath_" was not prepared by this installer." Quit 0 }
 	Quit 1
 }
 
