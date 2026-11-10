@@ -57,7 +57,7 @@ printf 'zn "OPCUA"\nset rs=##class(%%SQL.Statement).%%ExecDirect(,"SELECT TOP 10
 
 | Path | Contents |
 |------|----------|
-| `backend/src/OPCUA/` | All production ObjectScript: Client, Adapters, Services, REST, DataSource, Types. This is exactly what a client install ships |
+| `backend/src/OPCUA/` | All production ObjectScript: Client, Adapters, Services, REST, DataSource, Types, Security (managed Sign & Encrypt). This is exactly what a client install ships |
 | `backend/tests/OPCUA/Tests/` | `%UnitTest` classes: `Unit/` (offline, `OPCUA.Tests.Unit`) and `Live/` (docker servers, `OPCUA.Tests.Live`), run by `OPCUA.Tests.Runner`; shared fixtures, `*DS` data sources and `Production.cls` at the top level |
 | `backend/examples/Examples/` | Demo Business Services (PollingExample, SubscriptionExample, SecureExample, ArrayExample, etc.) |
 | `backend/native/linux-{amd64,arm64}/` | Prebuilt Unix shared objects (`.so`), picked by `TARGETARCH` |
@@ -66,6 +66,7 @@ printf 'zn "OPCUA"\nset rs=##class(%%SQL.Statement).%%ExecDirect(,"SELECT TOP 10
 | `webapp/src/app/` | Angular 19 console (standalone components, signals, Tailwind) |
 | `webapp/src/app/core/models/opcua.models.ts` | All TypeScript interfaces (`TreeNode`, `Schema`, `DeviceValidation`, `PipelineHealth`, etc.) |
 | `webapp/src/app/pages/schema-library/`, `schema-builder/` | Schema list + creation |
+| `webapp/src/app/shared/settings-modal/` | Settings tabs; `security-tab/` (OPC UA Security: instance identity) and `server-security/` (per-profile readiness rows, certificate review/trust) |
 | `webapp/src/app/pages/device-binding/` | Bind devices to a schema; also serves pipeline edit |
 | `webapp/src/app/shared/opcua-tree/` | Embeddable single-server address-space browser |
 | `webapp/src/app/core/services/api.service.ts` | REST client (browse, deploy, editPipeline, listPipelines) |
@@ -96,7 +97,7 @@ SQL Explorer: http://localhost:52783/csp/sys/exp/%25CSP.UI.Portal.SQL.Home.zen?$
 - **A schema is reusable and outlives its pipelines.** Several pipelines may share one. Deleting a pipeline must never delete its schema; `SchemaService.Delete` is the only deletion path and it refuses while any pipeline references the schema.
 - **Devices are resolved by name at connect time**, never frozen at deploy time. `DeviceNodePaths` is an ordinary production setting, so adding a device is a one-line edit with no regeneration and no recompile. Nothing about devices is stored — masks and node IDs are derived by browsing on every (re)connect.
 - **Editing a pipeline changes only devices + strictness** (`POST /pipelines/rebind`). Changing a schema's *columns* is not possible anywhere; recreate the schema, which drops the table.
-- **All REST endpoints accept both GET (query params) and POST (JSON body)**, except `/schemas` and `/credentials`, which use real verbs. Connection param is `url`, not `serverUrl`.
+- **All REST endpoints accept both GET (query params) and POST (JSON body)**, except `/schemas`, `/credentials` and `/security`, which use real verbs. Connection param is `url`, not `serverUrl`.
 - **The console stores no password.** It signs in to IRIS once through the REST app's JWT `POST /login` (installer and demo switch JWT on) and keeps only the tokens, in sessionStorage; `AuthService` refreshes them single-flight, since IRIS revokes a refresh-token chain on replay. Without JWT on the app it falls back to Basic held in memory. Do not put the IRIS password back into localStorage.
 - **OPC UA passwords live only in IRIS credentials entries.** A console server profile stores a `credentials` ID, never a username or password; `ClientManager.ExtractConnectionParams` reads the entry on the server, and deploy puts the same ID in the pipeline, so the console and its pipelines share one entry. Inline `username`/`password` remain only for testing an unsaved login. Older consoles' stored OPC UA passwords are dropped on load, not migrated. `/credentials` never returns a password.
 - **Every pipeline uses the row-source services** (`TCP*RowSourceService`): columns × devices → one table, one row per device per cycle. The hand-authored Examples + `OPCUA.Tests` classes are a separate declarative path (typed `OPCUA.Types.*` properties → `TCPPollingService`/`TCPSubscriptionService`) kept for the test harness — **do not regress it**.
@@ -108,4 +109,10 @@ SQL Explorer: http://localhost:52783/csp/sys/exp/%25CSP.UI.Portal.SQL.Home.zen?$
 - **Row assembly has exactly one implementation**, `OPCUA.DataSource.RowWriter`. Polling and subscription services both delegate to it. Do not fork it back into the services.
 - **`%SerialObject` subclasses** are generated for nested folder hierarchies and appear as `Property_SubProperty` columns in SQL. A folder serial object holds DataValue serial objects, so a nested measurement reads as `row.Motor.Temperature.Value`.
 - **The Projection** (`OPCUA.DataSource.Projection`) fires on every DataSource class compile, writes `^OPCUA.DataSource(className)`, and generates `SaveSourcedData()`. The runtime services depend entirely on this global.
+- **Sign & Encrypt is managed by default, manual if paths are given.** SecurityMode 3 with no `certPath`/`keyPath` (adapter `PublicCertificate`/`PrivateKey`) uses `OPCUA.Security.*`: one client identity per IRIS instance (`<mgr>/opcua-pki/own/`, config in `^%OPCUA.Security`, shared by every namespace) and per-server trust keyed by the normalised URL. Explicit paths keep the old behaviour exactly (demo `SecureExample`, `/usr/irissys/uac/certs/*`). Never mix the two.
+- **Empty trust list = trust everything** (open62541 1.2.1). Managed connects must refuse *before* the native setup call when a server has no trusted certificate, no pin, or a CA-issued certificate without issuer + CRL (`Trust.Pin`), and must never fall back to SecurityMode 1.
+- **Managed connections are pinned** (SHA-256 of the reviewed certificate, ordinal 52 `SetServerPin`, plus SAN host check) on top of normal chain/CRL/expiry checks. Trust stores only a certificate IRIS fetched itself whose fingerprint equals the one the user confirmed. A changed certificate is shown for approval, never accepted silently.
+- **Approval is external.** The server administrator trusts IRIS's certificate; IRIS only offers the DER/PEM download and fingerprint, and `Diagnose` explains `clientNotApproved`. `/security/*` needs `%Admin_Secure:USE` (403 otherwise). No private key in a REST response, log, error or exported global.
+- **Native ordinals are appended**: 1–52; 48–52 (PKI + `zfSetServerPin`) arrive with connector 0.5.0; `OPCUA.Utils.SupportsPki()` gates them. Installer 0.5.0 embeds `backend/src/OPCUA/**` (including `Security/`) and the 0.5.0 natives automatically.
+- **Security tests never touch the real store**: set `^%OPCUA.Security.Override` (root + global) and kill it in `OnAfterAllTests`. `./demo/iris/secure-e2e.sh` runs the end-to-end approval flow against `certified-server` (phases via `OPCUA.Tests.Runner.Run("Class:Method")`). Docker volume `iris-opcua-pki` → `/usr/irissys/mgr/opcua-pki` keeps the identity across rebuilds.
 - **Do not call `$Get(obj.prop)`** — use `obj.prop` directly or `obj.%Get("prop")` (see ObjectScript Gotchas in parent CLAUDE.md).
