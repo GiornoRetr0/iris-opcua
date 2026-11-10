@@ -1,7 +1,8 @@
 Include %occInclude
 
 /// Offline tests for OPCUA.Security.Connection (managed vs manual resolution) and the
-/// pure Diagnose.Classify. Resolve is checked instead of Setup: SetupClient is Final, so
+/// pure Diagnose.Classify. Tests that need a real identity (the native connector) are in
+/// OPCUA.Tests.Live.SecurityConnectionLiveTest. Resolve is checked instead of Setup: SetupClient is Final, so
 /// every refusal must happen in Resolve, before any native call.
 Class OPCUA.Tests.Unit.SecurityConnectionTest Extends %UnitTest.TestCase
 {
@@ -67,74 +68,6 @@ Method TestManagedRefusesEmptyHost()
     Do $$$AssertStatusNotOK(tSC, "an empty host in brackets is refused")
     Do $$$AssertEquals($System.Status.GetErrorText(tSC), "ERROR #5001: The server address has no host name. Enter it as opc.tcp://host:port.", "message")
     Do $$$AssertEquals(a, "", "no setup arguments")
-}
-
-/// A usable identity in the test store.
-Method MakeIdentity() As %Boolean
-{
-    Set tSC = ##class(OPCUA.Security.Identity).Create("", 0, "", .st)
-    Do $$$AssertStatusOK(tSC, "identity created")
-    Quit $$$ISOK(tSC)
-}
-
-/// A pin entry; pFiles are written into the trusted directory.
-Method Seed(pURL As %String, pNeedsIssuer As %Boolean, pFiles As %String)
-{
-    Set key = ##class(OPCUA.Security.Store).ServerKey(pURL)
-    Do ##class(OPCUA.Security.Store).EnsureDirs(##class(OPCUA.Security.Store).ServerDir(key, "trusted"))
-    Do ##class(OPCUA.Security.Store).EnsureDirs(##class(OPCUA.Security.Store).ServerDir(key, "crl"))
-    For i = 1:1:$Length(pFiles, ",") {
-        Set f = $Piece(pFiles, ",", i)
-        If f '= "" {
-            Set s = ##class(%Stream.FileBinary).%New()
-            Do s.LinkToFile(##class(OPCUA.Security.Store).ServerDir(key, "trusted")_f)
-            Do s.Write("x")
-            Do s.%Save()
-        }
-    }
-    Do ##class(OPCUA.Security.Store).SaveServer(key, {"url": (##class(OPCUA.Security.Store).NormaliseURL(pURL)), "fingerprint": "AA:BB", "subject": "CN=s", "issuer": "CN=myCA", "notAfter": "2099-01-01 00:00:00", "selfSigned": (+'pNeedsIssuer), "needsIssuer": (+pNeedsIssuer), "hasIssuer": 0})
-}
-
-Method TestManagedRefusesUntrusted()
-{
-    Quit:'..MakeIdentity()
-    Set tSC = ##class(OPCUA.Security.Connection).Resolve("opc.tcp://never-trusted:4840", 3, "", "", "", "", "", .a, .pins, .host, .managed)
-    Do $$$AssertStatusNotOK(tSC, "no pin: refused")
-    Do $$$AssertEquals($System.Status.GetErrorText(tSC), "ERROR #5001: IRIS does not trust this OPC UA server yet. Review and trust its certificate in the server settings.", "message")
-    Do $$$AssertEquals(a, "", "no setup arguments (no native call)")
-    Do $$$AssertEquals(pins, "", "no pins")
-}
-
-Method TestManagedRefusesEmptyTrustDir()
-{
-    Quit:'..MakeIdentity()
-    Do ..Seed("opc.tcp://emptytrust:4840", 0, "")
-    Set tSC = ##class(OPCUA.Security.Connection).Resolve("opc.tcp://emptytrust:4840", 3, "", "", "", "", "", .a, .pins, .host, .managed)
-    Do $$$AssertStatusNotOK(tSC, "entry but nothing in the trust directory: refused")
-    Do $$$AssertEquals($System.Status.GetErrorText(tSC), "ERROR #5001: IRIS does not trust this OPC UA server yet. Review and trust its certificate in the server settings.", "message")
-    Do $$$AssertEquals(a, "", "no setup arguments")
-}
-
-Method TestManagedRefusesMissingIssuer()
-{
-    Quit:'..MakeIdentity()
-    Do ..Seed("opc.tcp://needsca:4840", 1, "server.der")
-    Set tSC = ##class(OPCUA.Security.Connection).Resolve("opc.tcp://needsca:4840", 3, "", "", "", "", "", .a, .pins, .host, .managed)
-    Do $$$AssertStatusNotOK(tSC, "CA-signed without issuer and CRL: refused")
-    Do $$$AssertEquals($System.Status.GetErrorText(tSC), "ERROR #5001: This server's certificate was issued by CN=myCA. Add that CA certificate and its revocation list before connecting.", "message")
-    Do $$$AssertEquals(a, "", "no setup arguments")
-}
-
-Method TestManagedResolvesWhenTrusted()
-{
-    Quit:'..MakeIdentity()
-    Do ..Seed("opc.tcp://selfsigned:4840", 0, "server.der")
-    Set tSC = ##class(OPCUA.Security.Connection).Resolve("opc.tcp://selfsigned:4840", 3, "ignored", "", "", "x", "y", .a, .pins, .host, .managed)
-    Do $$$AssertStatusOK(tSC, "resolves")
-    Do $$$AssertEquals($ListGet(a, 1), 3, "mode 3")
-    Do $$$AssertTrue($ListGet(a, 2) '= "ignored", "the identity's URI, not the caller's")
-    Do $$$AssertEquals(pins, $ListBuild("AA:BB"), "pin")
-    Do $$$AssertEquals(host, "selfsigned", "host")
 }
 
 Method TestClassifyUnknownFingerprintNotChanged()
@@ -243,18 +176,6 @@ Method TestClassifyRefusal()
     Do $$$AssertEquals(tIss.category, "issuerMissing", "issuer missing")
     Set tOth = ##class(OPCUA.Security.Diagnose).ClassifyRefusal($$$ERROR($$$GeneralError, "The server address has no host name."))
     Do $$$AssertEquals(tOth.category, "other", "anything else")
-}
-
-Method TestResolveRefusalsClassify()
-{
-    Set tSC = ##class(OPCUA.Security.Connection).Resolve("opc.tcp://noid:4840", 3, "", "", "", "", "", .a, .p, .h, .m)
-    Do $$$AssertEquals(##class(OPCUA.Security.Diagnose).ClassifyRefusal(tSC).category, "noIdentity", "no identity yet")
-    Quit:'..MakeIdentity()
-    Set tSC = ##class(OPCUA.Security.Connection).Resolve("opc.tcp://never:4840", 3, "", "", "", "", "", .a, .p, .h, .m)
-    Do $$$AssertEquals(##class(OPCUA.Security.Diagnose).ClassifyRefusal(tSC).category, "notTrusted", "untrusted")
-    Do ..Seed("opc.tcp://needsca2:4840", 1, "server.der")
-    Set tSC = ##class(OPCUA.Security.Connection).Resolve("opc.tcp://needsca2:4840", 3, "", "", "", "", "", .a, .p, .h, .m)
-    Do $$$AssertEquals(##class(OPCUA.Security.Diagnose).ClassifyRefusal(tSC).category, "issuerMissing", "no issuer")
 }
 
 }
