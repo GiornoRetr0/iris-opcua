@@ -3,7 +3,8 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ConfigService } from '../../core/services/config.service';
 import { firstValueFrom } from 'rxjs';
-import { ApiService, apiErrorMessage, InlineLogin } from '../../core/services/api.service';
+import { ApiService, apiErrorMessage, InlineLogin, NOT_SIGNED_IN } from '../../core/services/api.service';
+import { AuthService } from '../../core/services/auth.service';
 import { CredentialsEntry, ServerProfile } from '../../core/models/opcua.models';
 
 /**
@@ -323,10 +324,10 @@ const NEW_CREDENTIALS = ' new';
             <!-- Gateway tab -->
             @if (activeTab() === 'gateway') {
               <section>
-                @if (notice()) {
+                @if (notice() && !auth.user()) {
                   <p class="mb-4 flex items-start gap-1.5 text-sm text-error font-medium" role="alert">
                     <span class="material-symbols-outlined text-base shrink-0">error</span>
-                    <span>{{ notice() }}: IRIS did not accept this username and password. Check them and save.</span>
+                    <span>{{ noticeText() }}</span>
                   </p>
                 }
                 <header class="mb-4 flex items-center gap-2">
@@ -346,26 +347,44 @@ const NEW_CREDENTIALS = ' new';
                       </p>
                     }
                   </div>
-                  <div>
-                    <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">IRIS API Username</label>
-                    <input type="text" [(ngModel)]="gatewayForm.apiUsername" autocomplete="off"
-                           class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
-                  </div>
-                  <div>
-                    <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">IRIS API Password</label>
-                    @if (gatewayPasswordSet()) {
-                      <div class="flex items-center gap-2 w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5">
-                        <span class="material-symbols-outlined text-base text-tertiary">key</span>
-                        <span class="text-sm text-on-surface flex-1">Password set</span>
-                        <button type="button" (click)="clearGatewayPassword()"
-                                class="text-xs font-semibold text-primary hover:underline">Change</button>
-                      </div>
-                    } @else {
-                      <input type="password" [(ngModel)]="gatewayForm.apiPassword" autocomplete="off"
-                             placeholder="No password set"
+                  <!-- The password is used once, to sign in, and never stored. The
+                       session is a token for this tab (AuthService). -->
+                  @if (auth.user(); as user) {
+                    <div class="md:col-span-2 flex items-center gap-3 bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-3">
+                      <span class="material-symbols-outlined text-xl text-tertiary">verified_user</span>
+                      <p class="text-sm text-on-surface flex-1">Signed in to IRIS as <strong class="font-semibold">{{ user }}</strong></p>
+                      <button type="button" (click)="signOut()"
+                              class="text-xs font-semibold text-primary hover:underline">Sign out</button>
+                    </div>
+                  } @else {
+                    <div>
+                      <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">IRIS Username</label>
+                      <input type="text" [(ngModel)]="signInForm.username" (ngModelChange)="signInError.set('')" autocomplete="username"
                              class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
-                    }
-                  </div>
+                    </div>
+                    <div>
+                      <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">IRIS Password</label>
+                      <input type="password" [(ngModel)]="signInForm.password" (ngModelChange)="signInError.set('')" (keydown.enter)="signIn()" autocomplete="current-password"
+                             class="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
+                    </div>
+                    <div class="md:col-span-2 flex flex-col sm:flex-row sm:items-center gap-3 -mt-2">
+                      <button type="button" (click)="signIn()" [disabled]="signingIn() || !signInForm.username"
+                              class="flex items-center justify-center gap-2 px-5 py-2.5 text-primary text-sm font-semibold rounded-lg hover:bg-primary/5 transition-all border border-outline-variant/30 disabled:opacity-50 shrink-0">
+                        <span class="material-symbols-outlined text-xl" [class.animate-spin]="signingIn()">{{ signingIn() ? 'progress_activity' : 'login' }}</span>
+                        {{ signingIn() ? 'Signing in…' : 'Sign in' }}
+                      </button>
+                      @if (signInError()) {
+                        <p class="flex items-start gap-1.5 text-xs text-error font-medium" role="alert">
+                          <span class="material-symbols-outlined text-sm shrink-0">error</span>
+                          <span>{{ signInError() }}</span>
+                        </p>
+                      } @else {
+                        <p class="text-[11px] text-on-surface-muted">
+                          The password is not stored. You stay signed in in this tab until you sign out, close it, or are idle for a while.
+                        </p>
+                      }
+                    </div>
+                  }
                   <div>
                     <label class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1.5 ml-1">Auto-refresh interval (seconds)</label>
                     <input type="number" [(ngModel)]="gatewayForm.autoRefreshInterval" min="1" max="60"
@@ -386,14 +405,14 @@ const NEW_CREDENTIALS = ' new';
 
           <!-- Where this configuration lives. Per-browser, not per-user: two operators
                at one workstation share it and the same operator elsewhere has none of
-               it, and nothing said so. See docs/design/webapp-security-review.md for
-               the credential question, which is not a design call. -->
-          <p class="px-8 pb-4 -mt-4 flex items-start gap-1.5 text-[11px] text-on-surface-muted">
+               it. Between the scrolling form and the footer, not pulled up into the
+               form's padding, where the form scrolled underneath it. -->
+          <p class="px-8 py-3 border-t border-outline-variant/10 flex items-start gap-1.5 text-[11px] text-on-surface-muted">
             <span class="material-symbols-outlined text-sm shrink-0">info</span>
             <span>
-              These settings are stored in this browser only, including the IRIS API
-              password. They do not follow you to another machine. OPC UA usernames and
-              passwords are stored in IRIS credentials, never here.
+              Servers and settings are stored in this browser only and do not follow you to
+              another machine. No passwords are stored here: OPC UA credentials are kept in
+              IRIS, and the IRIS sign-in lasts for this tab.
             </span>
           </p>
 
@@ -469,8 +488,10 @@ export class SettingsModalComponent implements OnInit {
    */
   testFailed = signal(false);
 
-  /** The gateway password's Change button: an empty field to type into. */
-  private revealedGatewayPassword = signal(false);
+  readonly auth = inject(AuthService);
+  signInForm = { username: '', password: '' };
+  signingIn = signal(false);
+  signInError = signal('');
 
   readonly NEW = NEW_CREDENTIALS;
   /** IRIS credentials entries, from GET /credentials. */
@@ -486,7 +507,7 @@ export class SettingsModalComponent implements OnInit {
   serverStatuses = signal<Record<string, 'online' | 'offline' | 'testing'>>({});
 
   // Gateway form (shared settings)
-  gatewayForm: { apiBaseUrl: string; apiUsername: string; apiPassword: string; autoRefreshInterval: number };
+  gatewayForm: { apiBaseUrl: string; autoRefreshInterval: number };
 
   constructor() {
     const cfg = this.configService.get();
@@ -494,10 +515,9 @@ export class SettingsModalComponent implements OnInit {
     this.servers.set((cfg.servers || []).map(s => ({ ...s })));
     this.gatewayForm = {
       apiBaseUrl: cfg.apiBaseUrl,
-      apiUsername: cfg.apiUsername,
-      apiPassword: cfg.apiPassword,
       autoRefreshInterval: cfg.autoRefreshInterval,
     };
+    this.signInForm.username = cfg.apiUsername;
 
     // Auto-select first server if any
     const svrs = this.servers();
@@ -657,7 +677,7 @@ export class SettingsModalComponent implements OnInit {
     }
   }
 
-  testServerConnection(): void {
+  async testServerConnection(): Promise<void> {
     const server = this.editingServer();
     if (!server || !server.url) return;
 
@@ -665,7 +685,7 @@ export class SettingsModalComponent implements OnInit {
     this.serverStatuses.update(s => ({ ...s, [server.id]: 'testing' }));
 
     // Temporarily save gateway settings so API base URL is current
-    this.configService.save(this.gatewayForm);
+    await this.applyApiAddress();
 
     // An unsaved username and password are tested as typed, for this request only.
     // A change that keeps the stored password tests with the stored entry.
@@ -701,13 +721,41 @@ export class SettingsModalComponent implements OnInit {
    * beside the button while the user fixes the thing it complains about reads as
    * the app not noticing.
    */
-  gatewayPasswordSet(): boolean {
-    return !!this.gatewayForm.apiPassword && !this.revealedGatewayPassword();
+  noticeText(): string {
+    return this.notice() === NOT_SIGNED_IN
+      ? 'Sign in with your IRIS account to use the console.'
+      : 'IRIS refused the current sign-in. Sign in again.';
   }
 
-  clearGatewayPassword(): void {
-    this.gatewayForm.apiPassword = '';
-    this.revealedGatewayPassword.set(true);
+  async signIn(): Promise<void> {
+    if (this.signingIn() || !this.signInForm.username) return;
+    // Sign in to the API address in the form, which may not be saved yet.
+    await this.applyApiAddress();
+    this.signingIn.set(true);
+    this.signInError.set('');
+    try {
+      await this.auth.signIn(this.signInForm.username, this.signInForm.password);
+      this.signInForm.password = '';
+      this.loadCredentials();
+    } catch (err: any) {
+      this.signInError.set(err?.message || 'Sign-in failed');
+    } finally {
+      this.signingIn.set(false);
+    }
+  }
+
+  async signOut(): Promise<void> {
+    await this.auth.signOut();
+    this.credentialsList.set([]);
+  }
+
+  /**
+   * Save the gateway form. A session belongs to the API it signed in to, so a
+   * changed address signs out first.
+   */
+  private async applyApiAddress(): Promise<void> {
+    if (this.gatewayForm.apiBaseUrl !== this.configService.get().apiBaseUrl) await this.auth.signOut();
+    this.configService.save(this.gatewayForm);
   }
 
   clearSaveError(): void {
@@ -733,7 +781,7 @@ export class SettingsModalComponent implements OnInit {
 
     // Credentials first: a server is saved pointing at an entry only once IRIS has it.
     // The API address may have just changed, so it is saved before calling it.
-    this.configService.save(this.gatewayForm);
+    await this.applyApiAddress();
     this.saving.set(true);
     try {
       for (const server of all) {

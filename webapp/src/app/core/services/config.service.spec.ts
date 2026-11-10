@@ -6,7 +6,7 @@ import { RUNTIME_CONFIG } from '../runtime-config';
  * Older consoles stored every OPC UA username and password in localStorage. They are
  * dropped on load, not moved anywhere, and the cleaned config is written back at once.
  */
-describe('ConfigService drops stored OPC UA passwords', () => {
+describe('ConfigService drops stored passwords', () => {
   const KEY = 'opcua-console::config';
 
   afterEach(() => localStorage.removeItem(KEY));
@@ -26,7 +26,9 @@ describe('ConfigService drops stored OPC UA passwords', () => {
     const stored = localStorage.getItem(KEY)!;
     expect(stored).not.toContain('opcua-secret');
     expect(stored).not.toContain('legacy-secret');
-    // The IRIS API sign-in is a separate matter and stays.
-    expect(cfg.apiPassword).toBe('SYS');
+    // The IRIS API password goes too: the sign-in is a token in sessionStorage.
+    expect('apiPassword' in cfg).toBeFalse();
+    expect(stored).not.toContain('SYS');
+    expect(cfg.apiUsername).toBe('SuperUser');
   });
 });

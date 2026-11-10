@@ -129,6 +129,8 @@ ClassMethod CreateWebApp(pNamespace As %String) As %Status
 		set tProps("Description") = "OPC UA Adapter REST API"
 		set tProps("Enabled") = 1
 		set tProps("AutheEnabled") = 32
+		// The console signs in once with POST /login and then uses a token.
+		set tProps("JWTAuthEnabled") = 1
 		set tProps("Resource") = ""
 
 		set tSC = ##class(Security.Applications).Create("/csp/opcua/api", .tProps)

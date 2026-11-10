@@ -284,7 +284,19 @@ ClassMethod CreateApp(pPath As %String, pNS As %String) As %String(MAXLEN="") [ 
 		Set d = ..DescribeApp(pPath, pNS)
 		If d.state = "conflict" { Set r.message = d.reason Quit }
 		Set role = ..#ApiRolePrefix_pNS, r.role = role
-		If d.state = "reuse" { Set r.action = "reuse", r.resource = d.resource Do r.%Set("ok", 1, "boolean") Quit }
+		If d.state = "reuse" {
+			Set r.action = "reuse", r.resource = d.resource
+			// Earlier installers created the app without JWT sign-in. Switch it on in
+			// an app this class made; an app someone else made is left as it is, and the
+			// console signs in to it with Basic, held in memory only.
+			If d.owned && 'd.jwt {
+				Set j("JWTAuthEnabled") = 1
+				$$$ThrowOnError(##class(Security.Applications).Modify(pPath, .j))
+				Set r.action = "reuse; JWT sign-in switched on"
+			}
+			Do r.%Set("ok", 1, "boolean")
+			Quit
+		}
 		Set res = ..#ApiResource
 		If '##class(Security.Resources).Exists(res) {
 			$$$ThrowOnError(##class(Security.Resources).Create(res, "OPC UA REST API (created by the terminal installer)", ""))
@@ -302,6 +314,9 @@ ClassMethod CreateApp(pPath As %String, pNS As %String) As %String(MAXLEN="") [ 
 		Set p("Description") = "OPC UA Adapter REST API (created by the terminal installer)"
 		Set p("Enabled") = 1
 		Set p("AutheEnabled") = 32
+		// The console signs in once (POST /login) and then uses a token, so no password
+		// is kept in the browser. Basic still works for other clients.
+		Set p("JWTAuthEnabled") = 1
 		Set p("Resource") = res
 		$$$ThrowOnError(##class(Security.Applications).Create(pPath, .p))
 		Do ..Claim("app", pPath, pNS)
@@ -683,6 +698,7 @@ ClassMethod DescribeApp(pPath As %String, pNS As %String) As %DynamicObject [ In
 	Do d.%Set("enabled", +$Get(p("Enabled")), "boolean")
 	Do d.%Set("passwordAuth", $ZBoolean(+$Get(p("AutheEnabled")), 32, 1) = 32, "boolean")
 	Do d.%Set("unauthenticated", $ZBoolean(+$Get(p("AutheEnabled")), 64, 1) = 64, "boolean")
+	Do d.%Set("jwt", +$Get(p("JWTAuthEnabled")), "boolean")
 	Do d.%Set("owned", ..Claimed("app", pPath) '= "", "boolean")
 	If ($ZConvert(d.namespace, "U") '= pNS) || (d.dispatchClass '= ..#DispatchClass) {
 		Set d.state = "conflict"

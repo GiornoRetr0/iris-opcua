@@ -83,10 +83,11 @@ import { CommonModule } from '@angular/common';
             <div class="flex items-start gap-3 mb-8 rounded-xl border border-outline-variant/20 bg-surface-container-low px-4 py-3">
               <span class="material-symbols-outlined text-on-surface-variant text-xl shrink-0">info</span>
               <p class="text-sm text-on-surface-variant leading-relaxed">
-                Settings are stored in this browser only, including the IRIS API password. They don't
-                follow you to another machine. OPC UA usernames and passwords are not among them:
-                they are stored in IRIS credentials entries (Interoperability &gt; Configure &gt;
-                Credentials), and a pipeline you deploy for a server uses the same entry. The
+                Settings are stored in this browser only and don't follow you to another machine.
+                No passwords are among them. You sign in to IRIS once per browser tab, and the
+                password is not kept. OPC UA usernames and passwords are stored in IRIS
+                credentials entries (Interoperability &gt; Configure &gt; Credentials), and a
+                pipeline you deploy for a server uses the same entry. The
                 <strong class="font-semibold">IRIS API Gateway</strong> tab holds the REST endpoint
                 this console talks to — separate from the OPC UA servers it collects from.
               </p>

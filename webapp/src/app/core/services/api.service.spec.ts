@@ -4,6 +4,11 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { ApiService, apiErrorMessage } from './api.service';
 import { ConfigService } from './config.service';
 import { ServerProfile } from '../models/opcua.models';
+import { signal } from '@angular/core';
+import { AuthService } from './auth.service';
+
+/** A signed-in AuthService: ApiService only asks it who is signed in. */
+const authStub = (user: string | null = 'u') => ({ provide: AuthService, useValue: { user: signal(user) } });
 
 /**
  * The API answers every error with a real HTTP status and the usual envelope
@@ -54,15 +59,16 @@ describe('ApiService on 401', () => {
   let events: CustomEvent[];
   const listener = (e: Event) => events.push(e as CustomEvent);
 
-  function setup(hosted: boolean): ApiService {
+  function setup(hosted: boolean, user: string | null = 'u'): ApiService {
     TestBed.configureTestingModule({
       providers: [
         provideHttpClient(),
         provideHttpClientTesting(),
         {
           provide: ConfigService,
-          useValue: { hosted, get: () => ({ apiBaseUrl: '/api', apiUsername: 'u', apiPassword: 'p' }) },
+          useValue: { hosted, get: () => ({ apiBaseUrl: '/api', apiUsername: 'u' }) },
         },
+        authStub(user),
       ],
     });
     http = TestBed.inject(HttpTestingController);
@@ -105,11 +111,12 @@ describe('ApiService on 401', () => {
     expect(events.length).toBe(0);
   });
 
-  it('does not open Settings outside the hosted console', () => {
-    const api = setup(false);
+  it('says "Not signed in" when there is no session, hosted or not', () => {
+    const api = setup(false, null);
     api.listSchemas().subscribe({ error: () => {} });
     http.expectOne('/api/schemas').flush({ status: 'error', error: 'Sign-in failed' }, { status: 401, statusText: 'Unauthorized' });
-    expect(events.length).toBe(0);
+    expect(events.length).toBe(1);
+    expect(events[0].detail).toEqual({ tab: 'gateway', notice: 'Not signed in' });
   });
 });
 
@@ -133,11 +140,12 @@ describe('ApiService pipeline management sends no OPC UA credentials', () => {
           useValue: {
             hosted: false,
             get: () => ({
-              apiBaseUrl: '/api', apiUsername: 'u', apiPassword: 'p',
+              apiBaseUrl: '/api', apiUsername: 'u',
               serverUrl: 'opc.tcp://plc', securityMode: 1, username: 'user1', password: 'opcua-secret',
             }),
           },
         },
+        authStub(),
       ],
     });
     http = TestBed.inject(HttpTestingController);
@@ -194,7 +202,8 @@ describe('ApiService OPC UA credentials', () => {
       providers: [
         provideHttpClient(),
         provideHttpClientTesting(),
-        { provide: ConfigService, useValue: { hosted: false, get: () => ({ apiBaseUrl: '/api', apiUsername: 'u', apiPassword: 'p' }) } },
+        { provide: ConfigService, useValue: { hosted: false, get: () => ({ apiBaseUrl: '/api', apiUsername: 'u' }) } },
+        authStub(),
       ],
     });
     http = TestBed.inject(HttpTestingController);

@@ -306,6 +306,19 @@ The two halves are deliberately separate: `/schemas` creates a reusable device *
 
 Each route maps to a method in Handler that delegates to a specialized service class.
 
+### Console sign-in
+
+The console signs in once with IRIS's JWT login for REST applications: `POST /login`
+`{user, password}` returns an access token (60 s) and a refresh token (15 min, rotated on
+every `POST /refresh`). The REST app needs **JWT Authentication** switched on, which the
+terminal installer and the Docker demo do. The console keeps only the tokens, in
+`sessionStorage`; `authInterceptor` sends `Authorization: Bearer`, refreshes before expiry
+(one refresh at a time: IRIS revokes the whole chain if an old refresh token is replayed),
+and on a refused token refreshes once and repeats the call. `POST /logout` revokes them.
+A wrong password, an expired token and an app without JWT all answer IRIS's bare 404; when
+`/login` fails, the console probes `/ping` with Basic and, if that works, keeps the Basic
+login in memory only. Basic auth on every request keeps working for other clients.
+
 ### Request parsing
 
 `Handler.GetRequestParams()` tries to read a JSON body first, then falls back to query parameters. This allows both `POST` with JSON body and `GET` with URL parameters to work.

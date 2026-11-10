@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 import { Observable, map, timeout, catchError, throwError } from 'rxjs';
 import { ConfigService } from './config.service';
+import { AuthService } from './auth.service';
 import {
   OpcuaNode,
   NodeReadResult,
@@ -24,6 +25,9 @@ interface ApiEnvelope<T> {
 
 /** What the console shows when IRIS refuses the API account (HTTP 401). */
 export const SIGN_IN_FAILED = 'Sign-in failed';
+
+/** Settings' notice when a call needs a sign-in and there is none (never was, or it ended). */
+export const NOT_SIGNED_IN = 'Not signed in';
 
 /** The message of our {"status":"error","error":"…"} envelope, if the body is one. */
 function envelopeError(err: HttpErrorResponse): string {
@@ -84,38 +88,30 @@ function unwrap<T>(res: ApiEnvelope<T>): T {
 export class ApiService {
   private http = inject(HttpClient);
   private configService = inject(ConfigService);
+  private auth = inject(AuthService);
 
   private get baseUrl(): string {
     return this.configService.get().apiBaseUrl.replace(/\/+$/, '');
   }
 
+  /** The sign-in is added by authInterceptor. */
   private get headers(): HttpHeaders {
-    const cfg = this.configService.get();
-    let headers = new HttpHeaders({ 'Content-Type': 'application/json' });
-    if (cfg.apiUsername) {
-      headers = headers.set(
-        'Authorization',
-        'Basic ' + btoa(cfg.apiUsername + ':' + (cfg.apiPassword || ''))
-      );
-    }
-    return headers;
+    return new HttpHeaders({ 'Content-Type': 'application/json' });
   }
 
   /**
-   * Common error path for every call. A failed sign-in (see isSignInFailure) in
-   * the hosted console means the IRIS account in Settings no longer signs in
-   * (wrong or changed password, disabled account), so Settings opens on that tab
-   * with the reason. The error still
-   * reaches the caller, which shows apiErrorMessage(err).
+   * Common error path for every call. A failed sign-in (see isSignInFailure) means
+   * there is no IRIS session (never signed in, or it ended and could not be
+   * refreshed) or IRIS refused it, so Settings opens on the sign-in tab with the
+   * reason. The error still reaches the caller, which shows apiErrorMessage(err).
    */
   private fail(err: any): Observable<never> {
     if (err?.name === 'TimeoutError') {
       return throwError(() => new Error('Request timed out'));
     }
-    if (isSignInFailure(err) && this.configService.hosted) {
-      document.dispatchEvent(
-        new CustomEvent('open-settings', { detail: { tab: 'gateway', notice: SIGN_IN_FAILED } })
-      );
+    if (isSignInFailure(err)) {
+      const notice = this.auth.user() ? SIGN_IN_FAILED : NOT_SIGNED_IN;
+      document.dispatchEvent(new CustomEvent('open-settings', { detail: { tab: 'gateway', notice } }));
     }
     return throwError(() => err);
   }

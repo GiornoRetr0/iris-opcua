@@ -53,15 +53,7 @@ npm ci
 npm start
 ```
 
-Open [http://localhost:4200](http://localhost:4200). Under **Settings → IRIS API Gateway**, use:
-
-| Setting | Demo value |
-|---|---|
-| API Base URL | `/iris/csp/opcua/api` |
-| IRIS API Username | `SuperUser` |
-| IRIS API Password | `SYS` (uppercase) |
-
-Save the settings. The development proxy forwards this path to `http://localhost:52783`. To check API access through the same route:
+Open [http://localhost:4200](http://localhost:4200). The development server signs in by itself as the demo account, `SuperUser` / `SYS` (uppercase), against the API Base URL `/iris/csp/opcua/api`. To use another account, sign out under **Settings → IRIS API Gateway** and sign in again. The development proxy forwards this path to `http://localhost:52783`. To check API access through the same route:
 
 ```bash
 curl --user SuperUser http://localhost:4200/iris/csp/opcua/api/ping
@@ -218,13 +210,13 @@ The terminal installer does this step for you: IRIS serves the console from a fi
 
 Prefer a same-origin deployment, with the web server proxying the API. If frontend and API use different origins, configure and verify CORS/preflight handling for your frontend origin, the `Authorization` header, and API methods. **The Angular development proxy is not part of the production build.**
 
-Open **Settings → IRIS API Gateway** and enter your API URL and dedicated IRIS account credentials. Use the same-origin API path if you configured a proxy, or the full HTTPS API URL otherwise. Save the settings; changing the target instance needs no frontend rebuild.
+Open **Settings → IRIS API Gateway**, enter your API URL, and sign in with your dedicated IRIS account. Use the same-origin API path if you configured a proxy, or the full HTTPS API URL otherwise. Save the settings; changing the target instance needs no frontend rebuild. The console signs in to IRIS's JWT login (`POST <api>/login`), so switch on **JWT Authentication** for the REST web application (the terminal installer does this). Without it the console falls back to sending the password with every call, kept in memory only, so each reload asks you to sign in again.
 
 For temporary development use, you can run `npm start` and edit `webapp/proxy.conf.json` to target your instance. It forwards the existing path unchanged: adjust the route/path handling if your gateway uses another prefix, then restart the development server.
 
 **OPC UA passwords** are stored in IRIS credentials entries (Interoperability > Configure > Credentials), never in the browser: each saved server names an entry, the API reads it on the server, and a pipeline deployed for that server uses the same entry.
 
-**Current limitation:** the IRIS API sign-in is still saved in cleartext browser `localStorage`, per browser profile, and the server list does not follow users between computers. See the [credential-storage review](docs/design/webapp-security-review.md).
+**The IRIS sign-in** is a token, not a password: the password is sent once to `POST /login`, and the access and refresh tokens IRIS returns are kept in `sessionStorage`, so they last for that browser tab. The console refreshes them in the background; signing out revokes them, and an idle session expires (the refresh token's lifetime, 15 minutes by default). Nothing in `localStorage` is a secret. The server list is still per browser profile and does not follow users between computers. Cross-origin hosting needs a CORS preflight for `/login`, which IRIS does not answer by default, so serve the console from the API's origin.
 
 ### 6. Connect to the real OPC UA server
 
