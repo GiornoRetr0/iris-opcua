@@ -160,8 +160,8 @@ export interface AppConfig {
   /** @deprecated */
   securityMode: number;
   apiBaseUrl: string;
+  /** The last account signed in with, to prefill the sign-in. Never its password. */
   apiUsername: string;
-  apiPassword: string;
   /** @deprecated */
   certPath: string;
   /** @deprecated */

@@ -3,11 +3,12 @@ import { AppConfig, ServerProfile } from '../models/opcua.models';
 import { RUNTIME_CONFIG } from '../runtime-config';
 
 /**
- * Where configuration lives: cleartext `localStorage`, per-browser rather than
- * per-user. It holds the server list and the IRIS API sign-in. OPC UA usernames and
- * passwords are not here: each server names an IRIS credentials entry, which the API
- * reads on the server. The UI states the browser-local part so a user is not
- * surprised when their servers do not follow them to another machine.
+ * Where configuration lives: `localStorage`, per-browser rather than per-user. It
+ * holds the server list, the API address and the last IRIS username, and no
+ * password: each OPC UA server names an IRIS credentials entry, read on the server,
+ * and the IRIS sign-in is a token in sessionStorage (AuthService). The UI states the
+ * browser-local part so a user is not surprised when their servers do not follow
+ * them to another machine.
  */
 const STORAGE_KEY = 'opcua-console::config';
 
@@ -28,7 +29,6 @@ const DEFAULTS: AppConfig = {
   securityMode: 1,
   apiBaseUrl: '/iris/csp/opcua/api',
   apiUsername: 'SuperUser',
-  apiPassword: 'SYS',
   certPath: '',
   keyPath: '',
   trustDir: '',
@@ -56,7 +56,7 @@ export class ConfigService {
   private readonly storageKey = this.hosted ? `${STORAGE_KEY}::${this.runtime.apiBaseUrl}` : STORAGE_KEY;
 
   private readonly defaults: AppConfig = this.hosted
-    ? { ...DEFAULTS, apiBaseUrl: this.runtime.apiBaseUrl!, apiUsername: '', apiPassword: '' }
+    ? { ...DEFAULTS, apiBaseUrl: this.runtime.apiBaseUrl!, apiUsername: '' }
     : DEFAULTS;
 
   private _config = signal<AppConfig>({ ...this.defaults });
@@ -105,10 +105,11 @@ export class ConfigService {
           }];
         }
 
-        // OPC UA usernames and passwords used to be stored here. They are dropped,
-        // not moved into IRIS: each server's credentials are chosen again in Settings.
-        // Written back at once, so the passwords leave localStorage on first load.
-        const stripped = this.stripOpcuaPasswords(merged);
+        // Passwords used to be stored here: the IRIS API's and every OPC UA server's.
+        // They are dropped, not moved: sign in again, and choose each server's
+        // credentials again in Settings. Written back at once, so the passwords leave
+        // localStorage on first load.
+        const stripped = this.stripPasswords(merged);
         this._config.set(this.pin(merged));
         if (stripped) this.persist();
       }
@@ -131,11 +132,12 @@ export class ConfigService {
   }
 
   /**
-   * Remove the OPC UA username and password fields older versions stored, at the
-   * top level and on every server, and give each server a `credentials` field.
+   * Remove the password fields older versions stored (the IRIS API password, and an
+   * OPC UA username and password at the top level and on every server), and give
+   * each server a `credentials` field.
    * Returns whether anything was removed.
    */
-  private stripOpcuaPasswords(cfg: AppConfig): boolean {
+  private stripPasswords(cfg: AppConfig): boolean {
     let stripped = false;
     const drop = (o: any) => {
       for (const key of ['username', 'password']) {
@@ -146,6 +148,10 @@ export class ConfigService {
       }
     };
     drop(cfg);
+    if ('apiPassword' in cfg) {
+      delete (cfg as any).apiPassword;
+      stripped = true;
+    }
     cfg.servers = (cfg.servers || []).map((s) => {
       const copy: any = { ...s };
       drop(copy);

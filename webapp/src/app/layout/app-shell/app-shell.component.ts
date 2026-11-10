@@ -4,7 +4,7 @@ import { CommonModule } from '@angular/common';
 import { TopNavComponent } from '../top-nav/top-nav.component';
 import { SideNavComponent } from '../side-nav/side-nav.component';
 import { SettingsModalComponent } from '../../shared/settings-modal/settings-modal.component';
-import { ConfigService } from '../../core/services/config.service';
+import { AuthService } from '../../core/services/auth.service';
 
 @Component({
   selector: 'app-shell',
@@ -24,7 +24,7 @@ import { ConfigService } from '../../core/services/config.service';
   `,
 })
 export class AppShellComponent implements OnInit, OnDestroy {
-  private config = inject(ConfigService);
+  private auth = inject(AuthService);
 
   settingsOpen = signal(false);
   settingsTab = signal<'servers' | 'gateway'>('servers');
@@ -33,9 +33,9 @@ export class AppShellComponent implements OnInit, OnDestroy {
   settingsNotice = signal('');
 
   /**
-   * The IRIS account the user closed a sign-in notice for. Background calls (the
-   * API ping, the dashboard refresh) keep getting 401 until the account is fixed,
-   * and must not reopen Settings every few seconds with the same account.
+   * Who was signed in (or "" for nobody) when the user closed a sign-in notice.
+   * Background calls (the API ping, the dashboard refresh) keep failing until the
+   * user signs in, and must not reopen Settings every few seconds meanwhile.
    */
   private dismissedAccount: string | null = null;
 
@@ -62,17 +62,19 @@ export class AppShellComponent implements OnInit, OnDestroy {
   }
 
   private account(): string {
-    const cfg = this.config.get();
-    return `${cfg.apiUsername}\u0000${cfg.apiPassword}`;
+    return this.auth.user() ?? '';
   }
 
   ngOnInit(): void {
     document.addEventListener('open-settings', this.handler);
-    // A hosted console has no default account: ask for one before anything calls the API.
-    if (this.config.hosted && !this.config.get().apiUsername) {
-      this.settingsTab.set('gateway');
-      this.settingsOpen.set(true);
-    }
+    // No session (a new tab of the hosted console, or the development login failed):
+    // ask for a sign-in before anything calls the API.
+    this.auth.ready.then(() => {
+      if (!this.auth.user() && !this.settingsOpen()) {
+        this.settingsTab.set('gateway');
+        this.settingsOpen.set(true);
+      }
+    });
   }
 
   ngOnDestroy(): void {
