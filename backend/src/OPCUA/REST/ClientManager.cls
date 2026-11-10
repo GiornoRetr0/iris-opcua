@@ -20,7 +20,7 @@ ClassMethod Connect(Output pClient As OPCUA.Client, pURL As %String, pSecurityMo
 		set tSC = pClient.Initialize()
 		Quit:$$$ISERR(tSC)
 
-		set tSC = pClient.SetupClient(, pSecurityMode, pClientURI, pCertPath, pKeyPath, pTrustDir, pCrlDir)
+		set tSC = ##class(OPCUA.Security.Connection).Setup(pClient, pURL, pSecurityMode, pClientURI, pCertPath, pKeyPath, pTrustDir, pCrlDir, .tManaged)
 		Quit:$$$ISERR(tSC)
 
 		set tSC = pClient.Connect(pURL, pUsername, pPassword)

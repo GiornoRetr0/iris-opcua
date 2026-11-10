@@ -134,7 +134,7 @@ Method OnInit() As %Status
 		Quit:$$$ISERR(tSC)
 
 		do ..ApplyLogFile()
-		set tSC = ..Client.SetupClient("",..SecurityMode,..ClientURI,..PublicCertificate,..PrivateKey,..TrustListDir,..RevocationListDir)
+		set tSC = ##class(OPCUA.Security.Connection).Setup(..Client,..URL,..SecurityMode,..ClientURI,..PublicCertificate,..PrivateKey,..TrustListDir,..RevocationListDir,.tManaged,"")
 		Quit:$$$ISERR(tSC)
 
 	} catch (e) {
@@ -190,7 +190,7 @@ Method Connect() As %Status [ Private ]
 		if ..ResetClientFlag '= 0 {
 
 			do ..ApplyLogFile()
-			set tSC = ..Client.SetupClient("",..SecurityMode,..ClientURI,..PublicCertificate,..PrivateKey,..TrustListDir,..RevocationListDir)
+			set tSC = ##class(OPCUA.Security.Connection).Setup(..Client,..URL,..SecurityMode,..ClientURI,..PublicCertificate,..PrivateKey,..TrustListDir,..RevocationListDir,.tManaged,"")
 
 			if $$$ISERR(tSC) {
 
@@ -221,6 +221,12 @@ Method Connect() As %Status [ Private ]
 		}
 		set tSC = ..Client.Connect(..URL, tUser, tPassword)
 		//Quit:$$$ISERR(tSC)
+		// A managed Sign & Encrypt failure is explained in the event log; the normal
+		// retry schedule is unchanged and nothing falls back to an unsecured mode.
+		if $$$ISERR(tSC), ##class(OPCUA.Security.Connection).IsManaged(..SecurityMode, ..PublicCertificate, ..PrivateKey) {
+			set tDiag = ##class(OPCUA.Security.Diagnose).Run(..URL, tSC)
+			$$$LOGWARNING("OPCUA managed Sign & Encrypt connection failed ("_tDiag.category_"): "_tDiag.message_$select(tDiag.clientFingerprint'="":" IRIS client certificate fingerprint: "_tDiag.clientFingerprint, 1:""))
+		}
 
 	} catch (e) {
 		set tSC = e.AsStatus()
