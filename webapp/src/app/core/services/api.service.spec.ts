@@ -3,6 +3,7 @@ import { HttpErrorResponse, provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ApiService, apiErrorMessage } from './api.service';
 import { ConfigService } from './config.service';
+import { ServerProfile } from '../models/opcua.models';
 
 /**
  * The API answers every error with a real HTTP status and the usual envelope
@@ -164,10 +165,82 @@ describe('ApiService pipeline management sends no OPC UA credentials', () => {
     for (const body of bodies) expect(JSON.stringify(body)).not.toContain('opcua-secret');
   });
 
-  it('deploy still sends the username and password', () => {
-    api.deploy({ schemaClass: 'S', devices: 'i=85' }).subscribe();
+  it('deploy sends the server\'s credentials ID, never a password', () => {
+    api.deploy({ schemaClass: 'S', devices: 'i=85' }, server({ credentials: 'OPCUA-plc' })).subscribe();
     const body = http.expectOne('/api/deploy').request.body;
-    expect(body.username).toBe('user1');
-    expect(body.password).toBe('opcua-secret');
+    expect(body.credentials).toBe('OPCUA-plc');
+    expect(body.username).toBeUndefined();
+    expect(body.password).toBeUndefined();
+  });
+});
+
+function server(extra: Partial<ServerProfile> = {}): ServerProfile {
+  return {
+    id: 's1', name: 'plc', url: 'opc.tcp://plc:4840', securityMode: 1, credentials: '',
+    certPath: '', keyPath: '', trustDir: '', crlDir: '', clientURI: '', ...extra,
+  };
+}
+
+/**
+ * OPC UA usernames and passwords live in IRIS credentials entries. Connection calls
+ * send the entry's ID; only Test Connection of an unsaved login sends one inline.
+ */
+describe('ApiService OPC UA credentials', () => {
+  let http: HttpTestingController;
+  let api: ApiService;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: ConfigService, useValue: { hosted: false, get: () => ({ apiBaseUrl: '/api', apiUsername: 'u', apiPassword: 'p' }) } },
+      ],
+    });
+    http = TestBed.inject(HttpTestingController);
+    api = TestBed.inject(ApiService);
+  });
+
+  afterEach(() => http.verify());
+
+  it('browse, read, test and validate send the credentials ID', () => {
+    const s = server({ credentials: 'OPCUA-plc' });
+    api.browse(0, 84, 0, s).subscribe();
+    api.read(1, 'x', 1, s).subscribe();
+    api.test(s).subscribe();
+    api.validateSchema('S', 'i=85', s).subscribe();
+    for (const url of ['/api/browse', '/api/read', '/api/test', '/api/schemas/S/validate']) {
+      const body = http.expectOne(url).request.body;
+      expect(body.credentials).toBe('OPCUA-plc');
+      expect('username' in body).toBeFalse();
+      expect('password' in body).toBeFalse();
+    }
+  });
+
+  it('an anonymous server sends neither', () => {
+    api.test(server()).subscribe();
+    const body = http.expectOne('/api/test').request.body;
+    expect('credentials' in body || 'username' in body || 'password' in body).toBeFalse();
+  });
+
+  it('test of an unsaved login sends it inline instead of the ID', () => {
+    api.test(server({ credentials: 'OPCUA-plc' }), { username: 'new', password: 'typed' }).subscribe();
+    const body = http.expectOne('/api/test').request.body;
+    expect(body.username).toBe('new');
+    expect(body.password).toBe('typed');
+    expect('credentials' in body).toBeFalse();
+  });
+
+  it('create, update and list use real verbs; an empty password is not sent', () => {
+    api.listCredentials().subscribe();
+    api.createCredentials('OPCUA-plc', 'opc', 'pw').subscribe();
+    api.updateCredentials('OPCUA plc', 'opc2', '').subscribe();
+    const list = http.expectOne((r) => r.method === 'GET' && r.url === '/api/credentials');
+    list.flush({ status: 'ok', data: [] });
+    const create = http.expectOne((r) => r.method === 'POST' && r.url === '/api/credentials');
+    expect(create.request.body).toEqual({ id: 'OPCUA-plc', username: 'opc', password: 'pw' });
+    const update = http.expectOne('/api/credentials/OPCUA%20plc');
+    expect(update.request.method).toBe('PUT');
+    expect(update.request.body).toEqual({ username: 'opc2' });
   });
 });

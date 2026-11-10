@@ -13,6 +13,7 @@ import {
   CreateSchemaRequest,
   CreateSchemaResult,
   SchemaValidation,
+  CredentialsEntry,
 } from '../models/opcua.models';
 
 interface ApiEnvelope<T> {
@@ -68,6 +69,17 @@ export function apiErrorMessage(err: unknown, fallback = 'Request failed'): stri
   return fallback;
 }
 
+/** A username and password sent with one request, never stored. */
+export interface InlineLogin {
+  username: string;
+  password: string;
+}
+
+function unwrap<T>(res: ApiEnvelope<T>): T {
+  if (res.status === 'error') throw new Error(res.error || 'Unknown API error');
+  return res.data as T;
+}
+
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   private http = inject(HttpClient);
@@ -108,16 +120,25 @@ export class ApiService {
     return throwError(() => err);
   }
 
-  /** Build request body with connection params from a specific server profile */
-  private buildBody(params: Record<string, any> = {}, server?: ServerProfile): Record<string, any> {
+  /**
+   * Build request body with connection params from a specific server profile.
+   * The session's login is the server's `credentials` ID, which the API resolves on
+   * the server. `login` replaces it for one request: the Test Connection of a
+   * username and password not saved yet.
+   */
+  private buildBody(params: Record<string, any> = {}, server?: ServerProfile, login?: InlineLogin): Record<string, any> {
     if (server) {
       const body: Record<string, any> = {
         url: server.url,
         securityMode: server.securityMode,
         ...params,
       };
-      if (server.username) body['username'] = server.username;
-      if (server.password) body['password'] = server.password;
+      if (login) {
+        body['username'] = login.username;
+        body['password'] = login.password;
+      } else if (server.credentials) {
+        body['credentials'] = server.credentials;
+      }
       if (server.certPath) body['certPath'] = server.certPath;
       if (server.keyPath) body['keyPath'] = server.keyPath;
       if (server.trustDir) body['trustDir'] = server.trustDir;
@@ -133,8 +154,6 @@ export class ApiService {
       securityMode: cfg.securityMode,
       ...params,
     };
-    if (cfg.username) body['username'] = cfg.username;
-    if (cfg.password) body['password'] = cfg.password;
     if (cfg.certPath) body['certPath'] = cfg.certPath;
     if (cfg.keyPath) body['keyPath'] = cfg.keyPath;
     if (cfg.trustDir) body['trustDir'] = cfg.trustDir;
@@ -151,7 +170,7 @@ export class ApiService {
    * POST for managing an existing pipeline: sends only `params`, never the
    * connection fields. The server reads a pipeline's endpoint and credentials
    * from the pipeline itself (its password sits in an IRIS credentials entry,
-   * audit #15), so the browser's stored OPC UA password has no business here.
+   * audit #15).
    */
   private postPlain<T>(endpoint: string, params: Record<string, any>, timeoutMs = 15000): Observable<T> {
     return this.postBody<T>(endpoint, params, timeoutMs);
@@ -203,8 +222,31 @@ export class ApiService {
     }, 15000, server);
   }
 
-  test(server?: ServerProfile): Observable<ConnectionTestResult> {
-    return this.post<ConnectionTestResult>('/test', {}, 15000, server);
+  test(server?: ServerProfile, login?: InlineLogin): Observable<ConnectionTestResult> {
+    return this.postBody<ConnectionTestResult>('/test', this.buildBody({}, server, login), 15000);
+  }
+
+  // ── IRIS credentials entries: where OPC UA usernames and passwords live ──
+
+  /** Every entry's ID, username and users. Never a password. */
+  listCredentials(): Observable<CredentialsEntry[]> {
+    return this.request<CredentialsEntry[]>('get', '/credentials');
+  }
+
+  /** Create an entry. 409 if the ID is taken. */
+  createCredentials(id: string, username: string, password: string): Observable<{ id: string; username: string }> {
+    return this.http
+      .post<ApiEnvelope<{ id: string; username: string }>>(`${this.baseUrl}/credentials`, { id, username, password }, { headers: this.headers })
+      .pipe(timeout(15000), map(unwrap), catchError((err) => this.fail(err)));
+  }
+
+  /** Change an entry. An empty password keeps the stored one. */
+  updateCredentials(id: string, username: string, password: string): Observable<{ id: string; username: string }> {
+    const body: Record<string, string> = { username };
+    if (password) body['password'] = password;
+    return this.http
+      .put<ApiEnvelope<{ id: string; username: string }>>(`${this.baseUrl}/credentials/${encodeURIComponent(id)}`, body, { headers: this.headers })
+      .pipe(timeout(15000), map(unwrap), catchError((err) => this.fail(err)));
   }
 
   deploy(params: Record<string, any>, server?: ServerProfile): Observable<DeployResult> {

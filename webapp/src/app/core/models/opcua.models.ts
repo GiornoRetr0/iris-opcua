@@ -134,8 +134,13 @@ export interface ServerProfile {
   name: string;
   url: string;
   securityMode: number;
-  username: string;
-  password: string;
+  /**
+   * ID of the IRIS credentials entry (Ens.Config.Credentials) holding this server's
+   * username and password, or '' for an anonymous session. The password itself is
+   * never in the browser: the API reads the entry on the server, and deploy puts the
+   * same ID in the pipeline, so the console and its pipelines share one entry.
+   */
+  credentials: string;
   certPath: string;
   keyPath: string;
   trustDir: string;
@@ -154,10 +159,6 @@ export interface AppConfig {
   serverUrl: string;
   /** @deprecated */
   securityMode: number;
-  /** @deprecated */
-  username: string;
-  /** @deprecated */
-  password: string;
   apiBaseUrl: string;
   apiUsername: string;
   apiPassword: string;
@@ -259,3 +260,12 @@ export interface DeviceValidation {
   unusableReason?: string;
 }
 
+/** An IRIS credentials entry, as GET /credentials lists it. Never carries a password. */
+export interface CredentialsEntry {
+  id: string;
+  username: string;
+  /** Production items whose Credentials setting names it, as "Item (Production)". */
+  usedBy: string[];
+  /** The pipeline deploy made the entry for (deleting the pipeline deletes it), or ''. */
+  pipeline: string;
+}

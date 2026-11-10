@@ -222,7 +222,9 @@ Open **Settings → IRIS API Gateway** and enter your API URL and dedicated IRIS
 
 For temporary development use, you can run `npm start` and edit `webapp/proxy.conf.json` to target your instance. It forwards the existing path unchanged: adjust the route/path handling if your gateway uses another prefix, then restart the development server.
 
-**Current limitation:** IRIS and OPC UA passwords are saved in cleartext browser `localStorage`, per browser profile. Profiles do not automatically follow users between computers. See the [credential-storage review](docs/design/webapp-security-review.md); improved authentication and server-side credential storage remain product work before a general client rollout.
+**OPC UA passwords** are stored in IRIS credentials entries (Interoperability > Configure > Credentials), never in the browser: each saved server names an entry, the API reads it on the server, and a pipeline deployed for that server uses the same entry.
+
+**Current limitation:** the IRIS API sign-in is still saved in cleartext browser `localStorage`, per browser profile, and the server list does not follow users between computers. See the [credential-storage review](docs/design/webapp-security-review.md).
 
 ### 6. Connect to the real OPC UA server
 

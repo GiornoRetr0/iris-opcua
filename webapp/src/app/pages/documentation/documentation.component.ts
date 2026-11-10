@@ -73,16 +73,20 @@ import { CommonModule } from '@angular/common';
    e.g. <span class="text-green-400">opc.tcp://your-server:4840</span>
 4. Choose Security Mode (None or Sign &amp; Encrypt)
    Sign &amp; Encrypt reveals the certificate fields below it
-5. Click <span class="text-blue-400">Test Connection</span> to verify
-6. Click <span class="text-blue-400">Save Changes</span></code></pre>
+5. Under <span class="text-blue-400">Credentials</span>, keep Anonymous, pick an IRIS
+   credentials entry, or choose <span class="text-blue-400">New credentials…</span>
+6. Click <span class="text-blue-400">Test Connection</span> to verify
+7. Click <span class="text-blue-400">Save Changes</span></code></pre>
               <div class="absolute top-0 right-0 w-32 h-full bg-gradient-to-l from-primary/10 to-transparent pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"></div>
             </div>
 
             <div class="flex items-start gap-3 mb-8 rounded-xl border border-outline-variant/20 bg-surface-container-low px-4 py-3">
               <span class="material-symbols-outlined text-on-surface-variant text-xl shrink-0">info</span>
               <p class="text-sm text-on-surface-variant leading-relaxed">
-                Settings are stored in this browser only, including passwords. They don't follow you
-                to another machine, and anyone using this browser profile can read them. The
+                Settings are stored in this browser only, including the IRIS API password. They don't
+                follow you to another machine. OPC UA usernames and passwords are not among them:
+                they are stored in IRIS credentials entries (Interoperability &gt; Configure &gt;
+                Credentials), and a pipeline you deploy for a server uses the same entry. The
                 <strong class="font-semibold">IRIS API Gateway</strong> tab holds the REST endpoint
                 this console talks to — separate from the OPC UA servers it collects from.
               </p>
@@ -109,6 +113,14 @@ import { CommonModule } from '@angular/common';
                     <td class="py-4 font-mono text-primary font-semibold">Security Mode</td>
                     <td class="py-4"><span class="px-2 py-0.5 bg-surface-container rounded text-[10px] font-bold">YES</span></td>
                     <td class="py-4 text-on-surface-variant">None (unencrypted) or Sign & Encrypt (mutual TLS)</td>
+                  </tr>
+                  <tr class="border-b border-outline-variant/10">
+                    <td class="py-4 font-mono text-primary font-semibold">Credentials</td>
+                    <td class="py-4"><span class="px-2 py-0.5 bg-surface-container rounded text-[10px] font-bold">IF NEEDED</span></td>
+                    <td class="py-4 text-on-surface-variant">
+                      The IRIS credentials entry with the server's username and password, or
+                      Anonymous. Changing an entry changes it for every pipeline that uses it
+                    </td>
                   </tr>
                   <tr class="border-b border-outline-variant/10">
                     <td class="py-4 font-mono text-primary font-semibold">Certificates</td>

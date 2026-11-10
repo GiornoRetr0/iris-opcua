@@ -44,6 +44,13 @@ ClassMethod Disconnect(pClient As OPCUA.Client)
 
 /// Extract common connection parameters from a JSON request body.
 /// Returns URL by reference. Other params are optional with defaults.
+///
+/// The session's username and password come from <tt>credentials</tt>, the ID of an
+/// IRIS credentials entry, read here on the server (what the console sends for a
+/// saved server; see <class>OPCUA.REST.CredentialsService</class>), or from
+/// <tt>username</tt> and <tt>password</tt> sent inline, which are used for this
+/// request only and never stored (the console's test of an unsaved entry). Neither
+/// means anonymous. Both is a 400.
 ClassMethod ExtractConnectionParams(pBody As %DynamicObject, Output pURL As %String, Output pSecurityMode As %Integer, Output pUsername As %String, Output pPassword As %String, Output pCertPath As %String, Output pKeyPath As %String, Output pTrustDir As %String, Output pCrlDir As %String, Output pClientURI As %String) As %Status
 {
 	set pURL = pBody.%Get("url")
@@ -52,10 +59,17 @@ ClassMethod ExtractConnectionParams(pBody As %DynamicObject, Output pURL As %Str
 	}
 	set tSecVal = pBody.%Get("securityMode")
 	set pSecurityMode = $Select(tSecVal="":1, +tSecVal=0:1, 1:+tSecVal)
-	set tUser = pBody.%Get("username")
-	set pUsername = $Select(tUser="":"", 1:tUser)
-	set tPass = pBody.%Get("password")
-	set pPassword = $Select(tPass="":"", 1:tPass)
+	set tCredId = pBody.%Get("credentials")
+	if tCredId '= "" {
+		if pBody.%Get("username") '= "" {
+			Quit ##class(OPCUA.REST.Error).BadRequest("Send either 'credentials' (an existing credentials ID) or 'username' and 'password', not both.")
+		}
+		set tSC = ##class(OPCUA.REST.DeployService).ReadCredentials(tCredId, .pUsername, .pPassword)
+		Quit:$$$ISERR(tSC) tSC
+	} else {
+		set pUsername = pBody.%Get("username")
+		set pPassword = pBody.%Get("password")
+	}
 	set tCert = pBody.%Get("certPath")
 	set pCertPath = $Select(tCert="":"", 1:tCert)
 	set tKey = pBody.%Get("keyPath")

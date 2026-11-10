@@ -118,7 +118,8 @@ for (const file of collectTs(SRC)) {
   }
 
   walk(parsed.nodes, (el) => {
-    const line = tpl.lineOffset + el.startSourceSpan.start.line + 1;
+    // Not every node the walk reaches has a startSourceSpan; all have sourceSpan.
+    const line = tpl.lineOffset + (el.startSourceSpan ?? el.sourceSpan).start.line + 1;
 
     // Rule 1 — the same attribute or binding declared twice. Angular keeps the
     // last and silently discards the rest.
