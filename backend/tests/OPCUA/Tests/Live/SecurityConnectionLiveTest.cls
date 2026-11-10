@@ -120,6 +120,58 @@ Method TestServerChangedDiagnosed()
     Do $$$AssertEquals(d.category, "serverChanged", "a different pinned certificate")
 }
 
+/// Overwrites the stored pin, as a server presenting a different certificate looks.
+Method SetPin(pFp As %String)
+{
+    Set tKey = ##class(OPCUA.Security.Store).ServerKey(..#URL)
+    Do ##class(OPCUA.Security.Store).GetServer(tKey, .e)
+    Set e.fingerprint = pFp
+    Do ##class(OPCUA.Security.Store).SaveServer(tKey, e)
+}
+
+Method TestPinnedMismatchRejected()
+{
+    Quit:..Skipped()
+    Quit:'..Prepare()
+    // A valid fingerprint that is not the server's: the identity's own.
+    Do ..SetPin(..Fp)
+    Set tSC = ##class(OPCUA.REST.ClientManager).Connect(.tClient, ..#URL, 3)
+    Do $$$AssertStatusNotOK(tSC, "a server presenting another certificate than the pinned one is rejected")
+    Set tConnected = 0
+    If $IsObject($Get(tClient)) Do tClient.GetClientState("", .tConnected)
+    Do $$$AssertEquals(+tConnected, 0, "no session")
+    Do ##class(OPCUA.REST.ClientManager).Disconnect(tClient)
+    Set d = ##class(OPCUA.Security.Diagnose).Run(..#URL, tSC)
+    Do $$$AssertEquals(d.category, "serverChanged", "diagnosis")
+    Do $$$AssertEquals(d.message, "Server certificate changed"_$Char(8212)_"review and approve the replacement.", "exact message")
+}
+
+/// The adapter sets the client up again after a failed managed connect; this is the same
+/// flow (one client, Setup + Connect repeated) with the pin changed between attempts:
+/// each attempt re-resolves the pin, so the diagnosis follows it.
+Method TestResetupPicksUpNewPin()
+{
+    Quit:..Skipped()
+    Quit:'..Prepare()
+    Set tRealFp = ##class(OPCUA.Security.Store).ServerKey(..#URL)
+    Do ##class(OPCUA.Security.Store).GetServer(tRealFp, .e0)
+    Set tReal = e0.fingerprint
+    Do ##class(OPCUA.Utils).Initialize()
+    Set tClient = ##class(OPCUA.Client).%New()
+    Do tClient.Initialize()
+    Do ..SetPin(..Fp)
+    Do $$$AssertStatusOK(##class(OPCUA.Security.Connection).Setup(tClient, ..#URL, 3, "", "", "", "", "", .m, ""), "setup 1")
+    Set tSC = tClient.Connect(..#URL, "", "")
+    Do $$$AssertStatusNotOK(tSC, "attempt 1 fails")
+    Do $$$AssertEquals(##class(OPCUA.Security.Diagnose).Run(..#URL, tSC).category, "serverChanged", "attempt 1 against the wrong pin")
+    Do ..SetPin(tReal)
+    Do $$$AssertStatusOK(##class(OPCUA.Security.Connection).Setup(tClient, ..#URL, 3, "", "", "", "", "", .m, ""), "setup 2")
+    Set tSC = tClient.Connect(..#URL, "", "")
+    Do $$$AssertStatusNotOK(tSC, "attempt 2 still fails (not approved)")
+    Do $$$AssertEquals(##class(OPCUA.Security.Diagnose).Run(..#URL, tSC).category, "clientNotApproved", "attempt 2 sees the restored pin")
+    Do ##class(OPCUA.REST.ClientManager).Disconnect(tClient)
+}
+
 Method TestNoFallback()
 {
     Quit:..Skipped()

@@ -28,6 +28,7 @@ Method OnAfterAllTests() As %Status
 Method OnBeforeOneTest(testname As %String) As %Status
 {
     Kill ^%OPCUA.SecurityConnTest
+    Do ##class(%File).RemoveDirectoryTree(..Root)
     Quit $$$OK
 }
 
@@ -56,6 +57,7 @@ Method TestManagedRefusesNoIdentity()
     Set tSC = ##class(OPCUA.Security.Connection).Resolve("opc.tcp://x:4840", 3, "", "", "", "", "", .a, .pins, .host, .managed)
     Do $$$AssertEquals(managed, 1, "managed")
     Do $$$AssertStatusNotOK(tSC, "refused without an identity")
+    Do $$$AssertEquals($System.Status.GetErrorText(tSC), "ERROR #5001: No IRIS client identity is set up. Open Settings "_$Char(8250)_" OPC UA Security to create one.", "message")
     Do $$$AssertEquals(a, "", "no setup arguments are produced")
 }
 
@@ -63,15 +65,101 @@ Method TestManagedRefusesEmptyHost()
 {
     Set tSC = ##class(OPCUA.Security.Connection).Resolve("opc.tcp://[]:4840", 3, "", "", "", "", "", .a, .pins, .host, .managed)
     Do $$$AssertStatusNotOK(tSC, "an empty host in brackets is refused")
+    Do $$$AssertEquals($System.Status.GetErrorText(tSC), "ERROR #5001: The server address has no host name. Enter it as opc.tcp://host:port.", "message")
     Do $$$AssertEquals(a, "", "no setup arguments")
+}
+
+/// A usable identity in the test store.
+Method MakeIdentity() As %Boolean
+{
+    Set tSC = ##class(OPCUA.Security.Identity).Create("", 0, "", .st)
+    Do $$$AssertStatusOK(tSC, "identity created")
+    Quit $$$ISOK(tSC)
+}
+
+/// A pin entry; pFiles are written into the trusted directory.
+Method Seed(pURL As %String, pNeedsIssuer As %Boolean, pFiles As %String)
+{
+    Set key = ##class(OPCUA.Security.Store).ServerKey(pURL)
+    Do ##class(OPCUA.Security.Store).EnsureDirs(##class(OPCUA.Security.Store).ServerDir(key, "trusted"))
+    Do ##class(OPCUA.Security.Store).EnsureDirs(##class(OPCUA.Security.Store).ServerDir(key, "crl"))
+    For i = 1:1:$Length(pFiles, ",") {
+        Set f = $Piece(pFiles, ",", i)
+        If f '= "" {
+            Set s = ##class(%Stream.FileBinary).%New()
+            Do s.LinkToFile(##class(OPCUA.Security.Store).ServerDir(key, "trusted")_f)
+            Do s.Write("x")
+            Do s.%Save()
+        }
+    }
+    Do ##class(OPCUA.Security.Store).SaveServer(key, {"url": (##class(OPCUA.Security.Store).NormaliseURL(pURL)), "fingerprint": "AA:BB", "subject": "CN=s", "issuer": "CN=myCA", "notAfter": "2099-01-01 00:00:00", "selfSigned": (+'pNeedsIssuer), "needsIssuer": (+pNeedsIssuer), "hasIssuer": 0})
 }
 
 Method TestManagedRefusesUntrusted()
 {
-    // A configured identity that is not usable still refuses; trust is checked live.
+    Quit:'..MakeIdentity()
     Set tSC = ##class(OPCUA.Security.Connection).Resolve("opc.tcp://never-trusted:4840", 3, "", "", "", "", "", .a, .pins, .host, .managed)
-    Do $$$AssertStatusNotOK(tSC, "refused")
+    Do $$$AssertStatusNotOK(tSC, "no pin: refused")
+    Do $$$AssertEquals($System.Status.GetErrorText(tSC), "ERROR #5001: IRIS does not trust this OPC UA server yet. Review and trust its certificate in the server settings.", "message")
+    Do $$$AssertEquals(a, "", "no setup arguments (no native call)")
     Do $$$AssertEquals(pins, "", "no pins")
+}
+
+Method TestManagedRefusesEmptyTrustDir()
+{
+    Quit:'..MakeIdentity()
+    Do ..Seed("opc.tcp://emptytrust:4840", 0, "")
+    Set tSC = ##class(OPCUA.Security.Connection).Resolve("opc.tcp://emptytrust:4840", 3, "", "", "", "", "", .a, .pins, .host, .managed)
+    Do $$$AssertStatusNotOK(tSC, "entry but nothing in the trust directory: refused")
+    Do $$$AssertEquals($System.Status.GetErrorText(tSC), "ERROR #5001: IRIS does not trust this OPC UA server yet. Review and trust its certificate in the server settings.", "message")
+    Do $$$AssertEquals(a, "", "no setup arguments")
+}
+
+Method TestManagedRefusesMissingIssuer()
+{
+    Quit:'..MakeIdentity()
+    Do ..Seed("opc.tcp://needsca:4840", 1, "server.der")
+    Set tSC = ##class(OPCUA.Security.Connection).Resolve("opc.tcp://needsca:4840", 3, "", "", "", "", "", .a, .pins, .host, .managed)
+    Do $$$AssertStatusNotOK(tSC, "CA-signed without issuer and CRL: refused")
+    Do $$$AssertEquals($System.Status.GetErrorText(tSC), "ERROR #5001: This server's certificate was issued by CN=myCA. Add that CA certificate and its revocation list before connecting.", "message")
+    Do $$$AssertEquals(a, "", "no setup arguments")
+}
+
+Method TestManagedResolvesWhenTrusted()
+{
+    Quit:'..MakeIdentity()
+    Do ..Seed("opc.tcp://selfsigned:4840", 0, "server.der")
+    Set tSC = ##class(OPCUA.Security.Connection).Resolve("opc.tcp://selfsigned:4840", 3, "ignored", "", "", "x", "y", .a, .pins, .host, .managed)
+    Do $$$AssertStatusOK(tSC, "resolves")
+    Do $$$AssertEquals($ListGet(a, 1), 3, "mode 3")
+    Do $$$AssertTrue($ListGet(a, 2) '= "ignored", "the identity's URI, not the caller's")
+    Do $$$AssertEquals(pins, $ListBuild("AA:BB"), "pin")
+    Do $$$AssertEquals(host, "selfsigned", "host")
+}
+
+Method TestClassifyUnknownFingerprintNotChanged()
+{
+    For tSha = "", "absent" {
+        Set d = {"reachable": 1, "offersSignAndEncrypt": 1, "hostMatches": 1}
+        If tSha = "" Set d.sha256 = ""
+        Set r = ##class(OPCUA.Security.Diagnose).Classify("BadConnectionClosed", d, "AA:AA", "BB")
+        Do $$$AssertNotEquals(r.category, "serverChanged", "unknown presented fingerprint is not a change ("_tSha_")")
+        Do $$$AssertEquals(r.category, "clientNotApproved", "falls through ("_tSha_")")
+    }
+    Set r = ##class(OPCUA.Security.Diagnose).Classify("BadUserAccessDenied", {"reachable": 1, "offersSignAndEncrypt": 1}, "AA:AA", "BB")
+    Do $$$AssertEquals(r.category, "other", "other error stays other")
+}
+
+Method TestDiagnosisDedupe()
+{
+    Set d1 = {"category": "clientNotApproved", "serverFingerprint": "AA"}
+    Do $$$AssertEquals(##class(OPCUA.Security.Diagnose).IsNew("", d1, .k1), 1, "first failure is logged")
+    Do $$$AssertEquals(##class(OPCUA.Security.Diagnose).IsNew(k1, d1, .k2), 0, "same category and fingerprint: not logged again")
+    Set d2 = {"category": "clientNotApproved", "serverFingerprint": "BB"}
+    Do $$$AssertEquals(##class(OPCUA.Security.Diagnose).IsNew(k1, d2, .k3), 1, "new server fingerprint is logged")
+    Set d3 = {"category": "network"}
+    Do $$$AssertEquals(##class(OPCUA.Security.Diagnose).IsNew(k3, d3, .k4), 1, "new category is logged")
+    Do $$$AssertEquals(##class(OPCUA.Security.Diagnose).IsNew("", d3, .k5), 1, "after recovery the same failure is logged again")
 }
 
 Method TestClassifyNetwork()

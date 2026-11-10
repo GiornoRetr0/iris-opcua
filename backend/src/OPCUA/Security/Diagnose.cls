@@ -19,6 +19,13 @@ ClassMethod Result(pCategory As %String, pMessage As %String) As %DynamicObject 
 /// as BadCertificateUriInvalid appear in it).
 ClassMethod Classify(pErrorText As %String, pDiscovery As %DynamicObject, pPinnedFp As %String, pClientFp As %String) As %DynamicObject
 {
+    Set r = ..Decide($Get(pErrorText), pDiscovery, $Get(pPinnedFp), $Get(pClientFp))
+    If $IsObject(pDiscovery), pDiscovery.sha256 '= "" Set r.serverFingerprint = pDiscovery.sha256
+    Quit r
+}
+
+ClassMethod Decide(pErrorText As %String, pDiscovery As %DynamicObject, pPinnedFp As %String, pClientFp As %String) As %DynamicObject [ Private ]
+{
     Set tErr = $Get(pErrorText)
     If '$IsObject(pDiscovery) || 'pDiscovery.reachable {
         Quit ..Result("network", "IRIS could not reach the OPC UA server. Check the URL, port and firewall.")
@@ -28,7 +35,7 @@ ClassMethod Classify(pErrorText As %String, pDiscovery As %DynamicObject, pPinne
     }
     Set tPresented = ##class(OPCUA.Security.Trust).NormFp(pDiscovery.sha256)
     Set tPinned = ##class(OPCUA.Security.Trust).NormFp($Get(pPinnedFp))
-    If (tPinned '= "") && (tPresented '= tPinned) {
+    If (tPinned '= "") && (tPresented '= "") && (tPresented '= tPinned) {
         Quit ..Result("serverChanged", ##class(OPCUA.Security.Trust).#ChangedMessage)
     }
     If ($Find(tErr, "BadCertificateHostNameInvalid")) || (pDiscovery.hostMatches = 0) {
@@ -82,6 +89,15 @@ ClassMethod Run(pURL As %String, pFailure As %Status) As %DynamicObject
         Set tPinned = "", tClientFp = ""
     }
     Quit ..Classify(tErr, tDisc, $Get(tPinned), $Get(tClientFp))
+}
+
+/// Pure. Whether a diagnosis is worth logging: only when it differs from the previous
+/// failure's (category or presented server fingerprint). <var>pKey</var> is the new
+/// state to remember; keep "" after a success.
+ClassMethod IsNew(pPrevKey As %String, pDiag As %DynamicObject, Output pKey As %String) As %Boolean
+{
+    Set pKey = pDiag.category_"|"_pDiag.serverFingerprint
+    Quit (pKey '= $Get(pPrevKey))
 }
 
 }
