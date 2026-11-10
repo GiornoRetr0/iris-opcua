@@ -126,6 +126,116 @@ export interface ConnectionTestResult {
   connected: boolean;
   responseTimeMs: number;
   error?: string;
+  /** Present for managed Sign & Encrypt only. */
+  security?: SecureReadiness;
+}
+
+export type SecurityDiagnosisCategory =
+  | 'network' | 'noSecureEndpoint' | 'serverChanged' | 'hostMismatch'
+  | 'uriInvalid' | 'timeInvalid' | 'clientNotApproved' | 'other';
+
+export interface SecurityDiagnosis {
+  category: SecurityDiagnosisCategory;
+  message: string;
+  clientFingerprint?: string;
+}
+
+export interface SecureReadiness {
+  managed: boolean;
+  identityReady: boolean;
+  serverTrusted: boolean;
+  diagnosis?: SecurityDiagnosis;
+}
+
+export interface IdentityIssue {
+  code: string;
+  message: string;
+}
+
+export interface IdentityImpact {
+  pipelines: { namespace: string; name: string; url: string }[];
+  servers: { key: string; url: string; label: string }[];
+}
+
+/** The IRIS instance's OPC UA client identity. Never carries key material. */
+export interface IdentityStatus {
+  configured: boolean;
+  ready: boolean;
+  source?: string;
+  clientURI?: string;
+  fingerprint?: string;
+  subject?: string;
+  notBefore?: string;
+  notAfter?: string;
+  daysLeft?: number;
+  errors: IdentityIssue[];
+  warnings: IdentityIssue[];
+  candidates?: { certPath: string; keyPath: string; clientURI: string; fingerprint: string; notAfter: string; ready: boolean }[];
+  impact?: IdentityImpact;
+  advanced?: { certPath: string; keyPath: string; storeRoot: string };
+}
+
+export interface CertificateSummary {
+  subject: string;
+  issuer: string;
+  notBefore: string;
+  notAfter: string;
+  sha256: string;
+  sanUris: string[];
+  sanDns: string[];
+  sanIps: string[];
+  selfSigned: boolean;
+}
+
+/** What IRIS found on a server, for the user to review before trusting it. */
+export interface ServerCertificateReview {
+  url: string;
+  key: string;
+  offersSignAndEncrypt: boolean;
+  policies: string[];
+  applicationUri: string;
+  certificate: CertificateSummary;
+  identity: { uriMatches: boolean; hostMatches: boolean; problems: string[] };
+  trusted: boolean;
+  pinnedFingerprint: string;
+  changed: boolean;
+  needsIssuer: boolean;
+  issuerName: string;
+  previous?: CertificateSummary;
+}
+
+export interface TrustedServer {
+  key: string;
+  url: string;
+  label?: string;
+  fingerprint?: string;
+  subject?: string;
+  notAfter?: string;
+  daysLeft?: number;
+  needsIssuer?: boolean;
+  hasIssuer?: boolean;
+}
+
+export interface IdentityReplaceGuard {
+  replace?: boolean;
+  currentFingerprint?: string;
+}
+
+export interface CreateIdentityRequest extends IdentityReplaceGuard {
+  clientURI?: string;
+}
+
+/** Hex fields are uppercase. Key and password exist only for this request. */
+export interface ImportIdentityRequest extends IdentityReplaceGuard {
+  certificate?: string;
+  key?: string;
+  pkcs12?: string;
+  password?: string;
+}
+
+export interface UseIdentityFilesRequest extends IdentityReplaceGuard {
+  certPath: string;
+  keyPath: string;
 }
 
 /** A single OPC UA server connection profile */
@@ -141,11 +251,19 @@ export interface ServerProfile {
    * same ID in the pipeline, so the console and its pipelines share one entry.
    */
   credentials: string;
-  certPath: string;
-  keyPath: string;
-  trustDir: string;
-  crlDir: string;
-  clientURI: string;
+  certPath?: string;
+  keyPath?: string;
+  trustDir?: string;
+  crlDir?: string;
+  clientURI?: string;
+}
+
+/**
+ * A Sign & Encrypt profile with no certificate or key path is managed: IRIS uses its
+ * own client identity and trust store, so the console sends no certificate fields.
+ */
+export function isManaged(server: ServerProfile): boolean {
+  return server.securityMode === 3 && !server.certPath && !server.keyPath;
 }
 
 /**
@@ -163,15 +281,15 @@ export interface AppConfig {
   /** The last account signed in with, to prefill the sign-in. Never its password. */
   apiUsername: string;
   /** @deprecated */
-  certPath: string;
+  certPath?: string;
   /** @deprecated */
-  keyPath: string;
+  keyPath?: string;
   /** @deprecated */
-  trustDir: string;
+  trustDir?: string;
   /** @deprecated */
-  crlDir: string;
+  crlDir?: string;
   /** @deprecated */
-  clientURI: string;
+  clientURI?: string;
   autoRefreshInterval: number;
   servers: ServerProfile[];
 }
