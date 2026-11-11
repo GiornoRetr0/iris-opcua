@@ -85,7 +85,7 @@ ClassMethod SafeReadAndParse(pClient As OPCUA.Client, pNodeNS As %Integer, pNode
 	if $ListValid($Get(tResults)) && ($ListLength(tResults) >= 5) {
 		set tErrCode = $ListGet(tResults, 1)
 		if tErrCode = 0 {
-			set pResult.value = ..SafeExtractValue($ListGet(tResults, 5))
+			do ..SetValue(pResult, ..SafeExtractValue($ListGet(tResults, 5)))
 			set pResult.sourceTimestamp = $ListGet(tResults, 2)
 			set pResult.serverTimestamp = $ListGet(tResults, 3)
 			set pResult.statusCode = $ListGet(tResults, 4)
@@ -127,6 +127,18 @@ ClassMethod SafeInferType(pClient As OPCUA.Client, pNodeNS As %Integer, pNodeId,
 		// Fall back to empty (caller defaults to StringDataValue)
 	}
 	Quit tType
+}
+
+/// Puts the value into the response. An integer of more than 15 digits goes as a JSON
+/// string: JavaScript's JSON.parse keeps only 53 bits, so an Int64/UInt64 sent as a
+/// number reaches the console with its last digits changed.
+ClassMethod SetValue(pResult As %DynamicObject, pValue) [ Internal ]
+{
+	If '$IsObject(pValue), pValue '= "", pValue = +pValue, pValue = (pValue \ 1), $Length($Translate(pValue, "-")) > 15 {
+		Do pResult.%Set("value", pValue, "string")
+		Quit
+	}
+	Set pResult.value = pValue
 }
 
 /// Safely extract value from read results, converting arrays to JSON.

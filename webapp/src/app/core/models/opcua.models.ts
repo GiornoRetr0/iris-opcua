@@ -38,6 +38,8 @@ export interface TreeNode extends OpcuaNode {
   parentRef?: TreeNode;
   /** Which server profile this node belongs to */
   serverId?: string;
+  /** Why the last attempt to browse this node's children failed, or unset. */
+  browseError?: string;
 }
 
 export interface NodeReadResult {

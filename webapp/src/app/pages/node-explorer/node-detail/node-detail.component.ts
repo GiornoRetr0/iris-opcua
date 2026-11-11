@@ -1,10 +1,29 @@
-import { Component, input, inject, signal, effect, untracked, OnDestroy } from '@angular/core';
+import { Component, input, inject, signal, computed, effect, untracked, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { TreeNode, NodeReadResult } from '../../../core/models/opcua.models';
+import { Subscription } from 'rxjs';
+import { TreeNode, NodeReadResult, ServerProfile } from '../../../core/models/opcua.models';
 import { ApiService, apiErrorMessage } from '../../../core/services/api.service';
 import { ConfigService } from '../../../core/services/config.service';
 import { severityOf, statusText, statusDetail } from '../../../core/opcua-status';
+import { parseIrisUtc, localClock, localDateTime } from '../../../core/util/iris-time';
+
+/**
+ * NodeId identifier types as the native layer reports them (open62541's
+ * UA_NodeIdType, mirrored in Constants.inc): 0 Numeric, 3 String, 4 GUID,
+ * 5 ByteString. This used to map 1/2/3, so a GUID or ByteString node showed as
+ * "Numeric" with an `i=` prefix.
+ */
+const ID_TYPES: Record<number, { prefix: string; name: string }> = {
+  0: { prefix: 'i', name: 'Numeric' },
+  3: { prefix: 's', name: 'String' },
+  4: { prefix: 'g', name: 'GUID' },
+  5: { prefix: 'b', name: 'ByteString' },
+};
+
+/** A plain decimal number, nothing before or after it. */
+const NUMERIC = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
+const INTEGER = /^[+-]?\d+$/;
 
 @Component({
   selector: 'app-node-detail',
@@ -231,6 +250,15 @@ export class NodeDetailComponent implements OnDestroy {
   readLoading = signal(false);
   autoRefresh = true;
   private refreshInterval: any;
+  /**
+   * The read in flight, if any. Each read opens its own OPC UA connection (a Sign &
+   * Encrypt one takes noticeably longer) and may take up to the 15s request timeout,
+   * so without this a 5s timer stacked reads whose answers could land out of order,
+   * and a read for the previous node could land after the user selected another.
+   */
+  private inflight: Subscription | null = null;
+  /** Seconds between auto-refresh reads; tracked so a settings change applies at once. */
+  private interval = computed(() => this.config.config().autoRefreshInterval || 5);
 
   // ── Staleness tracking ──────────────────────────────────────────────────────
   // The REST API is stateless: every read opens a connection, reads, and
@@ -263,6 +291,10 @@ export class NodeDetailComponent implements OnDestroy {
     effect(() => {
       const n = this.node();
       untracked(() => {
+        // The previous node's read, if still running, must not land on this one.
+        this.cancelRead();
+        // So must its value: it is not this node's.
+        this.readResult.set(null);
         if (n) {
           // A different node means the previous node's history says nothing about
           // this one. Clearing is what stops one node's freshness vouching for
@@ -272,9 +304,19 @@ export class NodeDetailComponent implements OnDestroy {
           this.setupAutoRefresh();
         } else {
           this.clearAutoRefresh();
-          this.readResult.set(null);
           this.resetFreshness();
         }
+      });
+    });
+
+    // The refresh interval alone, so changing it in settings reschedules the timer
+    // instead of waiting for the next node selection. `freshness()` reads the new
+    // value at once; a timer still on the old one made on-schedule reads look stale.
+    // Only rescheduling happens here, never a reset of the freshness history.
+    effect(() => {
+      this.interval();
+      untracked(() => {
+        if (this.node() && this.autoRefresh) this.setupAutoRefresh();
       });
     });
 
@@ -283,7 +325,19 @@ export class NodeDetailComponent implements OnDestroy {
 
   ngOnDestroy(): void {
     this.clearAutoRefresh();
+    this.cancelRead();
     if (this.ageTicker) clearInterval(this.ageTicker);
+  }
+
+  /** The server profile a node was browsed from; undefined for a node without one. */
+  private serverOf(n: TreeNode): ServerProfile | undefined {
+    return n.serverId ? this.config.getServer(n.serverId) : undefined;
+  }
+
+  private cancelRead(): void {
+    this.inflight?.unsubscribe();
+    this.inflight = null;
+    this.readLoading.set(false);
   }
 
   private resetFreshness(): void {
@@ -292,19 +346,52 @@ export class NodeDetailComponent implements OnDestroy {
     this.consecutiveFailures.set(0);
   }
 
-  readValue(): void {
+  /**
+   * Reads the selected node from the server it was browsed from.
+   *
+   * The node's server used to be left out, so every read went to the legacy
+   * single-server URL in settings: a node browsed on one server was read from
+   * another, which answered BadNodeIdUnknown or, worse, a different node's value.
+   *
+   * A timer tick is skipped while a read is still running; a manual Read replaces
+   * the running one. Either way at most one read is in flight, so answers cannot
+   * arrive out of order.
+   */
+  readValue(fromTimer = false): void {
     const n = this.node();
     if (!n) return;
+    if (fromTimer && this.inflight) return;
+    this.cancelRead();
+
+    const server = this.serverOf(n);
+    if (n.serverId && !server) {
+      // Never fall back to the default server: that is the wrong-server read again.
+      this.recordFailure('This server is no longer configured.');
+      return;
+    }
+
     this.readLoading.set(true);
-    this.api.read(n.nodeNs, n.nodeId, n.nodeIdType).subscribe({
+    const sub = new Subscription();
+    this.inflight = sub;
+    const settle = () => {
+      if (this.inflight === sub) this.inflight = null;
+      this.readLoading.set(false);
+    };
+    sub.add(this.api.read(n.nodeNs, n.nodeId, n.nodeIdType, server).subscribe({
       next: (result) => {
+        if (this.node() !== n) return;
+        settle();
         this.readResult.set(result);
-        this.readLoading.set(false);
         // A transported read whose StatusCode is Bad is not a successful reading.
         // Counting it as fresh would let a server that answers "I can't tell you"
-        // keep the card looking live.
-        if (result.readError) {
-          this.recordFailure(result.readError);
+        // keep the card looking live. This used to check readError alone, so a Bad
+        // status showed as "3s ago" and never went stale.
+        const failure = result.readError
+          || (result.statusCode != null && severityOf(result.statusCode) === 'bad'
+            ? `The server answered ${statusText(result.statusCode)} (${statusDetail(result.statusCode)}).`
+            : '');
+        if (failure) {
+          this.recordFailure(failure);
         } else {
           this.lastSuccessAt.set(Date.now());
           this.lastError.set('');
@@ -312,12 +399,13 @@ export class NodeDetailComponent implements OnDestroy {
         }
       },
       error: (err) => {
+        if (this.node() !== n) return;
         // The error callback used to only clear the spinner. Recording the
         // failure is what makes staleness visible at all.
-        this.readLoading.set(false);
+        settle();
         this.recordFailure(apiErrorMessage(err, 'The read failed'));
       },
-    });
+    }));
   }
 
   private recordFailure(message: string): void {
@@ -343,7 +431,7 @@ export class NodeDetailComponent implements OnDestroy {
   freshness(): 'unknown' | 'live' | 'stale' | 'disconnected' {
     const age = this.ageSeconds();
     if (age == null) return 'unknown';
-    const interval = this.config.get().autoRefreshInterval || 5;
+    const interval = this.interval();
     // Without auto-refresh nothing is re-reading, so age is the user's own doing
     // and decaying the value would be misleading rather than informative.
     if (!this.autoRefresh) return 'live';
@@ -412,8 +500,7 @@ export class NodeDetailComponent implements OnDestroy {
   private setupAutoRefresh(): void {
     this.clearAutoRefresh();
     if (!this.autoRefresh) return;
-    const interval = (this.config.get().autoRefreshInterval || 5) * 1000;
-    this.refreshInterval = setInterval(() => this.readValue(), interval);
+    this.refreshInterval = setInterval(() => this.readValue(true), this.interval() * 1000);
   }
 
   private clearAutoRefresh(): void {
@@ -427,16 +514,38 @@ export class NodeDetailComponent implements OnDestroy {
    * The hero value. Truncation is marked with an ellipsis — it used to
    * `substring(0, 20)` silently, so a 40-character value rendered as its first 20
    * and looked complete.
+   *
+   * Numbers are recognised only when the whole value is one. This used
+   * `parseFloat`, which reads a leading number and ignores the rest, so CurrentTime
+   * ("2026-11-10 23:…") showed as 2026 and "3 phases" as 3. Integers are shown as
+   * sent rather than through Math.round, which keeps the digits of an Int64 the API
+   * sends as a string. Booleans and timestamps are shown as what they are.
    */
   formatHeroValue(result: NodeReadResult): string {
     if (result.readError) return 'no reading';
     const val = result.value;
     if (val == null || val === '') return 'empty';
-    const num = parseFloat(val);
-    if (!isNaN(num) && String(val).trim() !== '') {
-      return num % 1 === 0 ? String(Math.round(num)) : num.toFixed(2);
+    const type = result.inferredType ?? '';
+
+    let s: string;
+    if (typeof val === 'object') {
+      s = JSON.stringify(val);
+    } else if (type.endsWith('.BooleanDataValue')) {
+      const t = String(val).trim().toLowerCase();
+      s = t === '1' || t === 'true' ? 'true' : t === '0' || t === 'false' ? 'false' : String(val);
+    } else if (type.endsWith('.TimeStampDataValue')) {
+      const d = parseIrisUtc(String(val));
+      s = d ? localDateTime(d) : String(val);
+    } else {
+      s = String(val).trim();
+      if (INTEGER.test(s)) {
+        s = s.replace(/^\+/, '');
+      } else if (NUMERIC.test(s)) {
+        const num = Number(s);
+        // Two decimals, unless that would turn a small non-zero value into 0.00.
+        s = num === 0 || Math.abs(num) >= 0.01 ? num.toFixed(2) : num.toPrecision(3);
+      }
     }
-    const s = String(val);
     return s.length > 20 ? s.slice(0, 20) + '…' : s;
   }
 
@@ -465,12 +574,18 @@ export class NodeDetailComponent implements OnDestroy {
    */
   breadcrumb(): string[] {
     const segments: string[] = [];
-    let cur: TreeNode | null | undefined = this.node();
+    const n = this.node();
+    let cur: TreeNode | null | undefined = n;
     // Guard against a malformed cycle rather than hanging the render.
     for (let i = 0; cur && i < 32; i++) {
       segments.unshift(cur.displayName);
       cur = cur.parentRef;
     }
+    // With several servers in the tree, "Objects > Server > LocalTime" does not say
+    // which one. The top-level nodes have no parentRef to their server row, so the
+    // server's name is added here.
+    const server = n ? this.serverOf(n) : undefined;
+    if (server?.name) segments.unshift(server.name);
     return segments;
   }
 
@@ -527,66 +642,43 @@ export class NodeDetailComponent implements OnDestroy {
    * italics and says so in words.
    */
   sourceTimestampText(): string {
-    const ts = this.readResult()?.sourceTimestamp;
-    return this.isMissingTimestamp(ts) ? '' : this.formatTimestamp(ts);
+    const d = parseIrisUtc(this.readResult()?.sourceTimestamp);
+    return d ? localClock(d) : '';
   }
 
   /**
-   * True when a timestamp field carries no timestamp.
+   * A local clock time, HH:MM:SS, or a dash when there is no timestamp: missing,
+   * unparseable, or the OPC UA null DateTime (1601-01-01), which a server sends in
+   * full for a node with no timestamp to report.
    *
-   * Three ways that happens, and only one of them is a missing string: the OPC UA
-   * null DateTime is 1601-01-01 (the Windows FILETIME epoch), and the server
-   * sends it in full for a node that has no timestamp to report. A folder read
-   * comes back with "1601-01-01 00:00:00.0000000" — truthy, parseable, and
-   * rendering as a confident "00:00:00" if you only check for absence.
-   */
-  private isMissingTimestamp(ts: string | undefined): boolean {
-    if (!ts) return true;
-    const d = new Date(ts);
-    return isNaN(d.getTime()) || d.getUTCFullYear() <= 1601;
-  }
-
-  /**
-   * A clock time, HH:MM:SS.
-   *
-   * Milliseconds are dropped deliberately: on a 5-second refresh they are false
-   * precision. This previously passed `fractionalSecondDigits` *alone*, which
-   * asks for the fractional part of a time whose hours, minutes and seconds were
-   * never requested — hence the bare "235" the audit found.
+   * The API sends UTC without an offset; `new Date()` read that as local time, so
+   * every timestamp was off by the browser's UTC offset. `parseIrisUtc` reads it as
+   * UTC. Milliseconds are dropped deliberately: on a 5-second refresh they are false
+   * precision.
    */
   formatTimestamp(ts: string | undefined): string {
-    if (this.isMissingTimestamp(ts)) return '—';
-    return new Date(ts!).toLocaleTimeString('en-US', {
-      hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit',
-    });
+    const d = parseIrisUtc(ts);
+    return d ? localClock(d) : '—';
   }
 
-  get idPrefix(): () => string {
-    return () => {
-      const n = this.node();
-      if (!n) return 'i';
-      switch (n.nodeIdType) {
-        case 0: return 'i';
-        case 1: return 's';
-        case 2: return 'g';
-        case 3: return 's';
-        default: return 'i';
-      }
-    };
+  idPrefix(): string {
+    const t = this.node()?.nodeIdType ?? 0;
+    return ID_TYPES[t]?.prefix ?? '?';
   }
 
-  get idTypeName(): () => string {
-    return () => {
-      const n = this.node();
-      if (!n) return 'Numeric';
-      switch (n.nodeIdType) {
-        case 0: return 'Numeric';
-        case 1: return 'String';
-        case 2: return 'GUID';
-        case 3: return 'String';
-        default: return 'Numeric';
-      }
-    };
+  idTypeName(): string {
+    const t = this.node()?.nodeIdType ?? 0;
+    return ID_TYPES[t]?.name ?? `Unknown (${t})`;
+  }
+
+  /**
+   * Whether the node has a value to read. A Property is a Variable in OPC UA (the
+   * backend calls a HasProperty child "property"); checking for 'variable' alone
+   * told the user that LocalTime, NamespaceArray and every other Property had none.
+   */
+  private hasValue(): boolean {
+    const c = this.node()?.nodeCategory;
+    return c === 'variable' || c === 'property';
   }
 
   /**
@@ -601,14 +693,14 @@ export class NodeDetailComponent implements OnDestroy {
   dataTypeKnown(): boolean {
     const r = this.readResult();
     if (!r || r.readError || !r.inferredType) return false;
-    if (this.node()?.nodeCategory !== 'variable') return false;
+    if (!this.hasValue()) return false;
     return this.severity() === 'good' || this.severity() === 'uncertain';
   }
 
   dataTypeLabel(): string {
     const r = this.readResult();
     if (!r) return 'not read yet';
-    if (this.node()?.nodeCategory !== 'variable') return 'not applicable — this node has no value';
+    if (!this.hasValue()) return 'not applicable — this node has no value';
     if (!this.dataTypeKnown()) return 'not readable';
     const parts = r.inferredType!.split('.');
     return parts[parts.length - 1].replace('DataValue', '');

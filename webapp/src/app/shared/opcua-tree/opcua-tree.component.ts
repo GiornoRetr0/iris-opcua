@@ -220,6 +220,12 @@ import { nodeIcon, nodeIconClass, nodeCategoryLabel } from './node-icons';
           </button>
         </div>
 
+        @if (node.browseError) {
+          <p [style.padding-left.rem]="(level + 1) * 1.1"
+             class="px-2 py-1 text-[11px] text-error"
+             role="alert">Could not browse: {{ node.browseError }} Expand to retry.</p>
+        }
+
         @if (node.expanded && node.children) {
           @if (!node.children.length && !node.loading) {
             <p [style.padding-left.rem]="(level + 1) * 1.1"
@@ -506,6 +512,7 @@ export class OpcuaTreeComponent {
     }
 
     node.loading = true;
+    node.browseError = undefined;
     this.refresh();
 
     this.api.browse(node.nodeNs, node.nodeId, node.nodeIdType, this.serverFor(node)).subscribe({
@@ -525,9 +532,14 @@ export class OpcuaTreeComponent {
         node.loading = false;
         this.refresh();
       },
-      error: () => {
+      // A failed browse is not an empty node. It used to set `children = []`, which
+      // rendered "(0)" and "empty" and, because children were now known, was never
+      // browsed again. Collapse, say why, and let the next expand retry.
+      error: (err) => {
         node.loading = false;
-        node.children = [];
+        node.expanded = false;
+        node.children = undefined;
+        node.browseError = apiErrorMessage(err, 'Could not browse this node');
         this.refresh();
       },
     });
