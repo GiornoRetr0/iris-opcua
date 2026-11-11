@@ -1,4 +1,15 @@
-## Unreleased — Managed Sign & Encrypt (connector 0.5.0, installer 0.5.0)
+## Unreleased — Managed Sign & Encrypt (connector 0.5.1, installer 0.5.0)
+
+Security fix: on Windows the identity key and the `opcua-pki` folders inherited the parent
+folder's ACL, which can let any local user (Users, Authenticated Users) read or replace the
+key and write into the trust folders. Connector 0.5.1 adds ordinal 53 `zfPkiProtectPath`
+and `OPCUA.Utils.SupportsProtect()`: the store root, every folder and every key get a
+protected DACL granting full control only to the IRIS process account, SYSTEM and
+BUILTIN\Administrators (well-known SIDs, Windows API, no `icacls`). Keys are created with
+it, and `Store.EnsureDirs` re-applies it to the whole store each time, so existing installs
+are tightened on first use; it fails closed if the DACL cannot be applied. Linux keeps
+0700/0600. The three native wrappers are rebuilt as 0.5.1.
+
 
 Sign & Encrypt no longer means generating DER files with OpenSSL, copying them onto the
 IRIS server and typing four paths and a Client URI into every server profile and

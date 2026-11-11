@@ -76,7 +76,7 @@ Before any OPC UA operation can happen, IRIS needs to load the C++ shared librar
 4. Validate it works by calling a simple test function
 5. Store the library ID for reuse
 
-**The constants file** (`OPCUA/Constants.inc`) defines all the "function ordinals" -- numbered indices (1 through 52) that map to specific C++ functions. When you call `$ZF(-5, libraryId, 3, ...)`, that `3` means "call the third function in the library." The constants give them readable names:
+**The constants file** (`OPCUA/Constants.inc`) defines all the "function ordinals" -- numbered indices (1 through 53) that map to specific C++ functions. When you call `$ZF(-5, libraryId, 3, ...)`, that `3` means "call the third function in the library." The constants give them readable names:
 
 ```objectscript
 #define zfConnectB        3    ;; Connect to server
@@ -920,8 +920,16 @@ one automatically. The `impact` list names every pipeline in every namespace tha
 SecurityMode 3 with no manual paths, plus every trusted server -- what a replacement
 breaks until each server approves the new certificate.
 
-**Store.** Files live under `<manager dir>/opcua-pki/` (instance-wide; 0700 directories
-and 0600 key on Linux; on Windows the key inherits the directory ACL -- unverified):
+**Store.** Files live under `<manager dir>/opcua-pki/` (instance-wide). On Linux
+directories are 0700 and keys 0600. On Windows (connector 0.5.1, ordinal 53
+`zfPkiProtectPath`) the root, every folder under it and every key file carry a protected
+(non-inherited) DACL with full control for exactly the IRIS process account, SYSTEM and
+BUILTIN\Administrators, built from well-known SIDs through the Windows API (no `icacls`);
+folder ACEs are inheritable, keys are created with the DACL already set, and
+`Store.EnsureDirs` re-applies it to the whole root on every call, so an older install is
+tightened the next time the store is touched. It fails closed: no DACL, no store operation.
+Before 0.5.1 a Windows install inherited the parent folder's ACL, which can include
+Users and Authenticated Users (read on the key, write in the trust folders). Layout:
 `own/` (identity; a replaced one is kept in `previous/`), `servers/<server-key>/trusted/`
 and `crl/`. Configuration is the instance-wide global `^%OPCUA.Security` (IRISSYS,
 visible from every namespace): identity source/paths/URI/fingerprint, one entry per
@@ -989,7 +997,7 @@ download, replace with impact confirmation) and, per server profile, three readi
 
 **Native layer.** Ordinals 48-52 (`zfPkiCreateIdentity`, `zfPkiInspectCert`,
 `zfPkiCheckKeyPair`, `zfPkiNormalise`, `zfSetServerPin`) come with connector 0.5.0, after
-47 `zfGetEndpoints`; `OPCUA.Utils.SupportsPki()` gates on version >= 0.5, because calling
+47 `zfGetEndpoints`; ordinal 53 `zfPkiProtectPath` (0.5.1, `SupportsProtect()`) restricts the store; `OPCUA.Utils.SupportsPki()` gates on version >= 0.5, because calling
 an ordinal an older library lacks is not a clean failure. They use the OpenSSL 1.1
 libcrypto shipped beside the connector: no `openssl` executable or shell at runtime, so
 it works on Windows.

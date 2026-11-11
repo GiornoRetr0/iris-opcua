@@ -56,6 +56,7 @@ ROUTINE OPCUA.Constants [Type=INC]
 #define zfPkiCheckKeyPair                   50
 #define zfPkiNormalise                      51
 #define zfSetServerPin                      52
+#define zfPkiProtectPath                    53
 
 
 
