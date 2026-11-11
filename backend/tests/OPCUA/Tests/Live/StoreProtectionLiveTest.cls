@@ -102,12 +102,16 @@ Method Sddl(pPath As %String) As %String
 	set tData = $translate(tFile.Read(32000), $char(0, 255, 254))
 	kill tFile
 	do ##class(%File).Delete(tOut)
-	// the first line is the path (which may itself contain "D:"); the SDDL line starts with D:
+	// line 1 is the path (on drive D: it starts with "D:\"), the SDDL is the next
+	// non-empty line, and must start D:P, D:AI, D:( ...
 	set tData = $translate(tData, $char(13))
+	set tLine = "", tSeenPath = 0
 	for i = 1:1:$length(tData, $char(10)) {
-		set tLine = $zstrip($piece(tData, $char(10), i), "<>W")
-		if $extract(tLine, 1, 2) = "D:" Quit
-		set tLine = ""
+		set tText = $zstrip($piece(tData, $char(10), i), "<>W")
+		continue:tText=""
+		if 'tSeenPath set tSeenPath = 1 continue
+		if $extract(tText, 1, 2) = "D:" set tLine = tText
+		Quit
 	}
 	Quit tLine
 }
