@@ -1,3 +1,25 @@
+## 0.5.1 — 2026-11-11 — Node explorer fixes (installer 0.5.1)
+
+Console and REST fixes only; the connector stays 0.5.1.
+
+### Fixed
+  - Node explorer read every node from the default server in settings, not the server it
+    was browsed from, so a node on a second server answered BadNodeIdUnknown or showed
+    another server's value. A node whose server was removed now fails instead.
+  - A Bad StatusCode counted as a fresh read; it is now a failed one.
+  - Properties (HasProperty children) were shown as having no value or data type.
+  - Timestamps are UTC from the API and were shown as if local; now local time.
+  - The value card parsed a leading number out of any string (CurrentTime showed 2026).
+    Integers keep every digit, Booleans show true/false, timestamps a local date-time,
+    arrays JSON. `ReadService` sends integers over 15 digits as JSON strings so Int64
+    values survive `JSON.parse`.
+  - Reads no longer overlap: selecting another node cancels the read in flight and clears
+    the old value, a manual Read replaces it, timer ticks wait for it.
+  - GUID and ByteString NodeIds showed as Numeric (`i=`).
+  - A failed browse looked like an empty node and was never retried; it now shows the
+    error and retries on the next expand.
+  - The breadcrumb names the server; a changed refresh interval applies at once.
+
 ## 0.5.0 — 2026-11-11 — Managed Sign & Encrypt (connector 0.5.1, installer 0.5.0)
 
 Security fix: on Windows the identity key and the `opcua-pki` folders inherited the parent
